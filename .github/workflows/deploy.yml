@@ -28,8 +28,13 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${TXY_USER}@${TXY_HOST}" "bash -s -- '${TXY_PATH}'" << 'EOF'
           set -Eeuo pipefail
           TXY_PATH="$1"
-          cd "${TXY_PATH}"
 
+          if [ ! -d "${TXY_PATH}/.git" ]; then
+            rm -rf "${TXY_PATH}"
+            git clone git@github.com:JayGrit/youbi-monitor-be.git "${TXY_PATH}"
+          fi
+
+          cd "${TXY_PATH}"
           git fetch origin && git reset --hard origin/main
           printf 'nameserver 183.60.82.98\nnameserver 183.60.83.19\nnameserver 8.8.8.8\n' > /etc/resolv.conf
           docker rm -f monitor-be || true
