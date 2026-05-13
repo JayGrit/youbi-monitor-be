@@ -65,11 +65,15 @@ public class MonitorService {
               tr.started_at translator_started_at,
               tr.completed_at translator_completed_at,
               tr.error_message translator_error,
+              ts.translated_count translator_completed_count,
+              GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0)) translator_total_count,
 
               sp.status speaker_status,
               sp.started_at speaker_started_at,
               sp.completed_at speaker_completed_at,
               sp.error_message speaker_error,
+              ss.speaker_completed_count,
+              ss.speaker_total_count,
 
               m.status combiner_status,
               m.started_at combiner_started_at,
@@ -88,6 +92,25 @@ public class MonitorService {
             LEFT JOIN yd_speaker sp ON sp.task_id = t.id
             LEFT JOIN yd_combiner m ON m.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, COUNT(*) fixed_count
+              FROM yd_asr_segment
+              WHERE segment_type = 'fixed'
+              GROUP BY task_id
+            ) fa ON fa.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, COUNT(*) translated_count
+              FROM yd_speaker_segment
+              GROUP BY task_id
+            ) ts ON ts.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) speaker_completed_count,
+                COUNT(*) speaker_total_count
+              FROM yd_speaker_segment
+              GROUP BY task_id
+            ) ss ON ss.task_id = t.id
             ORDER BY t.created_at DESC
             LIMIT ?
             """;
@@ -211,6 +234,8 @@ public class MonitorService {
                         startedAt,
                         completedAt,
                         elapsedSeconds(startedAt, completedAt, now),
+                        countValue(rs, stage.key(), "completed_count"),
+                        countValue(rs, stage.key(), "total_count"),
                         rs.getString(stage.errorColumn())
                 ));
             }
@@ -233,6 +258,14 @@ public class MonitorService {
         private static String stringOrDefault(ResultSet rs, String column, String defaultValue) throws SQLException {
             String value = rs.getString(column);
             return value == null || value.isBlank() ? defaultValue : value;
+        }
+
+        private static Integer countValue(ResultSet rs, String stageKey, String suffix) throws SQLException {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey)) {
+                return null;
+            }
+            int value = rs.getInt(stageKey + "_" + suffix);
+            return rs.wasNull() ? null : value;
         }
 
     }

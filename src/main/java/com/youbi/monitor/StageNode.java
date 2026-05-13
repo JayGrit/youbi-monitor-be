@@ -9,6 +9,8 @@ public record StageNode(
         LocalDateTime startedAt,
         LocalDateTime completedAt,
         long elapsedSeconds,
+        Integer completedCount,
+        Integer totalCount,
         String errorMessage
 ) {
 }
