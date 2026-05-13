@@ -3,23 +3,29 @@ package com.youbi.monitor;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.minio.GetObjectArgs;
+import io.minio.MinioClient;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class BilibiliUploadService {
@@ -30,37 +36,137 @@ public class BilibiliUploadService {
     private final BilibiliAccountService accountService;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final MinioClient minioClient;
+    private final String minioBucket;
+    private final Path uploadWorkDir;
 
-    public BilibiliUploadService(BilibiliAccountService accountService, ObjectMapper objectMapper) {
+    public BilibiliUploadService(
+            BilibiliAccountService accountService,
+            ObjectMapper objectMapper,
+            @Value("${youbi.minio.endpoint}") String minioEndpoint,
+            @Value("${youbi.minio.access-key}") String minioAccessKey,
+            @Value("${youbi.minio.secret-key}") String minioSecretKey,
+            @Value("${youbi.minio.bucket}") String minioBucket,
+            @Value("${youbi.minio.work-dir}") String uploadWorkDir
+    ) {
         this.accountService = accountService;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(60))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
+        this.minioClient = MinioClient.builder()
+                .endpoint(minioEndpoint)
+                .credentials(minioAccessKey, minioSecretKey)
+                .build();
+        this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
+        this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
     }
 
     public BilibiliUploadResult upload(BilibiliUploadRequest request) throws IOException, InterruptedException {
-        Path videoPath = Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize();
-        if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
-            throw new IOException("Video file does not exist or is empty: " + videoPath);
+        ResolvedVideo resolvedVideo = resolveVideo(request);
+        try {
+            Path videoPath = resolvedVideo.path();
+            if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
+                throw new IOException("Video file does not exist or is empty: " + videoPath);
+            }
+
+            String accountKey = accountService.normalizeAccountKey(request.accountKey());
+            JsonNode loginInfo = accountService.loginInfo(accountKey);
+            String cookie = accountService.cookieHeader(loginInfo);
+            String accessToken = accountService.accessToken(loginInfo);
+            UploadedVideo uploadedVideo = uploadVideoFile(videoPath, request, cookie);
+            JsonNode submit = submit(uploadedVideo, request, accessToken, cookie);
+            int code = submit.path("code").asInt(Integer.MIN_VALUE);
+            Map<String, Object> raw = objectMapper.convertValue(submit, MAP_TYPE);
+            if (code != 0) {
+                return new BilibiliUploadResult(false, "", null, submit.path("message").asText(submit.toString()), raw);
+            }
+            JsonNode data = submit.path("data");
+            String bvid = data.path("bvid").asText("");
+            Long aid = data.path("aid").canConvertToLong() ? data.path("aid").asLong() : null;
+            return new BilibiliUploadResult(true, bvid, aid, "上传成功", raw);
+        } finally {
+            if (resolvedVideo.temporary()) {
+                Files.deleteIfExists(resolvedVideo.path());
+            }
+        }
+    }
+
+    private ResolvedVideo resolveVideo(BilibiliUploadRequest request) throws IOException {
+        String minioUrl = firstText(request.videoUrl(), request.minioUrl());
+        if (!minioUrl.isBlank()) {
+            return new ResolvedVideo(downloadMinioVideo(minioUrl, request.taskId()), true);
         }
 
-        String accountKey = accountService.normalizeAccountKey(request.accountKey());
-        JsonNode loginInfo = accountService.loginInfo(accountKey);
-        String cookie = accountService.cookieHeader(loginInfo);
-        String accessToken = accountService.accessToken(loginInfo);
-        UploadedVideo uploadedVideo = uploadVideoFile(videoPath, request, cookie);
-        JsonNode submit = submit(uploadedVideo, request, accessToken, cookie);
-        int code = submit.path("code").asInt(Integer.MIN_VALUE);
-        Map<String, Object> raw = objectMapper.convertValue(submit, MAP_TYPE);
-        if (code != 0) {
-            return new BilibiliUploadResult(false, "", null, submit.path("message").asText(submit.toString()), raw);
+        Path videoPath = Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize();
+        return new ResolvedVideo(videoPath, false);
+    }
+
+    private Path downloadMinioVideo(String minioUrl, String taskId) throws IOException {
+        ObjectRef objectRef = parseObjectRef(minioUrl);
+        String filename = sanitizeFilename(Path.of(objectRef.objectName()).getFileName().toString());
+        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(taskId, "manual"))).resolve(UUID.randomUUID().toString());
+        Path destination = taskDir.resolve(filename);
+        Files.createDirectories(taskDir);
+        try (InputStream input = minioClient.getObject(
+                GetObjectArgs.builder()
+                        .bucket(objectRef.bucket())
+                        .object(objectRef.objectName())
+                        .build()
+        )) {
+            Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception exc) {
+            throw new IOException("Cannot download MinIO video: " + minioUrl, exc);
         }
-        JsonNode data = submit.path("data");
-        String bvid = data.path("bvid").asText("");
-        Long aid = data.path("aid").canConvertToLong() ? data.path("aid").asLong() : null;
-        return new BilibiliUploadResult(true, bvid, aid, "上传成功", raw);
+        if (!Files.isRegularFile(destination) || Files.size(destination) == 0) {
+            throw new IOException("Downloaded MinIO video is empty: " + minioUrl);
+        }
+        return destination;
+    }
+
+    private ObjectRef parseObjectRef(String ref) throws IOException {
+        String value = text(ref);
+        if (value.isBlank()) {
+            throw new IOException("Missing field: videoUrl");
+        }
+
+        URI uri;
+        try {
+            uri = URI.create(value);
+        } catch (IllegalArgumentException exc) {
+            throw new IOException("Invalid MinIO video URL: " + ref, exc);
+        }
+        if ("s3".equals(uri.getScheme())) {
+            String objectName = decode(uri.getPath()).replaceFirst("^/+", "");
+            String bucket = text(uri.getHost()).isBlank() ? minioBucket : uri.getHost();
+            return requiredObjectRef(bucket, objectName, ref);
+        }
+        if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
+            return requiredObjectRef(minioBucket, stripKnownPrefix(decode(uri.getPath())), ref);
+        }
+        if (value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
+            return requiredObjectRef(minioBucket, stripKnownPrefix(value), ref);
+        }
+        throw new IOException("Unsupported MinIO video URL: " + ref);
+    }
+
+    private ObjectRef requiredObjectRef(String bucket, String objectName, String ref) throws IOException {
+        String cleanObjectName = text(objectName).replaceFirst("^/+", "");
+        if (cleanObjectName.isBlank()) {
+            throw new IOException("Cannot resolve MinIO object from videoUrl: " + ref);
+        }
+        return new ObjectRef(text(bucket).isBlank() ? minioBucket : text(bucket), cleanObjectName);
+    }
+
+    private String stripKnownPrefix(String path) {
+        String value = text(path).split("\\?", 2)[0].replaceFirst("^/+", "");
+        for (String prefix : List.of("minio/" + minioBucket + "/", minioBucket + "/")) {
+            if (value.startsWith(prefix)) {
+                return value.substring(prefix.length());
+            }
+        }
+        return value;
     }
 
     private UploadedVideo uploadVideoFile(Path videoPath, BilibiliUploadRequest request, String cookie) throws IOException, InterruptedException {
@@ -262,12 +368,42 @@ public class BilibiliUploadService {
         return value == null ? "" : value.trim();
     }
 
+    private String firstText(String... values) {
+        for (String value : values) {
+            String text = text(value);
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    private String decode(String value) {
+        return URLDecoder.decode(text(value), StandardCharsets.UTF_8);
+    }
+
+    private String sanitizeFilename(String value) {
+        String sanitized = text(value).replaceAll("[\\\\/:*?\"<>|]+", "_");
+        return sanitized.isBlank() ? "video.mp4" : sanitized;
+    }
+
+    private String safeSegment(String value) {
+        String sanitized = text(value).replaceAll("[^A-Za-z0-9._-]+", "_");
+        return sanitized.isBlank() ? "manual" : sanitized;
+    }
+
     private String required(String value, String field) throws IOException {
         String text = text(value);
         if (text.isBlank()) {
             throw new IOException("Missing field: " + field);
         }
         return text;
+    }
+
+    private record ObjectRef(String bucket, String objectName) {
+    }
+
+    private record ResolvedVideo(Path path, boolean temporary) {
     }
 
     private record UploadedVideo(String title, String filename, String description) {

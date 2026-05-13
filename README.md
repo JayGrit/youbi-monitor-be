@@ -33,7 +33,8 @@ Override Spring datasource settings with environment variables such as
 - `POST /api/bilibili/account/{accountKey}/qrcode/{authCode}/poll`
 - `POST /api/bilibili/account/renew`
 - `POST /api/bilibili/account/renew?accountKey=default`
-- `POST /api/bilibili/upload`
+- `POST /api/bilibili/upload` with `videoUrl` or `minioUrl` pointing to the
+  final video in MinIO. `videoPath` remains accepted only for compatibility.
 
 The service only reads existing `yd_task` and stage tables. It does not create,
 resume, or mutate processing tasks.

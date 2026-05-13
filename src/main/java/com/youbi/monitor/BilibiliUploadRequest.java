@@ -4,6 +4,8 @@ public record BilibiliUploadRequest(
         String accountKey,
         String taskId,
         String videoPath,
+        String videoUrl,
+        String minioUrl,
         String title,
         String description,
         String tags,

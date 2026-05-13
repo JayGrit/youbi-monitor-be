@@ -15,3 +15,11 @@ management:
     web:
       exposure:
         include: health
+
+youbi:
+  minio:
+    endpoint: ${YDBI_MINIO_ENDPOINT:http://120.53.92.66:9000}
+    access-key: ${YDBI_MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${YDBI_MINIO_SECRET_KEY:minioadmin}
+    bucket: ${YDBI_MINIO_BUCKET:ydbi}
+    work-dir: ${YDBI_MONITOR_UPLOAD_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/uploads}
