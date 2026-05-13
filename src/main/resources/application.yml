@@ -1,0 +1,17 @@
+server:
+  port: 8200
+
+spring:
+  application:
+    name: monitor-be
+  datasource:
+    url: jdbc:mysql://120.53.92.66:3306/youbi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    username: hoshuuch
+    password: 490229
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

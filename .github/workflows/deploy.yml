@@ -1,0 +1,50 @@
+name: Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  deploy:
+    name: 服务器本地构建
+    environment: prod
+    runs-on: ubuntu-latest
+    env:
+      TXY_PRIVATE_KEY: ${{ secrets.TXY_PRIVATE_KEY }}
+      TXY_HOST: 120.53.92.66
+      TXY_USER: root
+      TXY_PATH: /hoshuuch/youbi-monitor-be
+    steps:
+      - name: 配置SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf "%s" "${TXY_PRIVATE_KEY}" | tr -d '\r' > ~/.ssh/id_ed25519
+          printf '\n' >> ~/.ssh/id_ed25519
+          ssh-keyscan -H ${TXY_HOST} >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519
+
+      - name: 远程构建并启动容器
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o ServerAliveInterval=30 -o ServerAliveCountMax=20 "${TXY_USER}@${TXY_HOST}" "bash -s -- '${TXY_PATH}'" << 'EOF'
+          set -Eeuo pipefail
+          TXY_PATH="$1"
+
+          if [ ! -d "${TXY_PATH}/.git" ]; then
+            rm -rf "${TXY_PATH}"
+            git clone git@github.com:JayGrit/youbi-monitor-be.git "${TXY_PATH}"
+          fi
+
+          cd "${TXY_PATH}"
+          git fetch origin && git reset --hard origin/main
+          printf 'nameserver 183.60.82.98\nnameserver 183.60.83.19\nnameserver 8.8.8.8\n' > /etc/resolv.conf
+          docker rm -f monitor-be || true
+          DOCKER_BUILDKIT=1 docker build -t monitor-be:latest .
+
+          docker run -d \
+            --name monitor-be \
+            --network host \
+            --restart unless-stopped \
+            monitor-be:latest
+
+          docker logs monitor-be --tail 20
+          EOF
