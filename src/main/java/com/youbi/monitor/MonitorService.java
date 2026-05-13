@@ -22,7 +22,8 @@ public class MonitorService {
             "Macmini M2",
             "LPXB",
             "MY_HP",
-            "LPXB_HP"
+            "LPXB_HP",
+            "TXY"
     );
     private static final List<StageDefinition> STAGES = List.of(
             new StageDefinition("downloader", "下载", "downloader_status", "downloader_started_at", "downloader_completed_at", "downloader_error"),
@@ -115,19 +116,14 @@ public class MonitorService {
             LIMIT ?
             """;
     private static final String HEARTBEAT_TABLE = "yd_service_heartbeat";
-    private static final String HEARTBEAT_SQL = """
-            SELECT
-              service_name,
-              `Macbook Air M4`,
-              `Macmini M2`,
-              LPXB,
-              MY_HP,
-              LPXB_HP
-            FROM yd_service_heartbeat
-            """;
     private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
             SELECT COUNT(*)
             FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            """;
+    private static final String HEARTBEAT_COLUMNS_SQL = """
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
             """;
 
@@ -154,7 +150,7 @@ public class MonitorService {
             return new ArrayList<>(byService.values());
         }
 
-        jdbcTemplate.query(HEARTBEAT_SQL, rs -> {
+        jdbcTemplate.query(heartbeatSql(), rs -> {
             String serviceName = rs.getString("service_name");
             String label = labelForService(serviceName);
             byService.put(serviceName, new ServiceHeartbeat(serviceName, label, deviceHeartbeats(rs, now)));
@@ -165,6 +161,25 @@ public class MonitorService {
     private boolean heartbeatTableExists() {
         Integer count = jdbcTemplate.queryForObject(HEARTBEAT_TABLE_EXISTS_SQL, Integer.class, HEARTBEAT_TABLE);
         return count != null && count > 0;
+    }
+
+    private String heartbeatSql() {
+        List<String> columns = jdbcTemplate.queryForList(HEARTBEAT_COLUMNS_SQL, String.class, HEARTBEAT_TABLE);
+        StringBuilder sql = new StringBuilder("SELECT service_name");
+        for (String device : HEARTBEAT_DEVICES) {
+            sql.append(",\n  ");
+            if (columns.contains(device)) {
+                sql.append(quotedIdentifier(device));
+            } else {
+                sql.append("NULL AS ").append(quotedIdentifier(device));
+            }
+        }
+        sql.append("\nFROM ").append(HEARTBEAT_TABLE);
+        return sql.toString();
+    }
+
+    private static String quotedIdentifier(String identifier) {
+        return "`" + identifier.replace("`", "``") + "`";
     }
 
     private static ServiceHeartbeat emptyHeartbeat(StageDefinition stage) {
