@@ -146,7 +146,16 @@ public class MonitorService {
                 SET status = 'ready',
                     completed_at = NULL,
                     error_message = NULL
-                WHERE id = ? AND status = 'failed'
+                WHERE id = ? AND (
+                    status = 'failed'
+                    OR EXISTS (SELECT 1 FROM yd_downloader WHERE task_id = yd_task.id AND status = 'failed')
+                    OR EXISTS (SELECT 1 FROM yd_demucs WHERE task_id = yd_task.id AND status = 'failed')
+                    OR EXISTS (SELECT 1 FROM yd_whisper WHERE task_id = yd_task.id AND status = 'failed')
+                    OR EXISTS (SELECT 1 FROM yd_translator WHERE task_id = yd_task.id AND status = 'failed')
+                    OR EXISTS (SELECT 1 FROM yd_speaker WHERE task_id = yd_task.id AND status = 'failed')
+                    OR EXISTS (SELECT 1 FROM yd_combiner WHERE task_id = yd_task.id AND status = 'failed')
+                    OR EXISTS (SELECT 1 FROM yd_uploader WHERE task_id = yd_task.id AND status = 'failed')
+                )
                 """, taskId);
         return updated > 0;
     }

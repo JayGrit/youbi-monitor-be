@@ -28,7 +28,7 @@ public class MonitorController {
     @PostMapping("/api/video-tasks/{taskId}/ready")
     public java.util.Map<String, String> markReady(@PathVariable String taskId) {
         if (!monitorService.markTaskReady(taskId)) {
-            throw new ResponseStatusException(CONFLICT, "Task is not failed or does not exist.");
+            throw new ResponseStatusException(CONFLICT, "Task has no failed status or does not exist.");
         }
         return java.util.Map.of("status", "ready");
     }
