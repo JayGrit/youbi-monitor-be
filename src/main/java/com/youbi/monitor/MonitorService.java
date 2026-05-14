@@ -140,6 +140,17 @@ public class MonitorService {
         return new MonitorResponse(tasks, serviceHeartbeats, now);
     }
 
+    public boolean markTaskReady(String taskId) {
+        int updated = jdbcTemplate.update("""
+                UPDATE yd_task
+                SET status = 'ready',
+                    completed_at = NULL,
+                    error_message = NULL
+                WHERE id = ? AND status = 'failed'
+                """, taskId);
+        return updated > 0;
+    }
+
     private List<ServiceHeartbeat> listServiceHeartbeats(LocalDateTime now) {
         Map<String, ServiceHeartbeat> byService = new LinkedHashMap<>();
         for (StageDefinition stage : STAGES) {
