@@ -20,8 +20,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,19 +73,21 @@ public class BilibiliUploadService {
 
             String accountKey = accountService.normalizeAccountKey(request.accountKey());
             JsonNode loginInfo = accountService.loginInfo(accountKey);
+            AccountIdentity accountIdentity = accountIdentity(accountKey, loginInfo);
             String cookie = accountService.cookieHeader(loginInfo);
             String accessToken = accountService.accessToken(loginInfo);
             UploadedVideo uploadedVideo = uploadVideoFile(videoPath, request, cookie);
-            JsonNode submit = submit(uploadedVideo, request, accessToken, cookie);
+            String cover = uploadCoverIfPresent(request, cookie);
+            JsonNode submit = submit(uploadedVideo, request, accessToken, cookie, cover);
             int code = submit.path("code").asInt(Integer.MIN_VALUE);
             Map<String, Object> raw = objectMapper.convertValue(submit, MAP_TYPE);
             if (code != 0) {
-                return new BilibiliUploadResult(false, "", null, submit.path("message").asText(submit.toString()), raw);
+                return new BilibiliUploadResult(false, "", null, accountIdentity.uid(), accountIdentity.name(), submit.path("message").asText(submit.toString()), raw);
             }
             JsonNode data = submit.path("data");
             String bvid = data.path("bvid").asText("");
             Long aid = data.path("aid").canConvertToLong() ? data.path("aid").asLong() : null;
-            return new BilibiliUploadResult(true, bvid, aid, "上传成功", raw);
+            return new BilibiliUploadResult(true, bvid, aid, accountIdentity.uid(), accountIdentity.name(), "上传成功", raw);
         } finally {
             if (resolvedVideo.temporary()) {
                 Files.deleteIfExists(resolvedVideo.path());
@@ -167,6 +169,21 @@ public class BilibiliUploadService {
             }
         }
         return value;
+    }
+
+    private boolean isMinioRef(String ref) {
+        String value = text(ref);
+        if (value.startsWith("s3:") || value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
+            return true;
+        }
+        try {
+            URI uri = URI.create(value);
+            String path = decode(uri.getPath());
+            return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
+                    && (path.startsWith("/minio/" + minioBucket + "/") || path.startsWith("/" + minioBucket + "/"));
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private UploadedVideo uploadVideoFile(Path videoPath, BilibiliUploadRequest request, String cookie) throws IOException, InterruptedException {
@@ -267,7 +284,65 @@ public class BilibiliUploadService {
         return sendJson(request);
     }
 
-    private JsonNode submit(UploadedVideo uploadedVideo, BilibiliUploadRequest request, String accessToken, String cookie) throws IOException, InterruptedException {
+    private String uploadCoverIfPresent(BilibiliUploadRequest request, String cookie) throws IOException, InterruptedException {
+        byte[] cover = resolveCover(request);
+        if (cover.length == 0) {
+            return "";
+        }
+
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("cover", "data:image/jpeg;base64," + Base64.getEncoder().encodeToString(cover));
+        form.put("csrf", csrfFromCookie(cookie));
+        HttpRequest httpRequest = baseRequest(URI.create("https://member.bilibili.com/x/vu/web/cover/up"), cookie)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(accountService.encodeForm(form), StandardCharsets.UTF_8))
+                .build();
+        JsonNode root = sendJson(httpRequest);
+        int code = root.path("code").asInt(Integer.MIN_VALUE);
+        String url = root.path("data").path("url").asText("");
+        if (code != 0 || url.isBlank()) {
+            throw new IOException("Bilibili cover upload failed: " + root);
+        }
+        return url;
+    }
+
+    private byte[] resolveCover(BilibiliUploadRequest request) throws IOException, InterruptedException {
+        String coverPath = text(request.coverPath());
+        if (!coverPath.isBlank()) {
+            return Files.readAllBytes(Path.of(coverPath).toAbsolutePath().normalize());
+        }
+
+        String coverUrl = text(request.coverUrl());
+        if (coverUrl.isBlank()) {
+            return new byte[0];
+        }
+        if (isMinioRef(coverUrl)) {
+            ObjectRef objectRef = parseObjectRef(coverUrl);
+            try (InputStream input = minioClient.getObject(
+                    GetObjectArgs.builder()
+                            .bucket(objectRef.bucket())
+                            .object(objectRef.objectName())
+                            .build()
+            )) {
+                return input.readAllBytes();
+            } catch (Exception exc) {
+                throw new IOException("Cannot download MinIO cover: " + coverUrl, exc);
+            }
+        }
+
+        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(coverUrl))
+                .timeout(Duration.ofMinutes(2))
+                .header("User-Agent", "Mozilla/5.0")
+                .GET()
+                .build();
+        HttpResponse<byte[]> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
+        if (response.statusCode() / 100 != 2 || response.body().length == 0) {
+            throw new IOException("Cannot download coverUrl: " + response.statusCode() + " " + coverUrl);
+        }
+        return response.body();
+    }
+
+    private JsonNode submit(UploadedVideo uploadedVideo, BilibiliUploadRequest request, String accessToken, String cookie, String cover) throws IOException, InterruptedException {
         Map<String, String> query = accountService.signedTvQuery(Map.of(
                 "access_key", accessToken,
                 "build", "7800300",
@@ -283,7 +358,7 @@ public class BilibiliUploadService {
         studio.put("copyright", request.copyright() == null ? 2 : request.copyright());
         studio.put("source", text(request.source()));
         studio.put("tid", request.tid() == null ? 171 : request.tid());
-        studio.put("cover", "");
+        studio.put("cover", text(cover));
         studio.put("title", truncate(required(request.title(), "title"), 80));
         studio.put("desc_format_id", 0);
         studio.put("desc", text(request.description()));
@@ -392,6 +467,35 @@ public class BilibiliUploadService {
         return sanitized.isBlank() ? "manual" : sanitized;
     }
 
+    private AccountIdentity accountIdentity(String accountKey, JsonNode loginInfo) {
+        Long uid = loginInfo.path("token_info").path("mid").canConvertToLong()
+                ? loginInfo.path("token_info").path("mid").asLong()
+                : null;
+        String name = accountKey;
+        try {
+            BilibiliAccountStatus status = accountService.status(accountKey);
+            if (status.mid() != null) {
+                uid = status.mid();
+            }
+            if (!text(status.uname()).isBlank()) {
+                name = status.uname();
+            }
+        } catch (Exception ignored) {
+            // Best effort only; the upload itself should not depend on profile refresh.
+        }
+        return new AccountIdentity(uid, name);
+    }
+
+    private String csrfFromCookie(String cookie) throws IOException {
+        for (String part : text(cookie).split(";")) {
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length == 2 && "bili_jct".equals(pair[0]) && !pair[1].isBlank()) {
+                return pair[1];
+            }
+        }
+        throw new IOException("Missing Bilibili csrf cookie: bili_jct");
+    }
+
     private String required(String value, String field) throws IOException {
         String text = text(value);
         if (text.isBlank()) {
@@ -407,5 +511,8 @@ public class BilibiliUploadService {
     }
 
     private record UploadedVideo(String title, String filename, String description) {
+    }
+
+    private record AccountIdentity(Long uid, String name) {
     }
 }

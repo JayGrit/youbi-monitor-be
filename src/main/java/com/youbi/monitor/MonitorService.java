@@ -38,7 +38,7 @@ public class MonitorService {
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              t.title,
+              COALESCE(NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
               t.source_url,
               t.status,
               t.current_stage,
@@ -68,6 +68,7 @@ public class MonitorService {
               tr.error_message translator_error,
               ts.translated_count translator_completed_count,
               GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0)) translator_total_count,
+              te.child_error_message translator_child_error,
 
               sp.status speaker_status,
               sp.started_at speaker_started_at,
@@ -75,6 +76,7 @@ public class MonitorService {
               sp.error_message speaker_error,
               ss.speaker_completed_count,
               ss.speaker_total_count,
+              se.child_error_message speaker_child_error,
 
               m.status combiner_status,
               m.started_at combiner_started_at,
@@ -84,6 +86,8 @@ public class MonitorService {
               u.status uploader_status,
               u.started_at uploader_started_at,
               u.completed_at uploader_completed_at,
+              u.bilibili_upload_uid,
+              u.bilibili_upload_account_name,
               u.error_message uploader_error
             FROM yd_task t
             LEFT JOIN yd_downloader d ON d.task_id = t.id
@@ -112,6 +116,30 @@ public class MonitorService {
               FROM yd_speaker_segment
               GROUP BY task_id
             ) ss ON ss.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                GROUP_CONCAT(
+                  CONCAT(request_key, ' #', item_index, ': ', COALESCE(NULLIF(error_message, ''), status))
+                  ORDER BY id
+                  SEPARATOR 0x0A
+                ) child_error_message
+              FROM yd_translator_api_task
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) te ON te.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                GROUP_CONCAT(
+                  CONCAT('segment #', item_index, ': ', COALESCE(NULLIF(error_message, ''), status))
+                  ORDER BY item_index
+                  SEPARATOR 0x0A
+                ) child_error_message
+              FROM yd_speaker_segment
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) se ON se.task_id = t.id
             ORDER BY t.created_at DESC
             LIMIT ?
             """;
@@ -131,6 +159,7 @@ public class MonitorService {
 
     public MonitorService(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+        ensureUploaderMonitorColumns();
     }
 
     public MonitorResponse listTasks(int limit) {
@@ -202,6 +231,24 @@ public class MonitorService {
         return "`" + identifier.replace("`", "``") + "`";
     }
 
+    private void ensureUploaderMonitorColumns() {
+        ensureColumn("yd_uploader", "bilibili_upload_uid", "VARCHAR(64) NULL");
+        ensureColumn("yd_uploader", "bilibili_upload_account_name", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
+    }
+
+    private void ensureColumn(String table, String column, String definition) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """, Integer.class, table, column);
+        if (count != null && count > 0) {
+            return;
+        }
+        jdbcTemplate.execute("ALTER TABLE " + quotedIdentifier(table) + " ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+    }
+
     private static ServiceHeartbeat emptyHeartbeat(StageDefinition stage) {
         return new ServiceHeartbeat(stage.key(), stage.label(), emptyDeviceHeartbeats());
     }
@@ -271,7 +318,8 @@ public class MonitorService {
                         elapsedSeconds(startedAt, completedAt, now),
                         countValue(rs, stage.key(), "completed_count"),
                         countValue(rs, stage.key(), "total_count"),
-                        rs.getString(stage.errorColumn())
+                        rs.getString(stage.errorColumn()),
+                        childErrorMessage(rs, stage.key())
                 ));
             }
 
@@ -285,6 +333,8 @@ public class MonitorService {
                     taskStartedAt,
                     taskCompletedAt,
                     MonitorService.elapsedSeconds(taskStartedAt, taskCompletedAt, now),
+                    rs.getString("bilibili_upload_uid"),
+                    rs.getString("bilibili_upload_account_name"),
                     rs.getString("error_message"),
                     nodes
             );
@@ -301,6 +351,13 @@ public class MonitorService {
             }
             int value = rs.getInt(stageKey + "_" + suffix);
             return rs.wasNull() ? null : value;
+        }
+
+        private static String childErrorMessage(ResultSet rs, String stageKey) throws SQLException {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey)) {
+                return null;
+            }
+            return rs.getString(stageKey + "_child_error");
         }
 
     }

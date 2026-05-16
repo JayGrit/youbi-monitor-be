@@ -11,6 +11,7 @@ public record StageNode(
         long elapsedSeconds,
         Integer completedCount,
         Integer totalCount,
-        String errorMessage
+        String errorMessage,
+        String childErrorMessage
 ) {
 }

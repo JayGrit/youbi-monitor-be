@@ -13,6 +13,8 @@ public record TaskMonitorItem(
         LocalDateTime startedAt,
         LocalDateTime completedAt,
         long elapsedSeconds,
+        String bilibiliUploadUid,
+        String bilibiliUploadAccountName,
         String errorMessage,
         List<StageNode> nodes
 ) {

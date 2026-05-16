@@ -14,6 +14,8 @@ public record BilibiliUploadRequest(
         String source,
         String dynamic,
         Integer noReprint,
+        String coverPath,
+        String coverUrl,
         String line,
         Integer limit
 ) {
