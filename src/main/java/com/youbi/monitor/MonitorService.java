@@ -3,6 +3,7 @@ package com.youbi.monitor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -33,6 +34,15 @@ public class MonitorService {
             new StageDefinition("speaker", "配音", "speaker_status", "speaker_started_at", "speaker_completed_at", "speaker_error"),
             new StageDefinition("combiner", "音视频合成", "combiner_status", "combiner_started_at", "combiner_completed_at", "combiner_error"),
             new StageDefinition("uploader", "上传", "uploader_status", "uploader_started_at", "uploader_completed_at", "uploader_error")
+    );
+    private static final List<RetryStage> RETRY_STAGES = List.of(
+            new RetryStage("downloader", "yd_downloader"),
+            new RetryStage("demucs", "yd_demucs"),
+            new RetryStage("whisper", "yd_whisper"),
+            new RetryStage("translator", "yd_translator"),
+            new RetryStage("speaker", "yd_speaker"),
+            new RetryStage("combiner", "yd_combiner"),
+            new RetryStage("uploader", "yd_uploader")
     );
 
     private static final String MONITOR_SQL = """
@@ -169,24 +179,121 @@ public class MonitorService {
         return new MonitorResponse(tasks, serviceHeartbeats, now);
     }
 
+    @Transactional
     public boolean markTaskReady(String taskId) {
-        int updated = jdbcTemplate.update("""
+        RetryStage failedStage = findFailedStage(taskId);
+        if (failedStage == null) {
+            return false;
+        }
+
+        resetFailedStage(taskId, failedStage);
+        resetDownstreamStages(taskId, failedStage);
+        resetStageChildren(taskId, failedStage);
+        jdbcTemplate.update("""
                 UPDATE yd_task
                 SET status = 'ready',
+                    current_stage = ?,
                     completed_at = NULL,
                     error_message = NULL
-                WHERE id = ? AND (
-                    status = 'failed'
-                    OR EXISTS (SELECT 1 FROM yd_downloader WHERE task_id = yd_task.id AND status = 'failed')
-                    OR EXISTS (SELECT 1 FROM yd_demucs WHERE task_id = yd_task.id AND status = 'failed')
-                    OR EXISTS (SELECT 1 FROM yd_whisper WHERE task_id = yd_task.id AND status = 'failed')
-                    OR EXISTS (SELECT 1 FROM yd_translator WHERE task_id = yd_task.id AND status = 'failed')
-                    OR EXISTS (SELECT 1 FROM yd_speaker WHERE task_id = yd_task.id AND status = 'failed')
-                    OR EXISTS (SELECT 1 FROM yd_combiner WHERE task_id = yd_task.id AND status = 'failed')
-                    OR EXISTS (SELECT 1 FROM yd_uploader WHERE task_id = yd_task.id AND status = 'failed')
-                )
-                """, taskId);
-        return updated > 0;
+                WHERE id = ?
+                """, failedStage.key(), taskId);
+        return true;
+    }
+
+    private RetryStage findFailedStage(String taskId) {
+        for (RetryStage stage : RETRY_STAGES) {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + stage.table() + " WHERE task_id = ? AND status = 'failed'",
+                    Integer.class,
+                    taskId
+            );
+            if (count != null && count > 0) {
+                return stage;
+            }
+        }
+
+        List<String> currentStages = jdbcTemplate.queryForList("""
+                SELECT current_stage
+                FROM yd_task
+                WHERE id = ? AND status = 'failed'
+                """, String.class, taskId);
+        if (currentStages.isEmpty()) {
+            return null;
+        }
+        String currentStage = currentStages.get(0);
+        for (RetryStage stage : RETRY_STAGES) {
+            if (stage.key().equals(currentStage)) {
+                return stage;
+            }
+        }
+        return null;
+    }
+
+    private void resetFailedStage(String taskId, RetryStage stage) {
+        ensureOperatorColumn(stage.table());
+        jdbcTemplate.update("""
+                UPDATE %s
+                SET status = 'ready',
+                    started_at = NULL,
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE task_id = ?
+                """.formatted(stage.table()), taskId);
+    }
+
+    private void resetDownstreamStages(String taskId, RetryStage failedStage) {
+        int failedIndex = RETRY_STAGES.indexOf(failedStage);
+        for (int i = failedIndex + 1; i < RETRY_STAGES.size(); i++) {
+            RetryStage stage = RETRY_STAGES.get(i);
+            ensureOperatorColumn(stage.table());
+            jdbcTemplate.update("""
+                    UPDATE %s
+                    SET status = 'pending',
+                        started_at = NULL,
+                        completed_at = NULL,
+                        error_message = NULL,
+                        `operator` = NULL
+                    WHERE task_id = ?
+                    """.formatted(stage.table()), taskId);
+        }
+    }
+
+    private void resetStageChildren(String taskId, RetryStage failedStage) {
+        if ("translator".equals(failedStage.key())) {
+            if (tableExists("yd_translator_api_task")) {
+                ensureOperatorColumn("yd_translator_api_task");
+                jdbcTemplate.update("""
+                        UPDATE yd_translator_api_task
+                        SET status = 'pending',
+                            attempt_count = 0,
+                            started_at = NULL,
+                            completed_at = NULL,
+                            error_message = NULL,
+                            next_run_at = NOW(),
+                            `operator` = NULL
+                        WHERE task_id = ? AND status IN ('failed', 'running')
+                        """, taskId);
+            }
+            if (tableExists("yd_speaker_segment")) {
+                jdbcTemplate.update("DELETE FROM yd_speaker_segment WHERE task_id = ?", taskId);
+            }
+            return;
+        }
+
+        if ("speaker".equals(failedStage.key()) && tableExists("yd_speaker_segment")) {
+            ensureOperatorColumn("yd_speaker_segment");
+            jdbcTemplate.update("""
+                    UPDATE yd_speaker_segment
+                    SET status = 'ready',
+                        attempt_count = 0,
+                        started_at = NULL,
+                        completed_at = NULL,
+                        error_message = NULL,
+                        `operator` = NULL
+                    WHERE task_id = ? AND status = 'failed'
+                    """, taskId);
+        }
     }
 
     private List<ServiceHeartbeat> listServiceHeartbeats(LocalDateTime now) {
@@ -237,6 +344,19 @@ public class MonitorService {
         ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
     }
 
+    private boolean tableExists(String table) {
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                """, Integer.class, table);
+        return count != null && count > 0;
+    }
+
+    private void ensureOperatorColumn(String table) {
+        ensureColumn(table, "operator", "VARCHAR(128) NULL");
+    }
+
     private void ensureColumn(String table, String column, String definition) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
@@ -279,6 +399,9 @@ public class MonitorService {
             }
         }
         return serviceName;
+    }
+
+    private record RetryStage(String key, String table) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
