@@ -8,7 +8,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
+
 import static org.springframework.http.HttpStatus.CONFLICT;
+import static org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR;
+import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @RestController
 @CrossOrigin
@@ -31,6 +35,21 @@ public class MonitorController {
             throw new ResponseStatusException(CONFLICT, "Task has no failed status or does not exist.");
         }
         return java.util.Map.of("status", "ready");
+    }
+
+    @PostMapping("/api/video-tasks/{taskId}/restart")
+    public MonitorService.TaskRestartResult restart(@PathVariable String taskId) {
+        try {
+            MonitorService.TaskRestartResult result = monitorService.restartTask(taskId);
+            if (result == null) {
+                throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
+            }
+            return result;
+        } catch (IllegalStateException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        } catch (IOException exc) {
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, exc.getMessage(), exc);
+        }
     }
 
     @GetMapping("/health")

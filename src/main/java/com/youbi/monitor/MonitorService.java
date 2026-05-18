@@ -1,10 +1,17 @@
 package com.youbi.monitor;
 
+import io.minio.ListObjectsArgs;
+import io.minio.MinioClient;
+import io.minio.RemoveObjectArgs;
+import io.minio.Result;
+import io.minio.messages.Item;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -43,6 +50,29 @@ public class MonitorService {
             new RetryStage("speaker", "yd_speaker"),
             new RetryStage("combiner", "yd_combiner"),
             new RetryStage("uploader", "yd_uploader")
+    );
+    private static final List<String> RESET_CHILD_TABLES = List.of(
+            "yd_speaker_segment",
+            "yd_translator_api_task",
+            "yd_asr_segment",
+            "yd_asr_result"
+    );
+    private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
+            "task_id",
+            "source_url",
+            "source_platform",
+            "created_at",
+            "updated_at"
+    );
+    private static final List<String> SYSTEM_STAGE_COLUMNS = List.of(
+            "task_id",
+            "status",
+            "started_at",
+            "completed_at",
+            "error_message",
+            "operator",
+            "created_at",
+            "updated_at"
     );
 
     private static final String MONITOR_SQL = """
@@ -166,9 +196,22 @@ public class MonitorService {
             """;
 
     private final JdbcTemplate jdbcTemplate;
+    private final MinioClient minioClient;
+    private final String minioBucket;
 
-    public MonitorService(JdbcTemplate jdbcTemplate) {
+    public MonitorService(
+            JdbcTemplate jdbcTemplate,
+            @Value("${youbi.minio.endpoint}") String minioEndpoint,
+            @Value("${youbi.minio.access-key}") String minioAccessKey,
+            @Value("${youbi.minio.secret-key}") String minioSecretKey,
+            @Value("${youbi.minio.bucket}") String minioBucket
+    ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.minioClient = MinioClient.builder()
+                .endpoint(minioEndpoint)
+                .credentials(minioAccessKey, minioSecretKey)
+                .build();
+        this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         ensureUploaderMonitorColumns();
     }
 
@@ -198,6 +241,25 @@ public class MonitorService {
                 WHERE id = ?
                 """, failedStage.key(), taskId);
         return true;
+    }
+
+    @Transactional
+    public TaskRestartResult restartTask(String taskId) throws IOException {
+        List<String> statuses = jdbcTemplate.queryForList(
+                "SELECT status FROM yd_task WHERE id = ?",
+                String.class,
+                taskId
+        );
+        if (statuses.isEmpty()) {
+            return null;
+        }
+        if ("running".equals(statuses.get(0)) || hasRunningStage(taskId)) {
+            throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before restarting.");
+        }
+
+        int deletedObjects = deleteTaskObjects(taskId);
+        resetTaskRowsForDownloader(taskId);
+        return new TaskRestartResult("ready", deletedObjects);
     }
 
     private RetryStage findFailedStage(String taskId) {
@@ -294,6 +356,153 @@ public class MonitorService {
                     WHERE task_id = ? AND status = 'failed'
                     """, taskId);
         }
+    }
+
+    private boolean hasRunningStage(String taskId) {
+        for (RetryStage stage : RETRY_STAGES) {
+            if (!tableExists(stage.table())) {
+                continue;
+            }
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM " + quotedIdentifier(stage.table()) + " WHERE task_id = ? AND status = 'running'",
+                    Integer.class,
+                    taskId
+            );
+            if (count != null && count > 0) {
+                return true;
+            }
+        }
+        if (tableExists("yd_speaker_segment")) {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM yd_speaker_segment WHERE task_id = ? AND status = 'running'",
+                    Integer.class,
+                    taskId
+            );
+            return count != null && count > 0;
+        }
+        return false;
+    }
+
+    private int deleteTaskObjects(String taskId) throws IOException {
+        String prefix = minioPrefix(taskId);
+        int deleted = 0;
+        Iterable<Result<Item>> objects = minioClient.listObjects(
+                ListObjectsArgs.builder()
+                        .bucket(minioBucket)
+                        .prefix(prefix)
+                        .recursive(true)
+                        .build()
+        );
+        try {
+            for (Result<Item> result : objects) {
+                Item item = result.get();
+                minioClient.removeObject(
+                        RemoveObjectArgs.builder()
+                                .bucket(minioBucket)
+                                .object(item.objectName())
+                                .build()
+                );
+                deleted++;
+            }
+        } catch (Exception exc) {
+            throw new IOException("Cannot delete MinIO objects under prefix " + prefix, exc);
+        }
+        return deleted;
+    }
+
+    private void resetTaskRowsForDownloader(String taskId) {
+        for (String table : RESET_CHILD_TABLES) {
+            if (tableExists(table)) {
+                jdbcTemplate.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
+            }
+        }
+
+        resetVideoInfo(taskId);
+        for (RetryStage stage : RETRY_STAGES) {
+            resetStageRow(taskId, stage, "downloader".equals(stage.key()) ? "ready" : "pending");
+        }
+
+        jdbcTemplate.update("""
+                UPDATE yd_task
+                SET status = 'ready',
+                    current_stage = 'downloader',
+                    started_at = NULL,
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE id = ?
+                """, taskId);
+    }
+
+    private void resetVideoInfo(String taskId) {
+        if (!tableExists("yd_video_info")) {
+            return;
+        }
+        List<String> resetColumns = resettableColumns("yd_video_info", PRESERVED_VIDEO_INFO_COLUMNS);
+        if (resetColumns.isEmpty()) {
+            restoreVideoInfoSource(taskId);
+            return;
+        }
+        jdbcTemplate.update("UPDATE yd_video_info SET " + nullAssignments(resetColumns) + " WHERE task_id = ?", taskId);
+        restoreVideoInfoSource(taskId);
+    }
+
+    private void restoreVideoInfoSource(String taskId) {
+        jdbcTemplate.update("""
+                INSERT INTO yd_video_info (task_id, source_url, source_platform)
+                SELECT id, source_url, source_platform
+                FROM yd_task
+                WHERE id = ?
+                ON DUPLICATE KEY UPDATE
+                    source_url = COALESCE(yd_video_info.source_url, VALUES(source_url)),
+                    source_platform = COALESCE(yd_video_info.source_platform, VALUES(source_platform))
+                """, taskId);
+    }
+
+    private void resetStageRow(String taskId, RetryStage stage, String status) {
+        if (!tableExists(stage.table())) {
+            return;
+        }
+        ensureOperatorColumn(stage.table());
+        List<String> resetColumns = resettableColumns(stage.table(), SYSTEM_STAGE_COLUMNS);
+        String extraAssignments = resetColumns.isEmpty() ? "" : ",\n                    " + nullAssignments(resetColumns);
+        jdbcTemplate.update("""
+                UPDATE %s
+                SET status = ?,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL%s
+                WHERE task_id = ?
+                """.formatted(quotedIdentifier(stage.table()), extraAssignments), status, taskId);
+    }
+
+    private List<String> resettableColumns(String table, List<String> preservedColumns) {
+        return jdbcTemplate.queryForList("""
+                        SELECT COLUMN_NAME
+                        FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE()
+                          AND TABLE_NAME = ?
+                          AND IS_NULLABLE = 'YES'
+                        """, String.class, table)
+                .stream()
+                .filter(column -> !preservedColumns.contains(column))
+                .toList();
+    }
+
+    private static String nullAssignments(List<String> columns) {
+        return columns.stream()
+                .map(column -> quotedIdentifier(column) + " = NULL")
+                .reduce((left, right) -> left + ",\n                    " + right)
+                .orElse("");
+    }
+
+    private static String minioPrefix(String taskId) {
+        String clean = text(taskId).replaceFirst("^/+", "").replaceFirst("/+$", "");
+        if (clean.isBlank()) {
+            throw new IllegalArgumentException("Missing taskId");
+        }
+        return clean + "/";
     }
 
     private List<ServiceHeartbeat> listServiceHeartbeats(LocalDateTime now) {
@@ -404,6 +613,9 @@ public class MonitorService {
     private record RetryStage(String key, String table) {
     }
 
+    public record TaskRestartResult(String status, int deletedMinioObjects) {
+    }
+
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
         Timestamp timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toLocalDateTime();
@@ -415,6 +627,10 @@ public class MonitorService {
         }
         LocalDateTime end = completedAt == null ? now : completedAt;
         return Math.max(0, Duration.between(startedAt, end).getSeconds());
+    }
+
+    private static String text(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private static class TaskRowMapper implements RowMapper<TaskMonitorItem> {
