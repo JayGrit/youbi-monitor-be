@@ -30,6 +30,15 @@ public class MonitorController {
         return monitorService.listTasks(boundedLimit);
     }
 
+    @GetMapping("/api/video-tasks/{taskId}/flow")
+    public TaskFlowDetail flow(@PathVariable String taskId) {
+        TaskFlowDetail detail = monitorService.getTaskFlow(taskId);
+        if (detail == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
+        }
+        return detail;
+    }
+
     @PostMapping("/api/video-tasks/{taskId}/ready")
     public java.util.Map<String, String> markReady(@PathVariable String taskId) {
         if (!monitorService.markTaskReady(taskId)) {

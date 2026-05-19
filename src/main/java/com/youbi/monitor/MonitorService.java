@@ -12,15 +12,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
+import java.net.URI;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class MonitorService {
@@ -73,6 +78,34 @@ public class MonitorService {
             "operator",
             "created_at",
             "updated_at"
+    );
+    private static final int CHILD_ROW_LIMIT = 500;
+    private static final Map<String, String> STAGE_TABLES = Map.of(
+            "downloader", "yd_downloader",
+            "demucs", "yd_demucs",
+            "whisper", "yd_whisper",
+            "translator", "yd_translator",
+            "speaker", "yd_speaker",
+            "combiner", "yd_combiner",
+            "uploader", "yd_uploader"
+    );
+    private static final Map<String, List<String>> STAGE_INPUT_FIELDS = Map.of(
+            "downloader", List.of("source_url", "source_platform"),
+            "demucs", List.of("audio_source_url", "audio_source_path"),
+            "whisper", List.of("audio_vocals_url", "audio_vocals_path"),
+            "translator", List.of("asr_fixed_json_path", "asr_json_path", "target_language"),
+            "speaker", List.of("audio_vocals_url", "translation_json_path", "target_language"),
+            "combiner", List.of("video_source_url", "audio_bgm_url", "tts_segments_dir", "translation_json_path"),
+            "uploader", List.of("final_video_url", "upload_title", "upload_desc", "upload_tag", "upload_cover_url")
+    );
+    private static final Map<String, List<String>> STAGE_OUTPUT_FIELDS = Map.of(
+            "downloader", List.of("title", "source_description", "source_uploader", "source_webpage_url", "source_thumbnail_url", "metadata_url", "video_source_url", "audio_source_url"),
+            "demucs", List.of("audio_vocals_url", "audio_bgm_url"),
+            "whisper", List.of("asr_json_path", "asr_fixed_json_path"),
+            "translator", List.of("translation_json_path", "target_language"),
+            "speaker", List.of("tts_segments_dir"),
+            "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
+            "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name")
     );
 
     private static final String MONITOR_SQL = """
@@ -197,6 +230,7 @@ public class MonitorService {
 
     private final JdbcTemplate jdbcTemplate;
     private final MinioClient minioClient;
+    private final String minioEndpoint;
     private final String minioBucket;
 
     public MonitorService(
@@ -207,6 +241,7 @@ public class MonitorService {
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
         this.jdbcTemplate = jdbcTemplate;
+        this.minioEndpoint = text(minioEndpoint);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -220,6 +255,356 @@ public class MonitorService {
         List<TaskMonitorItem> tasks = jdbcTemplate.query(MONITOR_SQL, new TaskRowMapper(now), limit);
         List<ServiceHeartbeat> serviceHeartbeats = listServiceHeartbeats(now);
         return new MonitorResponse(tasks, serviceHeartbeats, now);
+    }
+
+    public TaskFlowDetail getTaskFlow(String taskId) {
+        LocalDateTime now = LocalDateTime.now();
+        Map<String, Object> task = singleRow("yd_task", "id", taskId);
+        if (task.isEmpty()) {
+            return null;
+        }
+
+        Map<String, Object> videoInfo = singleRow("yd_video_info", "task_id", taskId);
+        List<TaskFlowDetail.TaskFlowAsset> minioObjects = listTaskAssets(taskId);
+        List<TaskFlowDetail.TaskFlowStage> stages = new ArrayList<>();
+        for (StageDefinition definition : STAGES) {
+            stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
+        }
+        return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
+    }
+
+    private TaskFlowDetail.TaskFlowStage flowStage(
+            String taskId,
+            StageDefinition definition,
+            Map<String, Object> task,
+            Map<String, Object> videoInfo,
+            List<TaskFlowDetail.TaskFlowAsset> minioObjects,
+            LocalDateTime now
+    ) {
+        String table = STAGE_TABLES.get(definition.key());
+        Map<String, Object> stageRow = singleRow(table, "task_id", taskId);
+        LocalDateTime startedAt = localDateTime(stageRow.get("started_at"));
+        LocalDateTime completedAt = localDateTime(stageRow.get("completed_at"));
+        String status = stringValue(stageRow.getOrDefault("status", "pending"));
+        List<TaskFlowDetail.TaskFlowTable> tables = flowTables(taskId, definition.key(), table, stageRow);
+        return new TaskFlowDetail.TaskFlowStage(
+                definition.key(),
+                definition.label(),
+                status.isBlank() ? "pending" : status,
+                startedAt,
+                completedAt,
+                elapsedSeconds(startedAt, completedAt, now),
+                stringValue(stageRow.get("operator")),
+                stringValue(stageRow.get("error_message")),
+                flowFields(definition.key(), STAGE_INPUT_FIELDS, task, videoInfo, stageRow, minioObjects),
+                flowFields(definition.key(), STAGE_OUTPUT_FIELDS, task, videoInfo, stageRow, minioObjects),
+                tables
+        );
+    }
+
+    private List<TaskFlowDetail.TaskFlowField> flowFields(
+            String stageKey,
+            Map<String, List<String>> fieldMap,
+            Map<String, Object> task,
+            Map<String, Object> videoInfo,
+            Map<String, Object> stageRow,
+            List<TaskFlowDetail.TaskFlowAsset> minioObjects
+    ) {
+        List<TaskFlowDetail.TaskFlowField> fields = new ArrayList<>();
+        for (String name : fieldMap.getOrDefault(stageKey, List.of())) {
+            Object value = firstPresent(name, stageRow, videoInfo, task);
+            if (isBlankValue(value)) {
+                continue;
+            }
+            fields.add(new TaskFlowDetail.TaskFlowField(name, value, assetFor(name, stageKey, value, minioObjects)));
+        }
+        return fields;
+    }
+
+    private List<TaskFlowDetail.TaskFlowTable> flowTables(String taskId, String stageKey, String stageTable, Map<String, Object> stageRow) {
+        List<TaskFlowDetail.TaskFlowTable> tables = new ArrayList<>();
+        if (!stageRow.isEmpty()) {
+            tables.add(new TaskFlowDetail.TaskFlowTable(stageTable, List.of(stageRow), false));
+        }
+        switch (stageKey) {
+            case "whisper" -> {
+                addLimitedTable(tables, "yd_asr_result", taskId, "task_id", "task_id");
+                addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "segment_type, item_index, id");
+            }
+            case "translator" -> {
+                addLimitedTable(tables, "yd_translator_api_task", taskId, "task_id", "id");
+                addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
+            }
+            case "speaker" -> addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
+            case "uploader" -> addLimitedTable(tables, "yd_uploader", taskId, "task_id", "task_id");
+            default -> {
+            }
+        }
+        return tables;
+    }
+
+    private void addLimitedTable(List<TaskFlowDetail.TaskFlowTable> tables, String table, String id, String idColumn, String orderBy) {
+        if (!tableExists(table)) {
+            return;
+        }
+        List<Map<String, Object>> rows = rows(table, idColumn, id, orderBy, CHILD_ROW_LIMIT + 1);
+        boolean truncated = rows.size() > CHILD_ROW_LIMIT;
+        if (truncated) {
+            rows = rows.subList(0, CHILD_ROW_LIMIT);
+        }
+        if (!rows.isEmpty()) {
+            tables.add(new TaskFlowDetail.TaskFlowTable(table, rows, truncated));
+        }
+    }
+
+    private Map<String, Object> singleRow(String table, String idColumn, String id) {
+        if (table == null || !tableExists(table)) {
+            return Map.of();
+        }
+        List<Map<String, Object>> rows = rows(table, idColumn, id, idColumn, 1);
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
+
+    private List<Map<String, Object>> rows(String table, String idColumn, String id, String orderBy, int limit) {
+        return jdbcTemplate.query(
+                "SELECT * FROM " + quotedIdentifier(table)
+                        + " WHERE " + quotedIdentifier(idColumn) + " = ?"
+                        + orderClause(table, orderBy)
+                        + " LIMIT ?",
+                (rs, rowNum) -> rowMap(rs),
+                id,
+                limit
+        );
+    }
+
+    private String orderClause(String table, String orderBy) {
+        if (orderBy == null || orderBy.isBlank()) {
+            return "";
+        }
+        Set<String> columns = new HashSet<>(columns(table));
+        List<String> parts = new ArrayList<>();
+        for (String raw : orderBy.split(",")) {
+            String column = raw.trim();
+            if (columns.contains(column)) {
+                parts.add(quotedIdentifier(column));
+            }
+        }
+        return parts.isEmpty() ? "" : " ORDER BY " + String.join(", ", parts);
+    }
+
+    private List<String> columns(String table) {
+        if (!tableExists(table)) {
+            return List.of();
+        }
+        return jdbcTemplate.queryForList("""
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                ORDER BY ORDINAL_POSITION
+                """, String.class, table);
+    }
+
+    private Map<String, Object> rowMap(ResultSet rs) throws SQLException {
+        Map<String, Object> row = new LinkedHashMap<>();
+        int count = rs.getMetaData().getColumnCount();
+        for (int i = 1; i <= count; i++) {
+            String name = rs.getMetaData().getColumnLabel(i);
+            Object value = rs.getObject(i);
+            if (value instanceof Timestamp timestamp) {
+                value = timestamp.toLocalDateTime();
+            }
+            row.put(name, value);
+        }
+        return row;
+    }
+
+    private List<TaskFlowDetail.TaskFlowAsset> listTaskAssets(String taskId) {
+        List<TaskFlowDetail.TaskFlowAsset> assets = new ArrayList<>();
+        String prefix = minioPrefix(taskId);
+        Iterable<Result<Item>> objects = minioClient.listObjects(
+                ListObjectsArgs.builder()
+                        .bucket(minioBucket)
+                        .prefix(prefix)
+                        .recursive(true)
+                        .build()
+        );
+        try {
+            for (Result<Item> result : objects) {
+                Item item = result.get();
+                assets.add(new TaskFlowDetail.TaskFlowAsset(
+                        objectDisplayName(item.objectName()),
+                        stageFromObject(item.objectName()),
+                        kindForName(item.objectName()),
+                        publicObjectUrl(item.objectName()),
+                        item.objectName(),
+                        item.size(),
+                        item.lastModified() == null ? null : LocalDateTime.ofInstant(item.lastModified().toInstant(), ZoneId.systemDefault())
+                ));
+            }
+        } catch (Exception exc) {
+            assets.add(new TaskFlowDetail.TaskFlowAsset(
+                    "MinIO 列表失败",
+                    "",
+                    "error",
+                    "",
+                    prefix,
+                    null,
+                    null
+            ));
+        }
+        return assets;
+    }
+
+    private TaskFlowDetail.TaskFlowAsset assetFor(
+            String fieldName,
+            String stageKey,
+            Object value,
+            List<TaskFlowDetail.TaskFlowAsset> minioObjects
+    ) {
+        String text = stringValue(value);
+        if (text.isBlank()) {
+            return null;
+        }
+        String objectName = objectNameFromRef(text);
+        if (objectName != null) {
+            for (TaskFlowDetail.TaskFlowAsset asset : minioObjects) {
+                if (objectName.equals(asset.objectName())) {
+                    return new TaskFlowDetail.TaskFlowAsset(
+                            fieldName,
+                            stageKey,
+                            kindForField(fieldName, asset.url()),
+                            text.startsWith("http://") || text.startsWith("https://") ? text : asset.url(),
+                            objectName,
+                            asset.size(),
+                            asset.lastModified()
+                    );
+                }
+            }
+            String url = text.startsWith("http://") || text.startsWith("https://") ? text : publicObjectUrl(objectName);
+            return new TaskFlowDetail.TaskFlowAsset(fieldName, stageKey, kindForField(fieldName, url), url, objectName, null, null);
+        }
+        if (text.startsWith("http://") || text.startsWith("https://")) {
+            return new TaskFlowDetail.TaskFlowAsset(fieldName, stageKey, kindForField(fieldName, text), text, null, null, null);
+        }
+        return null;
+    }
+
+    private Object firstPresent(String name, Map<String, Object>... rows) {
+        for (Map<String, Object> row : rows) {
+            if (row.containsKey(name) && !isBlankValue(row.get(name))) {
+                return row.get(name);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isBlankValue(Object value) {
+        return value == null || (value instanceof String text && text.isBlank());
+    }
+
+    private static LocalDateTime localDateTime(Object value) {
+        if (value instanceof LocalDateTime localDateTime) {
+            return localDateTime;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toLocalDateTime();
+        }
+        return null;
+    }
+
+    private static String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private String publicObjectUrl(String objectName) {
+        String endpoint = minioEndpoint.replaceFirst("/+$", "");
+        return endpoint + "/" + minioBucket + "/" + objectName.replaceFirst("^/+", "");
+    }
+
+    private String objectNameFromRef(String ref) {
+        String value = text(ref);
+        if (value.isBlank() || value.startsWith("db://")) {
+            return null;
+        }
+        if (value.startsWith("s3://")) {
+            String withoutScheme = value.substring("s3://".length());
+            int slash = withoutScheme.indexOf('/');
+            if (slash > 0) {
+                String bucket = withoutScheme.substring(0, slash);
+                if (bucket.equals(minioBucket)) {
+                    return withoutScheme.substring(slash + 1);
+                }
+            }
+            return null;
+        }
+        if (value.startsWith(minioBucket + "/")) {
+            return value.substring(minioBucket.length() + 1);
+        }
+        if (value.matches("^[^:/]+/.+")) {
+            return value.replaceFirst("^/+", "");
+        }
+        if (value.startsWith("http://") || value.startsWith("https://")) {
+            try {
+                String path = URI.create(value).getPath();
+                String marker = "/minio/" + minioBucket + "/";
+                int markerIndex = path.indexOf(marker);
+                if (markerIndex >= 0) {
+                    return path.substring(markerIndex + marker.length());
+                }
+                String bucketPrefix = "/" + minioBucket + "/";
+                int bucketIndex = path.indexOf(bucketPrefix);
+                if (bucketIndex >= 0) {
+                    return path.substring(bucketIndex + bucketPrefix.length());
+                }
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private static String stageFromObject(String objectName) {
+        String[] parts = objectName.split("/");
+        return parts.length >= 2 ? parts[1] : "";
+    }
+
+    private static String objectDisplayName(String objectName) {
+        int slash = objectName.lastIndexOf('/');
+        return slash >= 0 ? objectName.substring(slash + 1) : objectName;
+    }
+
+    private static String kindForName(String name) {
+        String lower = text(name).toLowerCase();
+        if (lower.matches(".*\\.(mp4|mov|m4v|webm)$")) {
+            return "video";
+        }
+        if (lower.matches(".*\\.(wav|mp3|m4a|aac|flac|ogg|webm)$")) {
+            return "audio";
+        }
+        if (lower.matches(".*\\.(png|jpg|jpeg|webp|gif)$")) {
+            return "image";
+        }
+        if (lower.matches(".*\\.(json)$") || lower.startsWith("db://")) {
+            return "json";
+        }
+        if (lower.endsWith(".srt") || lower.endsWith(".vtt") || lower.endsWith(".txt")) {
+            return "text";
+        }
+        return "file";
+    }
+
+    private static String kindForField(String fieldName, String name) {
+        String lowerField = text(fieldName).toLowerCase();
+        if (lowerField.contains("audio") || lowerField.contains("wav")) {
+            return "audio";
+        }
+        if (lowerField.contains("video")) {
+            return "video";
+        }
+        if (lowerField.contains("thumbnail") || lowerField.contains("cover")) {
+            return "image";
+        }
+        return kindForName(name);
     }
 
     @Transactional
