@@ -1,6 +1,7 @@
 package com.youbi.monitor;
 
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -41,6 +42,21 @@ public class MonitorController {
     public MonitorService.TaskRestartResult restart(@PathVariable String taskId) {
         try {
             MonitorService.TaskRestartResult result = monitorService.restartTask(taskId);
+            if (result == null) {
+                throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
+            }
+            return result;
+        } catch (IllegalStateException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        } catch (IOException exc) {
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, exc.getMessage(), exc);
+        }
+    }
+
+    @DeleteMapping("/api/video-tasks/{taskId}")
+    public MonitorService.TaskDeleteResult delete(@PathVariable String taskId) {
+        try {
+            MonitorService.TaskDeleteResult result = monitorService.deleteTask(taskId);
             if (result == null) {
                 throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
             }

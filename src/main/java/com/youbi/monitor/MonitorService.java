@@ -262,6 +262,25 @@ public class MonitorService {
         return new TaskRestartResult("ready", deletedObjects);
     }
 
+    @Transactional
+    public TaskDeleteResult deleteTask(String taskId) throws IOException {
+        List<String> statuses = jdbcTemplate.queryForList(
+                "SELECT status FROM yd_task WHERE id = ?",
+                String.class,
+                taskId
+        );
+        if (statuses.isEmpty()) {
+            return null;
+        }
+        if ("running".equals(statuses.get(0)) || hasRunningStage(taskId)) {
+            throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before deleting.");
+        }
+
+        int deletedObjects = deleteTaskObjects(taskId);
+        int deletedRows = deleteTaskRows(taskId);
+        return new TaskDeleteResult("deleted", deletedRows, deletedObjects);
+    }
+
     private RetryStage findFailedStage(String taskId) {
         for (RetryStage stage : RETRY_STAGES) {
             Integer count = jdbcTemplate.queryForObject(
@@ -432,6 +451,31 @@ public class MonitorService {
                     `operator` = NULL
                 WHERE id = ?
                 """, taskId);
+    }
+
+    private int deleteTaskRows(String taskId) {
+        int deleted = 0;
+        for (String table : taskScopedTables()) {
+            deleted += jdbcTemplate.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
+        }
+        deleted += jdbcTemplate.update("DELETE FROM yd_task WHERE id = ?", taskId);
+        return deleted;
+    }
+
+    private List<String> taskScopedTables() {
+        return jdbcTemplate.queryForList("""
+                SELECT TABLE_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND COLUMN_NAME = 'task_id'
+                  AND TABLE_NAME LIKE 'yd\\_%'
+                ORDER BY CASE
+                    WHEN TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment', 'yd_asr_result') THEN 0
+                    WHEN TABLE_NAME = 'yd_downloader_submission' THEN 2
+                    ELSE 1
+                  END,
+                  TABLE_NAME
+                """, String.class);
     }
 
     private void resetVideoInfo(String taskId) {
@@ -614,6 +658,9 @@ public class MonitorService {
     }
 
     public record TaskRestartResult(String status, int deletedMinioObjects) {
+    }
+
+    public record TaskDeleteResult(String status, int deletedDatabaseRows, int deletedMinioObjects) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
