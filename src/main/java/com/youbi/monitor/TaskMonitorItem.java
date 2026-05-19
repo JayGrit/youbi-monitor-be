@@ -7,6 +7,8 @@ public record TaskMonitorItem(
         String taskId,
         String title,
         String sourceUrl,
+        String sourceWebpageUrl,
+        Double sourceDurationSeconds,
         String status,
         String currentStage,
         LocalDateTime createdAt,

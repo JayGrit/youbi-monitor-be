@@ -99,7 +99,7 @@ public class MonitorService {
             "uploader", List.of("final_video_url", "upload_title", "upload_desc", "upload_tag", "upload_cover_url")
     );
     private static final Map<String, List<String>> STAGE_OUTPUT_FIELDS = Map.of(
-            "downloader", List.of("title", "source_description", "source_uploader", "source_webpage_url", "source_thumbnail_url", "metadata_url", "video_source_url", "audio_source_url"),
+            "downloader", List.of("title", "source_duration_seconds", "source_description", "source_uploader", "source_webpage_url", "source_thumbnail_url", "metadata_url", "video_source_url", "audio_source_url"),
             "demucs", List.of("audio_vocals_url", "audio_bgm_url"),
             "whisper", List.of("asr_json_path", "asr_fixed_json_path"),
             "translator", List.of("translation_json_path", "target_language"),
@@ -113,6 +113,8 @@ public class MonitorService {
               t.id,
               COALESCE(NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
               t.source_url,
+              vi.source_webpage_url,
+              vi.source_duration_seconds,
               t.status,
               t.current_stage,
               t.created_at,
@@ -170,6 +172,7 @@ public class MonitorService {
             LEFT JOIN yd_speaker sp ON sp.task_id = t.id
             LEFT JOIN yd_combiner m ON m.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
+            LEFT JOIN yd_video_info vi ON vi.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
               FROM yd_asr_segment
@@ -248,6 +251,7 @@ public class MonitorService {
                 .build();
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         ensureUploaderMonitorColumns();
+        ensureVideoInfoMonitorColumns();
     }
 
     public MonitorResponse listTasks(int limit) {
@@ -1056,6 +1060,13 @@ public class MonitorService {
         ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
     }
 
+    private void ensureVideoInfoMonitorColumns() {
+        if (!tableExists("yd_video_info")) {
+            return;
+        }
+        ensureColumn("yd_video_info", "source_duration_seconds", "DOUBLE NULL");
+    }
+
     private boolean tableExists(String table) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
@@ -1175,6 +1186,8 @@ public class MonitorService {
                     rs.getString("id"),
                     rs.getString("title"),
                     rs.getString("source_url"),
+                    rs.getString("source_webpage_url"),
+                    doubleOrNull(rs, "source_duration_seconds"),
                     rs.getString("status"),
                     rs.getString("current_stage"),
                     MonitorService.timestamp(rs, "created_at"),
@@ -1191,6 +1204,11 @@ public class MonitorService {
         private static String stringOrDefault(ResultSet rs, String column, String defaultValue) throws SQLException {
             String value = rs.getString(column);
             return value == null || value.isBlank() ? defaultValue : value;
+        }
+
+        private static Double doubleOrNull(ResultSet rs, String column) throws SQLException {
+            double value = rs.getDouble(column);
+            return rs.wasNull() ? null : value;
         }
 
         private static Integer countValue(ResultSet rs, String stageKey, String suffix) throws SQLException {
