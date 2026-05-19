@@ -62,6 +62,18 @@ public class MonitorController {
         }
     }
 
+    @PostMapping("/api/video-tasks/{taskId}/stop")
+    public MonitorService.TaskStopResult stop(@PathVariable String taskId) {
+        MonitorService.TaskStopResult result = monitorService.stopTask(taskId);
+        if (result == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
+        }
+        if (!result.stoppedTask()) {
+            throw new ResponseStatusException(CONFLICT, "Task is not running.");
+        }
+        return result;
+    }
+
     @DeleteMapping("/api/video-tasks/{taskId}")
     public MonitorService.TaskDeleteResult delete(@PathVariable String taskId) {
         try {

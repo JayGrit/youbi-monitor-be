@@ -666,6 +666,80 @@ public class MonitorService {
         return new TaskDeleteResult("deleted", deletedRows, deletedObjects);
     }
 
+    @Transactional
+    public TaskStopResult stopTask(String taskId) {
+        List<String> statuses = jdbcTemplate.queryForList(
+                "SELECT status FROM yd_task WHERE id = ?",
+                String.class,
+                taskId
+        );
+        if (statuses.isEmpty()) {
+            return null;
+        }
+
+        String message = "手动停止任务";
+        int stoppedStages = 0;
+        String stoppedStage = "";
+        for (RetryStage stage : RETRY_STAGES) {
+            if (!tableExists(stage.table())) {
+                continue;
+            }
+            ensureOperatorColumn(stage.table());
+            int updated = jdbcTemplate.update("""
+                    UPDATE %s
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        error_message = ?,
+                        `operator` = NULL
+                    WHERE task_id = ? AND status = 'running'
+                    """.formatted(quotedIdentifier(stage.table())), message, taskId);
+            if (updated > 0) {
+                stoppedStages += updated;
+                if (stoppedStage.isBlank()) {
+                    stoppedStage = stage.key();
+                }
+            }
+        }
+
+        if (tableExists("yd_translator_api_task")) {
+            ensureOperatorColumn("yd_translator_api_task");
+            stoppedStages += jdbcTemplate.update("""
+                    UPDATE yd_translator_api_task
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        error_message = ?,
+                        `operator` = NULL
+                    WHERE task_id = ? AND status IN ('pending', 'running')
+                    """, message, taskId);
+        }
+        if (tableExists("yd_speaker_segment")) {
+            ensureOperatorColumn("yd_speaker_segment");
+            stoppedStages += jdbcTemplate.update("""
+                    UPDATE yd_speaker_segment
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        error_message = ?,
+                        `operator` = NULL
+                    WHERE task_id = ? AND status IN ('ready', 'running')
+                    """, message, taskId);
+        }
+
+        if (stoppedStages == 0 && !"running".equals(statuses.get(0))) {
+            return new TaskStopResult(statuses.get(0), 0, false);
+        }
+
+        jdbcTemplate.update("""
+                UPDATE yd_task
+                SET status = 'failed',
+                    current_stage = COALESCE(NULLIF(?, ''), current_stage),
+                    completed_at = NOW(),
+                    error_message = ?,
+                    `operator` = NULL
+                WHERE id = ?
+                """, stoppedStage, message, taskId);
+        return new TaskStopResult("failed", stoppedStages, true);
+    }
+
     private RetryStage findFailedStage(String taskId) {
         for (RetryStage stage : RETRY_STAGES) {
             Integer count = jdbcTemplate.queryForObject(
@@ -1043,6 +1117,9 @@ public class MonitorService {
     }
 
     public record TaskRestartResult(String status, int deletedMinioObjects) {
+    }
+
+    public record TaskStopResult(String status, int stoppedStages, boolean stoppedTask) {
     }
 
     public record TaskDeleteResult(String status, int deletedDatabaseRows, int deletedMinioObjects) {
