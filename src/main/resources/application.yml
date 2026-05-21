@@ -23,3 +23,7 @@ youbi:
     secret-key: ${YDBI_MINIO_SECRET_KEY:minioadmin}
     bucket: ${YDBI_MINIO_BUCKET:ydbi}
     work-dir: ${YDBI_MONITOR_UPLOAD_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/uploads}
+  alidrive:
+    account-key: ${YDBI_ALIDRIVE_ACCOUNT_KEY:default}
+    refresh-token: ${YDBI_ALIDRIVE_REFRESH_TOKEN:}
+    work-dir: ${YDBI_ALIDRIVE_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/alidrive}
