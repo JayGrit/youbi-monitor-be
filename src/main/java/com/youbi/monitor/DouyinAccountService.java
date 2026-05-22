@@ -142,22 +142,28 @@ public class DouyinAccountService {
         }
 
         try {
-            if (!isLoginCompleted(session.page())) {
+            String storageState = session.context().storageState();
+            if (!isLoginCompleted(session.page(), storageState)) {
                 if (isQrExpired(session.page())) {
                     closeSession(authCode);
                     return new DouyinQrPollResult(false, "expired", "二维码已过期，请重新扫码", emptyStatus(session.accountKey()));
                 }
+                log.info("Douyin QR login waiting accountKey={} authCode={} url={} hasLoginCookie={}",
+                        session.accountKey(), authCode, session.page().url(), hasDouyinLoginCookie(storageState));
                 return new DouyinQrPollResult(false, "waiting", "等待扫码确认", emptyStatus(session.accountKey()));
             }
 
             session.page().waitForTimeout(2000);
-            String storageState = session.context().storageState();
+            storageState = session.context().storageState();
             String saveKey = AUTO_ACCOUNT_KEY.equals(session.accountKey()) ? automaticAccountKey(storageState) : session.accountKey();
             saveStorageState(saveKey, storageState);
             DouyinAccountStatus status = status(saveKey);
             closeSession(authCode);
+            log.info("Douyin QR login saved accountKey={} authCode={} savedKey={} bytes={}",
+                    session.accountKey(), authCode, saveKey, storageState.getBytes(StandardCharsets.UTF_8).length);
             return new DouyinQrPollResult(true, "success", "登录成功", status);
         } catch (Exception exception) {
+            log.warn("Cannot poll Douyin QR login accountKey={} authCode={}: {}", session.accountKey(), authCode, exception.getMessage());
             throw new IOException("Cannot poll Douyin qrcode: " + exception.getMessage(), exception);
         }
     }
@@ -328,10 +334,14 @@ public class DouyinAccountService {
         return value == null ? "" : value.toString();
     }
 
-    private boolean isLoginCompleted(Page page) {
-        if (!page.url().startsWith(HOME_URL_PREFIX)) {
-            return false;
+    private boolean isLoginCompleted(Page page, String storageState) {
+        if (page.url().startsWith(HOME_URL_PREFIX)) {
+            return true;
         }
+        return hasDouyinLoginCookie(storageState) && !hasVisibleLoginMarker(page);
+    }
+
+    private boolean hasVisibleLoginMarker(Page page) {
         for (Locator marker : List.of(
                 page.getByText("扫码登录", new Page.GetByTextOptions().setExact(true)).first(),
                 page.getByText("手机号登录", new Page.GetByTextOptions().setExact(true)).first(),
@@ -348,7 +358,25 @@ public class DouyinAccountService {
             } catch (Exception ignored) {
             }
         }
-        return true;
+        return false;
+    }
+
+    private boolean hasDouyinLoginCookie(String storageState) {
+        try {
+            JsonNode root = objectMapper.readTree(storageState);
+            for (JsonNode cookie : root.path("cookies")) {
+                String name = cookie.path("name").asText("");
+                String value = cookie.path("value").asText("");
+                if (value.isBlank()) {
+                    continue;
+                }
+                if (List.of("sessionid", "sessionid_ss", "sid_tt", "uid_tt", "sso_uid_tt", "passport_assist_user").contains(name)) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     private boolean isQrExpired(Page page) {
