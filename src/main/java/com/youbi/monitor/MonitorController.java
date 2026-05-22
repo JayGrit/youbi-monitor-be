@@ -3,8 +3,10 @@ package com.youbi.monitor;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -37,6 +39,23 @@ public class MonitorController {
             throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
         }
         return detail;
+    }
+
+    @PatchMapping("/api/video-tasks/{taskId}/speaker-segments/{segmentId}/dst-text")
+    public MonitorService.SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(
+            @PathVariable String taskId,
+            @PathVariable long segmentId,
+            @RequestBody SpeakerSegmentTextUpdateRequest request
+    ) {
+        MonitorService.SpeakerSegmentTextUpdateResult result = monitorService.updateSpeakerSegmentDstText(
+                taskId,
+                segmentId,
+                request == null ? null : request.dstText()
+        );
+        if (result == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Speaker segment does not exist.");
+        }
+        return result;
     }
 
     @PostMapping("/api/video-tasks/{taskId}/ready")

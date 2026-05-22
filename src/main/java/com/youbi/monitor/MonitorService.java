@@ -277,6 +277,32 @@ public class MonitorService {
         return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
     }
 
+    public SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(String taskId, long segmentId, String dstText) {
+        String normalizedText = dstText == null ? "" : dstText;
+        int updated = jdbcTemplate.update("""
+                UPDATE yd_speaker_segment
+                SET dst_text = ?
+                WHERE task_id = ? AND id = ?
+                """, normalizedText, taskId, segmentId);
+        if (updated == 0) {
+            return null;
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT *
+                FROM yd_speaker_segment
+                WHERE task_id = ? AND id = ?
+                LIMIT 1
+                """, taskId, segmentId);
+        Map<String, Object> row = rows.isEmpty() ? Map.of() : rows.get(0);
+        return new SpeakerSegmentTextUpdateResult(
+                segmentId,
+                taskId,
+                row.get("item_index") instanceof Number itemIndex ? itemIndex.intValue() : null,
+                stringValue(row.get("dst_text")),
+                localDateTime(row.get("updated_at"))
+        );
+    }
+
     private TaskFlowDetail.TaskFlowStage flowStage(
             String taskId,
             StageDefinition definition,
@@ -1134,6 +1160,15 @@ public class MonitorService {
     }
 
     public record TaskDeleteResult(String status, int deletedDatabaseRows, int deletedMinioObjects) {
+    }
+
+    public record SpeakerSegmentTextUpdateResult(
+            long id,
+            String taskId,
+            Integer itemIndex,
+            String dstText,
+            LocalDateTime updatedAt
+    ) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
