@@ -272,20 +272,43 @@ public class DouyinAccountService {
                       rect.bottom > 0 && rect.right > 0 &&
                       rect.top < window.innerHeight && rect.left < window.innerWidth;
                   };
+                  const squareScore = (rect) => {
+                    const ratio = rect.width / rect.height;
+                    if (ratio < 0.82 || ratio > 1.22) return -1;
+                    return Math.min(rect.width, rect.height);
+                  };
                   const imgs = Array.from(document.querySelectorAll('img'));
                   let best = null;
                   let bestScore = -1;
                   imgs.forEach((img) => {
                     if (!visible(img)) return;
                     const rect = img.getBoundingClientRect();
+                    const baseScore = squareScore(rect);
+                    if (baseScore < 0) return;
                     const src = img.getAttribute('src') || '';
-                    let score = Math.min(rect.width, rect.height);
-                    if (src.startsWith('data:image')) score += 1000;
+                    let score = baseScore;
+                    if (src.startsWith('data:image/png') || src.startsWith('data:image/jpeg') || src.startsWith('data:image/webp')) score += 2000;
+                    if (src.startsWith('data:image/svg')) score -= 500;
                     if ((img.getAttribute('aria-label') || '').includes('二维码')) score += 500;
+                    if ((img.alt || '').includes('二维码')) score += 500;
                     if (score > bestScore) {
                       best = src;
                       bestScore = score;
                     }
+                  });
+                  Array.from(document.querySelectorAll('canvas')).forEach((canvas) => {
+                    if (!visible(canvas)) return;
+                    const rect = canvas.getBoundingClientRect();
+                    const baseScore = squareScore(rect);
+                    if (baseScore < 0) return;
+                    try {
+                      const src = canvas.toDataURL('image/png');
+                      const score = baseScore + 2200;
+                      if (score > bestScore) {
+                        best = src;
+                        bestScore = score;
+                      }
+                    } catch (_) {}
                   });
                   return best || '';
                 }
