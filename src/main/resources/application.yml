@@ -30,3 +30,6 @@ youbi:
   xiaohongshu:
     headless: ${YDBI_XHS_HEADLESS:true}
     browser-channel: ${YDBI_XHS_BROWSER_CHANNEL:chrome}
+  douyin:
+    headless: ${YDBI_DOUYIN_HEADLESS:true}
+    browser-channel: ${YDBI_DOUYIN_BROWSER_CHANNEL:chrome}
