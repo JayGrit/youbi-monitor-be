@@ -262,16 +262,16 @@ public class XiaohongshuUploadService {
                     const style = window.getComputedStyle(el);
                     return !!(rect.width && rect.height) && style.visibility !== 'hidden' && style.display !== 'none';
                   };
-                  const clickElement = (el, method) => {
+                  const clickElement = (el, method, point) => {
                     el.scrollIntoView({block: 'center', inline: 'center'});
                     const rect = el.getBoundingClientRect();
-                    const x = rect.left + rect.width / 2;
-                    const y = rect.top + rect.height / 2;
+                    const x = point?.x ?? rect.left + rect.width / 2;
+                    const y = point?.y ?? rect.top + rect.height / 2;
                     const target = document.elementFromPoint(x, y) || el;
                     for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
                       target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window, clientX: x, clientY: y}));
                     }
-                    return `${method}:target=${target.tagName}.${target.className || ''}:rect=${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`;
+                    return `${method}:target=${target.tagName}.${target.className || ''}:point=${Math.round(x)},${Math.round(y)}:rect=${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`;
                   };
                   const host = document.querySelector('xhs-publish-btn[submit-disabled="false"]');
                   if (host && host.shadowRoot) {
@@ -282,7 +282,8 @@ public class XiaohongshuUploadService {
                     if (buttons.length) return clickElement(buttons[buttons.length - 1], 'shadow-last-button');
                   }
                   if (host && visible(host)) {
-                    return clickElement(host, 'publish-component-host');
+                    const rect = host.getBoundingClientRect();
+                    return clickElement(host, 'publish-component-submit-area', {x: rect.right - 220, y: rect.top + rect.height / 2});
                   }
                   const textNodes = Array.from(document.querySelectorAll('*'))
                     .filter((el) => visible(el) && (el.innerText || el.textContent || '').trim() === buttonText);
