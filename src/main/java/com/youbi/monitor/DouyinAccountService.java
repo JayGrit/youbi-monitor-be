@@ -8,6 +8,8 @@ import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.AriaRole;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -24,6 +26,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class DouyinAccountService {
+    private static final Logger log = LoggerFactory.getLogger(DouyinAccountService.class);
+
     static final String DEFAULT_ACCOUNT_KEY = "default";
     static final String AUTO_ACCOUNT_KEY = "_auto";
     static final String LOGIN_URL = "https://creator.douyin.com/";
@@ -104,18 +108,25 @@ public class DouyinAccountService {
     public DouyinQrCode createQrCode(String accountKey) throws IOException {
         String normalized = normalizeRequestedAccountKey(accountKey);
         String authCode = UUID.randomUUID().toString();
-        closeSession(authCode);
+        closeSessionsForAccount(normalized);
 
+        Playwright playwright = null;
+        Browser browser = null;
+        BrowserContext context = null;
         try {
-            Playwright playwright = Playwright.create();
-            Browser browser = playwright.chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
-            BrowserContext context = browser.newContext();
+            log.info("Creating Douyin QR login session accountKey={} authCode={}", normalized, authCode);
+            playwright = Playwright.create();
+            browser = playwright.chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
+            context = browser.newContext();
             Page page = context.newPage();
             page.navigate(LOGIN_URL);
             String imageDataUrl = extractQrImage(page);
             loginSessions.put(authCode, new LoginSession(normalized, authCode, playwright, browser, context, page, Instant.now().plusSeconds(180)));
+            log.info("Created Douyin QR login session accountKey={} authCode={} imageBytes={}", normalized, authCode, imageDataUrl.length());
             return new DouyinQrCode(normalized, authCode, imageDataUrl, Instant.now().getEpochSecond() + 180);
         } catch (Exception exception) {
+            closeQuietly(context, browser, playwright);
+            log.warn("Cannot create Douyin QR login session accountKey={} authCode={}: {}", normalized, authCode, exception.getMessage());
             throw new IOException("Cannot create Douyin qrcode: " + exception.getMessage(), exception);
         }
     }
@@ -483,16 +494,34 @@ public class DouyinAccountService {
         if (session == null) {
             return;
         }
+        closeQuietly(session.context(), session.browser(), session.playwright());
+    }
+
+    private void closeSessionsForAccount(String accountKey) {
+        loginSessions.values().stream()
+                .filter(session -> session.accountKey().equals(accountKey))
+                .map(LoginSession::authCode)
+                .toList()
+                .forEach(this::closeSession);
+    }
+
+    private void closeQuietly(BrowserContext context, Browser browser, Playwright playwright) {
         try {
-            session.context().close();
+            if (context != null) {
+                context.close();
+            }
         } catch (Exception ignored) {
         }
         try {
-            session.browser().close();
+            if (browser != null) {
+                browser.close();
+            }
         } catch (Exception ignored) {
         }
         try {
-            session.playwright().close();
+            if (playwright != null) {
+                playwright.close();
+            }
         } catch (Exception ignored) {
         }
     }
