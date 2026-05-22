@@ -321,6 +321,7 @@ public class DouyinUploadService {
         while (System.currentTimeMillis() < deadline) {
             attempts += 1;
             try {
+                dismissBlockingDialog(page, taskId);
                 Locator publishButton = page.getByRole(com.microsoft.playwright.options.AriaRole.BUTTON,
                         new Page.GetByRoleOptions().setName("发布").setExact(true));
                 if (publishButton.count() > 0) {
@@ -332,6 +333,7 @@ public class DouyinUploadService {
             } catch (RuntimeException exception) {
                 last = exception;
                 handleAutoVideoCover(page, taskId);
+                dismissBlockingDialog(page, taskId);
                 if (attempts % 10 == 1) {
                     dumpDiagnostics(page, taskId, "publish-wait-" + attempts);
                     log.info("Douyin upload publish retry taskId={} attempt={} message={}", taskId, attempts, exception.getMessage());
@@ -341,6 +343,25 @@ public class DouyinUploadService {
         }
         dumpDiagnostics(page, taskId, "publish-timeout");
         throw last == null ? new RuntimeException("Timed out publishing Douyin video") : last;
+    }
+
+    private void dismissBlockingDialog(Page page, String taskId) {
+        try {
+            Locator modal = page.locator(".semi-modal-content:visible").last();
+            if (modal.count() == 0) {
+                return;
+            }
+            Locator primary = modal.locator("button:visible").last();
+            if (primary.count() == 0) {
+                return;
+            }
+            String text = primary.innerText(new Locator.InnerTextOptions().setTimeout(1000));
+            primary.click(new Locator.ClickOptions().setTimeout(3000));
+            log.info("Douyin upload dismissed modal taskId={} button={}", taskId, truncate(text, 50));
+            page.waitForTimeout(500);
+        } catch (Exception exception) {
+            log.debug("Douyin upload modal dismiss skipped taskId={} message={}", taskId, exception.getMessage());
+        }
     }
 
     private void handleAutoVideoCover(Page page, String taskId) {
