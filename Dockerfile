@@ -44,6 +44,7 @@ RUN apt-get update \
 COPY --from=builder /app/target/monitor-be-0.0.1-SNAPSHOT.jar app.jar
 ENV TZ=Asia/Shanghai
 ENV YDBI_XHS_BROWSER_CHANNEL=chrome
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV JAVA_OPTS="-Xmx512m -Xms256m -XX:+UseSerialGC"
 EXPOSE 8200
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
