@@ -212,22 +212,28 @@ public class XiaohongshuUploadService {
     }
 
     private void clickPublish(Page page, boolean scheduled, String taskId) {
-        long deadline = System.currentTimeMillis() + Duration.ofMinutes(3).toMillis();
+        long deadline = System.currentTimeMillis() + Duration.ofMinutes(30).toMillis();
         String buttonText = scheduled ? "定时发布" : "发布";
         RuntimeException last = null;
         int attempts = 0;
         while (System.currentTimeMillis() < deadline) {
             attempts += 1;
             try {
-                Locator buttons = page.locator("button:has-text('" + buttonText + "'):visible");
-                int count = buttons.count();
-                String buttonTexts = visibleButtonTexts(page);
-                log.info("XHS upload click publish taskId={} button={} attempt={} url={} visibleMatches={} visibleButtons={}",
-                        taskId, buttonText, attempts, page.url(), count, truncate(buttonTexts, 500));
-                if (count == 0) {
-                    throw new RuntimeException("No visible publish button. Visible buttons: " + buttonTexts);
+                PageState state = pageState(page, buttonText);
+                log.info("XHS upload publish wait taskId={} button={} attempt={} url={} uploading={} exactTextMatches={} visibleButtons={} exactTextElements={}",
+                        taskId, buttonText, attempts, page.url(), state.uploading(), state.exactTextMatches(),
+                        truncate(state.visibleButtons(), 500), truncate(state.exactTextElements(), 500));
+                if (state.uploading()) {
+                    page.waitForTimeout(2000);
+                    continue;
                 }
-                buttons.last().click(new Locator.ClickOptions().setTimeout(5000));
+                Locator button = page.locator("button:has-text('" + buttonText + "'):visible");
+                if (button.count() > 0) {
+                    button.last().click(new Locator.ClickOptions().setTimeout(5000));
+                } else {
+                    Locator textButton = page.locator("text=\"" + buttonText + "\"").last();
+                    textButton.click(new Locator.ClickOptions().setTimeout(5000));
+                }
                 page.waitForURL(SUCCESS_URL_PATTERN, new Page.WaitForURLOptions().setTimeout(5000));
                 log.info("XHS upload publish success page reached taskId={} url={}", taskId, page.url());
                 return;
@@ -236,10 +242,32 @@ public class XiaohongshuUploadService {
                 if (attempts % 10 == 1) {
                     log.warn("XHS upload publish retry taskId={} attempt={} message={}", taskId, attempts, exception.getMessage());
                 }
-                page.waitForTimeout(1000);
+                page.waitForTimeout(2000);
             }
         }
         throw last == null ? new RuntimeException("Timed out publishing Xiaohongshu video") : last;
+    }
+
+    private PageState pageState(Page page, String buttonText) {
+        String body = "";
+        try {
+            body = page.locator("body").innerText(new Locator.InnerTextOptions().setTimeout(3000));
+        } catch (Exception ignored) {
+        }
+        return new PageState(
+                containsAny(body, "视频上传中", "上传中", "智能推荐封面生成中"),
+                visibleButtonTexts(page),
+                exactTextElements(page, buttonText),
+                exactTextMatchCount(page, buttonText)
+        );
+    }
+
+    private int exactTextMatchCount(Page page, String buttonText) {
+        try {
+            return page.locator("text=\"" + buttonText + "\"").count();
+        } catch (Exception ignored) {
+            return 0;
+        }
     }
 
     private String visibleButtonTexts(Page page) {
@@ -250,6 +278,22 @@ public class XiaohongshuUploadService {
                     .toList());
         } catch (Exception exception) {
             return "cannot-read-buttons: " + exception.getMessage();
+        }
+    }
+
+    private String exactTextElements(Page page, String buttonText) {
+        try {
+            return page.locator("text=\"" + buttonText + "\"").evaluateAll(
+                    """
+                    (els) => els.map((el, i) => {
+                      const rect = el.getBoundingClientRect();
+                      const style = window.getComputedStyle(el);
+                      return `${i}:${el.tagName}.${el.className || ''}:visible=${!!(rect.width && rect.height) && style.visibility !== 'hidden' && style.display !== 'none'}:rect=${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}:text=${(el.innerText || el.textContent || '').trim()}`;
+                    }).join(' | ')
+                    """
+            ).toString();
+        } catch (Exception exception) {
+            return "cannot-read-exact-text: " + exception.getMessage();
         }
     }
 
@@ -449,5 +493,8 @@ public class XiaohongshuUploadService {
     }
 
     private record ResolvedFile(Path path, boolean temporary) {
+    }
+
+    private record PageState(boolean uploading, String visibleButtons, String exactTextElements, int exactTextMatches) {
     }
 }
