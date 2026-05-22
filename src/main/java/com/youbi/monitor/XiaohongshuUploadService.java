@@ -223,6 +223,9 @@ public class XiaohongshuUploadService {
                 log.info("XHS upload publish wait taskId={} button={} attempt={} url={} uploading={} exactTextMatches={} visibleButtons={} exactTextElements={}",
                         taskId, buttonText, attempts, page.url(), state.uploading(), state.exactTextMatches(),
                         truncate(state.visibleButtons(), 500), truncate(state.exactTextElements(), 500));
+                if (attempts == 1 || attempts % 30 == 0) {
+                    dumpDiagnostics(page, taskId, "publish-wait-" + attempts);
+                }
                 if (state.uploading()) {
                     page.waitForTimeout(2000);
                     continue;
@@ -245,7 +248,22 @@ public class XiaohongshuUploadService {
                 page.waitForTimeout(2000);
             }
         }
+        dumpDiagnostics(page, taskId, "publish-timeout");
         throw last == null ? new RuntimeException("Timed out publishing Xiaohongshu video") : last;
+    }
+
+    private void dumpDiagnostics(Page page, String taskId, String label) {
+        try {
+            Path dir = uploadWorkDir.resolve("diagnostics").resolve(safeSegment(taskId));
+            Files.createDirectories(dir);
+            Path screenshot = dir.resolve(label + ".png");
+            Path html = dir.resolve(label + ".html");
+            page.screenshot(new Page.ScreenshotOptions().setPath(screenshot).setFullPage(true).setTimeout(10000));
+            Files.writeString(html, page.content(), StandardCharsets.UTF_8);
+            log.info("XHS upload diagnostics dumped taskId={} label={} screenshot={} html={}", taskId, label, screenshot, html);
+        } catch (Exception exception) {
+            log.warn("XHS upload diagnostics dump failed taskId={} label={} message={}", taskId, label, exception.getMessage());
+        }
     }
 
     private PageState pageState(Page page, String buttonText) {
