@@ -238,30 +238,29 @@ public class DouyinAccountService {
         } catch (Exception ignored) {
         }
 
-        Locator qrcode = waitForVisibleQrImage(page);
-        String src = qrcode.getAttribute("src");
+        String src = waitForVisibleQrImageSrc(page);
         if (src != null && !src.isBlank()) {
             return src;
         }
+        Locator qrcode = page.locator("img").first();
+        qrcode.waitFor(new Locator.WaitForOptions().setTimeout(3000));
         byte[] screenshot = qrcode.screenshot();
         return "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(screenshot);
     }
 
-    private Locator waitForVisibleQrImage(Page page) {
+    private String waitForVisibleQrImageSrc(Page page) {
         long deadline = System.currentTimeMillis() + 30000;
         while (System.currentTimeMillis() < deadline) {
-            int index = visibleQrImageIndex(page);
-            if (index >= 0) {
-                Locator image = page.locator("img").nth(index);
-                image.waitFor(new Locator.WaitForOptions().setTimeout(3000));
-                return image;
+            String src = visibleQrImageSrc(page);
+            if (!src.isBlank()) {
+                return src;
             }
             page.waitForTimeout(500);
         }
         throw new com.microsoft.playwright.TimeoutError("Timed out waiting for visible Douyin QR image");
     }
 
-    private int visibleQrImageIndex(Page page) {
+    private String visibleQrImageSrc(Page page) {
         Object value = page.evaluate(
                 """
                 () => {
@@ -274,9 +273,9 @@ public class DouyinAccountService {
                       rect.top < window.innerHeight && rect.left < window.innerWidth;
                   };
                   const imgs = Array.from(document.querySelectorAll('img'));
-                  let best = -1;
+                  let best = null;
                   let bestScore = -1;
-                  imgs.forEach((img, index) => {
+                  imgs.forEach((img) => {
                     if (!visible(img)) return;
                     const rect = img.getBoundingClientRect();
                     const src = img.getAttribute('src') || '';
@@ -284,18 +283,15 @@ public class DouyinAccountService {
                     if (src.startsWith('data:image')) score += 1000;
                     if ((img.getAttribute('aria-label') || '').includes('二维码')) score += 500;
                     if (score > bestScore) {
-                      best = index;
+                      best = src;
                       bestScore = score;
                     }
                   });
-                  return best;
+                  return best || '';
                 }
                 """
         );
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        return -1;
+        return value == null ? "" : value.toString();
     }
 
     private boolean isLoginCompleted(Page page) {
