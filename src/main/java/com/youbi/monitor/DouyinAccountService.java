@@ -229,23 +229,73 @@ public class DouyinAccountService {
     }
 
     private String extractQrImage(Page page) {
-        Locator scanLoginTab = page.getByText("扫码登录", new Page.GetByTextOptions().setExact(true)).first();
+        Locator scanLoginTab = page.getByText("扫码登录").first();
         scanLoginTab.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        Locator qrcode = scanLoginTab
-                .locator("..")
-                .locator("xpath=following-sibling::div[1]")
-                .locator("img[aria-label='二维码']")
-                .first();
-        if (qrcode.count() == 0) {
-            qrcode = page.getByRole(AriaRole.IMG, new Page.GetByRoleOptions().setName("二维码")).first();
+        try {
+            if (scanLoginTab.isVisible()) {
+                scanLoginTab.click(new Locator.ClickOptions().setTimeout(3000));
+            }
+        } catch (Exception ignored) {
         }
-        qrcode.waitFor(new Locator.WaitForOptions().setTimeout(30000));
+
+        Locator qrcode = waitForVisibleQrImage(page);
         String src = qrcode.getAttribute("src");
         if (src != null && !src.isBlank()) {
             return src;
         }
         byte[] screenshot = qrcode.screenshot();
         return "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(screenshot);
+    }
+
+    private Locator waitForVisibleQrImage(Page page) {
+        long deadline = System.currentTimeMillis() + 30000;
+        while (System.currentTimeMillis() < deadline) {
+            int index = visibleQrImageIndex(page);
+            if (index >= 0) {
+                Locator image = page.locator("img").nth(index);
+                image.waitFor(new Locator.WaitForOptions().setTimeout(3000));
+                return image;
+            }
+            page.waitForTimeout(500);
+        }
+        throw new com.microsoft.playwright.TimeoutError("Timed out waiting for visible Douyin QR image");
+    }
+
+    private int visibleQrImageIndex(Page page) {
+        Object value = page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width >= 120 && rect.height >= 120 &&
+                      style.visibility !== 'hidden' && style.display !== 'none' &&
+                      rect.bottom > 0 && rect.right > 0 &&
+                      rect.top < window.innerHeight && rect.left < window.innerWidth;
+                  };
+                  const imgs = Array.from(document.querySelectorAll('img'));
+                  let best = -1;
+                  let bestScore = -1;
+                  imgs.forEach((img, index) => {
+                    if (!visible(img)) return;
+                    const rect = img.getBoundingClientRect();
+                    const src = img.getAttribute('src') || '';
+                    let score = Math.min(rect.width, rect.height);
+                    if (src.startsWith('data:image')) score += 1000;
+                    if ((img.getAttribute('aria-label') || '').includes('二维码')) score += 500;
+                    if (score > bestScore) {
+                      best = index;
+                      bestScore = score;
+                    }
+                  });
+                  return best;
+                }
+                """
+        );
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return -1;
     }
 
     private boolean isLoginCompleted(Page page) {
