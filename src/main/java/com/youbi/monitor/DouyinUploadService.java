@@ -84,7 +84,7 @@ public class DouyinUploadService {
             log.info("Douyin upload storage state loaded taskId={} accountKey={} bytes={}", taskId, accountKey, storageState.getBytes(StandardCharsets.UTF_8).length);
             try (Browser browser = accountService.launchBrowser()) {
                 log.info("Douyin upload browser launched taskId={} accountKey={}", taskId, accountKey);
-                BrowserContext context = browser.newContext(accountService.storageContextOptions(storageState));
+                BrowserContext context = accountService.newContext(browser, accountService.storageContextOptions(storageState));
                 try {
                     Page page = context.newPage();
                     uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);

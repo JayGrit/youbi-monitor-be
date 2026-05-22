@@ -35,6 +35,11 @@ public class DouyinAccountService {
     static final String PUBLISH_VIDEO_URL = "https://creator.douyin.com/creator-micro/content/upload";
 
     private static final String TABLE = "yd_douyin_account";
+    private static final String STEALTH_INIT_SCRIPT = """
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh'] });
+            window.chrome = window.chrome || { runtime: {} };
+            """;
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -117,11 +122,12 @@ public class DouyinAccountService {
             log.info("Creating Douyin QR login session accountKey={} authCode={}", normalized, authCode);
             playwright = Playwright.create();
             browser = playwright.chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
-            context = browser.newContext();
+            context = prepareContext(browser.newContext());
             Page page = context.newPage();
             page.navigate(LOGIN_URL);
+            String originalUrl = page.url();
             String imageDataUrl = extractQrImage(page);
-            loginSessions.put(authCode, new LoginSession(normalized, authCode, playwright, browser, context, page, Instant.now().plusSeconds(180)));
+            loginSessions.put(authCode, new LoginSession(normalized, authCode, playwright, browser, context, page, originalUrl, Instant.now().plusSeconds(180)));
             log.info("Created Douyin QR login session accountKey={} authCode={} imageBytes={}", normalized, authCode, imageDataUrl.length());
             return new DouyinQrCode(normalized, authCode, imageDataUrl, Instant.now().getEpochSecond() + 180);
         } catch (Exception exception) {
@@ -143,13 +149,13 @@ public class DouyinAccountService {
 
         try {
             String storageState = session.context().storageState();
-            if (!isLoginCompleted(session.page(), storageState)) {
+            if (!isLoginCompleted(session.page(), storageState, session.originalUrl())) {
                 if (isQrExpired(session.page())) {
                     closeSession(authCode);
                     return new DouyinQrPollResult(false, "expired", "二维码已过期，请重新扫码", emptyStatus(session.accountKey()));
                 }
-                log.info("Douyin QR login waiting accountKey={} authCode={} url={} hasLoginCookie={}",
-                        session.accountKey(), authCode, session.page().url(), hasDouyinLoginCookie(storageState));
+                log.info("Douyin QR login waiting accountKey={} authCode={} originalUrl={} url={} hasLoginCookie={}",
+                        session.accountKey(), authCode, session.originalUrl(), session.page().url(), hasDouyinLoginCookie(storageState));
                 return new DouyinQrPollResult(false, "waiting", "等待扫码确认", emptyStatus(session.accountKey()));
             }
 
@@ -158,6 +164,11 @@ public class DouyinAccountService {
             String saveKey = AUTO_ACCOUNT_KEY.equals(session.accountKey()) ? automaticAccountKey(storageState) : session.accountKey();
             saveStorageState(saveKey, storageState);
             DouyinAccountStatus status = status(saveKey);
+            if (!Boolean.TRUE.equals(status.valid())) {
+                log.warn("Douyin QR login storage invalid accountKey={} authCode={} savedKey={} url={}",
+                        session.accountKey(), authCode, saveKey, session.page().url());
+                return new DouyinQrPollResult(false, "cookie_invalid", "扫码流程结束，但 cookie 校验失败", status);
+            }
             closeSession(authCode);
             log.info("Douyin QR login saved accountKey={} authCode={} savedKey={} bytes={}",
                     session.accountKey(), authCode, saveKey, storageState.getBytes(StandardCharsets.UTF_8).length);
@@ -206,6 +217,14 @@ public class DouyinAccountService {
 
     Browser launchBrowser() {
         return PlaywrightHolder.playwright().chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
+    }
+
+    BrowserContext newContext(Browser browser) {
+        return prepareContext(browser.newContext());
+    }
+
+    BrowserContext newContext(Browser browser, Browser.NewContextOptions options) {
+        return prepareContext(browser.newContext(options));
     }
 
     Browser.NewContextOptions storageContextOptions(String storageState) {
@@ -334,8 +353,11 @@ public class DouyinAccountService {
         return value == null ? "" : value.toString();
     }
 
-    private boolean isLoginCompleted(Page page, String storageState) {
+    private boolean isLoginCompleted(Page page, String storageState, String originalUrl) {
         if (page.url().startsWith(HOME_URL_PREFIX)) {
+            return true;
+        }
+        if (!page.url().equals(originalUrl) && !hasVisibleLoginMarker(page)) {
             return true;
         }
         return hasDouyinLoginCookie(storageState) && !hasVisibleLoginMarker(page);
@@ -390,7 +412,7 @@ public class DouyinAccountService {
 
     private boolean isStorageStateValid(String storageState) {
         try (Browser browser = launchBrowser()) {
-            BrowserContext context = browser.newContext(storageContextOptions(storageState));
+            BrowserContext context = newContext(browser, storageContextOptions(storageState));
             try {
                 Page page = context.newPage();
                 page.navigate(PUBLISH_VIDEO_URL);
@@ -554,6 +576,11 @@ public class DouyinAccountService {
         }
     }
 
+    private BrowserContext prepareContext(BrowserContext context) {
+        context.addInitScript(STEALTH_INIT_SCRIPT);
+        return context;
+    }
+
     private String firstText(String... values) {
         for (String value : values) {
             String text = text(value);
@@ -574,7 +601,7 @@ public class DouyinAccountService {
     }
 
     private record LoginSession(String accountKey, String authCode, Playwright playwright, Browser browser,
-                                BrowserContext context, Page page, Instant expiresAt) {
+                                BrowserContext context, Page page, String originalUrl, Instant expiresAt) {
     }
 
     private record AccountProfile(String userId, String nickname) {
@@ -585,7 +612,14 @@ public class DouyinAccountService {
             return new com.microsoft.playwright.BrowserType.LaunchOptions()
                     .setHeadless(headless)
                     .setChannel(channel)
-                    .setArgs(List.of("--no-sandbox", "--disable-dev-shm-usage"));
+                    .setArgs(List.of(
+                            "--no-sandbox",
+                            "--disable-dev-shm-usage",
+                            "--disable-blink-features=AutomationControlled",
+                            "--lang=zh-CN",
+                            "--disable-infobars",
+                            "--start-maximized"
+                    ));
         }
     }
 
