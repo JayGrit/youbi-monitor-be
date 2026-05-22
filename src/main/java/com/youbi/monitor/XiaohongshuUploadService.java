@@ -230,7 +230,7 @@ public class XiaohongshuUploadService {
                     page.waitForTimeout(2000);
                     continue;
                 }
-                clickPublishButton(page, buttonText);
+                clickPublishButton(page, buttonText, taskId);
                 page.waitForURL(SUCCESS_URL_PATTERN, new Page.WaitForURLOptions().setTimeout(5000));
                 log.info("XHS upload publish success page reached taskId={} url={}", taskId, page.url());
                 return;
@@ -246,19 +246,59 @@ public class XiaohongshuUploadService {
         throw last == null ? new RuntimeException("Timed out publishing Xiaohongshu video") : last;
     }
 
-    private void clickPublishButton(Page page, String buttonText) {
+    private void clickPublishButton(Page page, String buttonText, String taskId) {
         Locator nativeButton = page.locator("button:has-text('" + buttonText + "'):visible");
         if (nativeButton.count() > 0) {
             nativeButton.last().click(new Locator.ClickOptions().setTimeout(5000));
+            log.info("XHS upload publish click taskId={} method=native-button", taskId);
             return;
         }
-        Locator publishComponent = page.locator("xhs-publish-btn[submit-disabled='false']").last();
-        if (publishComponent.count() > 0) {
-            publishComponent.click(new Locator.ClickOptions().setTimeout(5000));
+        String clicked = page.evaluate(
+                """
+                (buttonText) => {
+                  const visible = (el) => {
+                    if (!el) return false;
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return !!(rect.width && rect.height) && style.visibility !== 'hidden' && style.display !== 'none';
+                  };
+                  const clickElement = (el, method) => {
+                    el.scrollIntoView({block: 'center', inline: 'center'});
+                    const rect = el.getBoundingClientRect();
+                    const x = rect.left + rect.width / 2;
+                    const y = rect.top + rect.height / 2;
+                    const target = document.elementFromPoint(x, y) || el;
+                    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+                      target.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window, clientX: x, clientY: y}));
+                    }
+                    return `${method}:target=${target.tagName}.${target.className || ''}:rect=${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`;
+                  };
+                  const host = document.querySelector('xhs-publish-btn[submit-disabled="false"]');
+                  if (host && host.shadowRoot) {
+                    const elements = Array.from(host.shadowRoot.querySelectorAll('button, [role="button"], div, span'));
+                    const target = elements.find((el) => visible(el) && (el.innerText || el.textContent || '').trim() === buttonText);
+                    if (target) return clickElement(target, 'shadow-text');
+                    const buttons = elements.filter((el) => visible(el) && (el.tagName === 'BUTTON' || el.getAttribute('role') === 'button'));
+                    if (buttons.length) return clickElement(buttons[buttons.length - 1], 'shadow-last-button');
+                  }
+                  if (host && visible(host)) {
+                    return clickElement(host, 'publish-component-host');
+                  }
+                  const textNodes = Array.from(document.querySelectorAll('*'))
+                    .filter((el) => visible(el) && (el.innerText || el.textContent || '').trim() === buttonText);
+                  if (textNodes.length) return clickElement(textNodes[textNodes.length - 1], 'dom-exact-text');
+                  return 'not-clicked';
+                }
+                """,
+                buttonText
+        ).toString();
+        log.info("XHS upload publish click taskId={} method={}", taskId, clicked);
+        if (!"not-clicked".equals(clicked)) {
             return;
         }
         Locator textButton = page.locator("text=\"" + buttonText + "\"").last();
         textButton.click(new Locator.ClickOptions().setTimeout(5000));
+        log.info("XHS upload publish click taskId={} method=playwright-text", taskId);
     }
 
     private void dumpDiagnostics(Page page, String taskId, String label) {
