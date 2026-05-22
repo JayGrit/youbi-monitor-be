@@ -5,6 +5,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.BoundingBox;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -252,6 +253,18 @@ public class XiaohongshuUploadService {
             nativeButton.last().click(new Locator.ClickOptions().setTimeout(5000));
             log.info("XHS upload publish click taskId={} method=native-button", taskId);
             return;
+        }
+        Locator publishComponent = page.locator("xhs-publish-btn[submit-disabled='false']").last();
+        if (publishComponent.count() > 0) {
+            BoundingBox box = publishComponent.boundingBox();
+            if (box != null) {
+                double x = box.x + box.width - 220;
+                double y = box.y + box.height / 2;
+                page.mouse().click(x, y);
+                log.info("XHS upload publish click taskId={} method=mouse-submit-area point={},{} rect={},{},{},{}",
+                        taskId, Math.round(x), Math.round(y), Math.round(box.x), Math.round(box.y), Math.round(box.width), Math.round(box.height));
+                return;
+            }
         }
         String clicked = page.evaluate(
                 """
