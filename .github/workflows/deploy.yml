@@ -44,6 +44,7 @@ jobs:
             --name monitor-be \
             --network host \
             --restart unless-stopped \
+            -v /hoshuuch/YouBi/workfolder:/work \
             monitor-be:latest
 
           docker logs monitor-be --tail 20
