@@ -230,13 +230,7 @@ public class XiaohongshuUploadService {
                     page.waitForTimeout(2000);
                     continue;
                 }
-                Locator button = page.locator("button:has-text('" + buttonText + "'):visible");
-                if (button.count() > 0) {
-                    button.last().click(new Locator.ClickOptions().setTimeout(5000));
-                } else {
-                    Locator textButton = page.locator("text=\"" + buttonText + "\"").last();
-                    textButton.click(new Locator.ClickOptions().setTimeout(5000));
-                }
+                clickPublishButton(page, buttonText);
                 page.waitForURL(SUCCESS_URL_PATTERN, new Page.WaitForURLOptions().setTimeout(5000));
                 log.info("XHS upload publish success page reached taskId={} url={}", taskId, page.url());
                 return;
@@ -250,6 +244,21 @@ public class XiaohongshuUploadService {
         }
         dumpDiagnostics(page, taskId, "publish-timeout");
         throw last == null ? new RuntimeException("Timed out publishing Xiaohongshu video") : last;
+    }
+
+    private void clickPublishButton(Page page, String buttonText) {
+        Locator nativeButton = page.locator("button:has-text('" + buttonText + "'):visible");
+        if (nativeButton.count() > 0) {
+            nativeButton.last().click(new Locator.ClickOptions().setTimeout(5000));
+            return;
+        }
+        Locator publishComponent = page.locator("xhs-publish-btn[submit-disabled='false']").last();
+        if (publishComponent.count() > 0) {
+            publishComponent.click(new Locator.ClickOptions().setTimeout(5000));
+            return;
+        }
+        Locator textButton = page.locator("text=\"" + buttonText + "\"").last();
+        textButton.click(new Locator.ClickOptions().setTimeout(5000));
     }
 
     private void dumpDiagnostics(Page page, String taskId, String label) {
