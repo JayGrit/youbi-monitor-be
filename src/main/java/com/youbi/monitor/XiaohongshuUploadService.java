@@ -219,8 +219,15 @@ public class XiaohongshuUploadService {
         while (System.currentTimeMillis() < deadline) {
             attempts += 1;
             try {
-                log.info("XHS upload click publish taskId={} button={} attempt={} url={}", taskId, buttonText, attempts, page.url());
-                page.locator("button:has-text('" + buttonText + "')").first().click();
+                Locator buttons = page.locator("button:has-text('" + buttonText + "'):visible");
+                int count = buttons.count();
+                String buttonTexts = visibleButtonTexts(page);
+                log.info("XHS upload click publish taskId={} button={} attempt={} url={} visibleMatches={} visibleButtons={}",
+                        taskId, buttonText, attempts, page.url(), count, truncate(buttonTexts, 500));
+                if (count == 0) {
+                    throw new RuntimeException("No visible publish button. Visible buttons: " + buttonTexts);
+                }
+                buttons.last().click(new Locator.ClickOptions().setTimeout(5000));
                 page.waitForURL(SUCCESS_URL_PATTERN, new Page.WaitForURLOptions().setTimeout(5000));
                 log.info("XHS upload publish success page reached taskId={} url={}", taskId, page.url());
                 return;
@@ -233,6 +240,17 @@ public class XiaohongshuUploadService {
             }
         }
         throw last == null ? new RuntimeException("Timed out publishing Xiaohongshu video") : last;
+    }
+
+    private String visibleButtonTexts(Page page) {
+        try {
+            return String.join(" | ", page.locator("button:visible").allTextContents().stream()
+                    .map(this::text)
+                    .filter(value -> !value.isBlank())
+                    .toList());
+        } catch (Exception exception) {
+            return "cannot-read-buttons: " + exception.getMessage();
+        }
     }
 
     private ResolvedFile resolveVideo(XiaohongshuUploadRequest request) throws IOException {
