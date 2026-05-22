@@ -661,7 +661,7 @@ public class MonitorService {
         if (statuses.isEmpty()) {
             return null;
         }
-        if ("running".equals(statuses.get(0)) || hasRunningStage(taskId)) {
+        if ("running".equals(statuses.get(0))) {
             throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before deleting.");
         }
 
