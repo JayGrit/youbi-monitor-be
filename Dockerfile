@@ -12,7 +12,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        fontconfig \
         fonts-liberation \
+        fonts-noto-cjk \
         gnupg \
         libasound2t64 \
         libatk-bridge2.0-0 \
@@ -40,6 +42,7 @@ RUN apt-get update \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-linux.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends google-chrome-stable \
+    && fc-cache -f \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/monitor-be-0.0.1-SNAPSHOT.jar app.jar
 ENV TZ=Asia/Shanghai
