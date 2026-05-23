@@ -196,6 +196,7 @@ public class XiaohongshuUploadService {
         } catch (Exception exception) {
             log.warn("XHS upload cover skipped taskId={} cover={} message={}", taskId, coverPath, exception.getMessage());
             dumpDiagnostics(page, taskId, "cover-skipped");
+            dismissCoverDialog(page, taskId);
         }
     }
 
@@ -212,6 +213,27 @@ public class XiaohongshuUploadService {
         page.waitForTimeout(2000);
         modal.locator("button.mojito-button").filter(new Locator.FilterOptions().setHasText("确定")).first().click();
         modal.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN).setTimeout(30000));
+    }
+
+    private void dismissCoverDialog(Page page, String taskId) {
+        try {
+            Locator cancel = page.locator("button").filter(new Locator.FilterOptions().setHasText("取消")).last();
+            if (cancel.count() > 0 && cancel.isVisible()) {
+                cancel.click(new Locator.ClickOptions().setTimeout(3000));
+                page.waitForTimeout(1000);
+                log.info("XHS upload cover dialog dismissed taskId={} method=cancel", taskId);
+                return;
+            }
+        } catch (Exception exception) {
+            log.debug("XHS upload cover dialog cancel skipped taskId={} message={}", taskId, exception.getMessage());
+        }
+        try {
+            page.keyboard().press("Escape");
+            page.waitForTimeout(1000);
+            log.info("XHS upload cover dialog dismissed taskId={} method=escape", taskId);
+        } catch (Exception exception) {
+            log.warn("XHS upload cover dialog dismiss failed taskId={} message={}", taskId, exception.getMessage());
+        }
     }
 
     private void setSchedule(Page page, String schedule, String taskId) {
