@@ -126,7 +126,7 @@ public class XiaohongshuUploadService {
         log.info("XHS upload fill metadata taskId={} title={} tags={}", taskId, title, text(request.tags()));
         titleInput.fill(title);
         fillDescriptionAndTags(page, request.description(), request.tags(), taskId);
-        setCover(page, coverPath, taskId);
+        setCoverIfPresent(page, coverPath, taskId);
         setSchedule(page, request.schedule(), taskId);
         clickPublish(page, hasText(request.schedule()), taskId);
     }
@@ -172,20 +172,34 @@ public class XiaohongshuUploadService {
             page.keyboard().press("Enter");
         }
         for (String tag : parseTags(tags)) {
-            log.info("XHS upload fill tag taskId={} tag={}", taskId, tag);
-            page.keyboard().type("#" + tag, new com.microsoft.playwright.Keyboard.TypeOptions().setDelay(30));
-            Locator topic = page.locator("#creator-editor-topic-container").first();
-            topic.waitFor(new Locator.WaitForOptions().setTimeout(5000));
-            Locator first = page.locator("#creator-editor-topic-container .item").first();
-            first.waitFor(new Locator.WaitForOptions().setTimeout(3000));
-            first.click();
+            try {
+                log.info("XHS upload fill tag taskId={} tag={}", taskId, tag);
+                page.keyboard().type("#" + tag, new com.microsoft.playwright.Keyboard.TypeOptions().setDelay(30));
+                Locator topic = page.locator("#creator-editor-topic-container").first();
+                topic.waitFor(new Locator.WaitForOptions().setTimeout(5000));
+                Locator first = page.locator("#creator-editor-topic-container .item").first();
+                first.waitFor(new Locator.WaitForOptions().setTimeout(3000));
+                first.click();
+            } catch (Exception exception) {
+                log.warn("XHS upload tag skipped taskId={} tag={} message={}", taskId, tag, exception.getMessage());
+                page.keyboard().press("Enter");
+            }
+        }
+    }
+
+    private void setCoverIfPresent(Page page, Path coverPath, String taskId) {
+        if (coverPath == null) {
+            return;
+        }
+        try {
+            setCover(page, coverPath, taskId);
+        } catch (Exception exception) {
+            log.warn("XHS upload cover skipped taskId={} cover={} message={}", taskId, coverPath, exception.getMessage());
+            dumpDiagnostics(page, taskId, "cover-skipped");
         }
     }
 
     private void setCover(Page page, Path coverPath, String taskId) {
-        if (coverPath == null) {
-            return;
-        }
         log.info("XHS upload set cover taskId={} cover={}", taskId, coverPath);
         Locator coverDialog = page.locator("div.cover-plugin-title").filter(new Locator.FilterOptions().setHasText("设置封面"))
                 .locator("xpath=ancestor::div[contains(@class, 'cover-plugin-preview')]")
