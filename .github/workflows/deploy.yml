@@ -40,11 +40,24 @@ jobs:
           docker rm -f monitor-be || true
           DOCKER_BUILDKIT=1 docker build -t monitor-be:latest .
 
+          DOUYIN_CDP_URL=""
+          if curl -fsS http://127.0.0.1:9333/json/version >/tmp/douyin-cdp-version.json 2>/dev/null; then
+            DOUYIN_CDP_URL="$(python3 -c 'import json,sys; print(json.load(open("/tmp/douyin-cdp-version.json")).get("webSocketDebuggerUrl", ""))')"
+          fi
+          DOCKER_ENV_ARGS=()
+          if [ -n "${DOUYIN_CDP_URL}" ]; then
+            DOCKER_ENV_ARGS=(-e "YDBI_DOUYIN_CDP_URL=${DOUYIN_CDP_URL}")
+            echo "Douyin CDP URL detected; monitor-be will connect to existing Chrome."
+          else
+            echo "Douyin CDP URL not detected; monitor-be will use storage-state mode."
+          fi
+
           docker run -d \
             --name monitor-be \
             --network host \
             --restart unless-stopped \
             -v /hoshuuch/YouBi/workfolder:/work \
+            "${DOCKER_ENV_ARGS[@]}" \
             monitor-be:latest
 
           docker logs monitor-be --tail 20

@@ -632,22 +632,69 @@ public class DouyinUploadService {
         throw last == null ? new RuntimeException("Timed out publishing Douyin video") : last;
     }
 
-    private void dismissBlockingDialog(Page page, String taskId) {
-        try {
-            Locator modal = page.locator(".semi-modal-content:visible").last();
-            if (modal.count() == 0) {
-                return;
+    private boolean dismissBlockingDialog(Page page, String taskId) {
+        for (String text : List.of("暂不设置", "我知道了", "知道了", "稍后再说", "完成", "取消")) {
+            if (clickDialogButtonByText(page, taskId, text)) {
+                return true;
             }
-            Locator primary = modal.locator("button:visible").last();
+        }
+        try {
+            Locator modal = visibleDialog(page).last();
+            if (modal.count() == 0) {
+                return false;
+            }
+            Locator primary = modal.locator("button:visible, [role='button']:visible").last();
             if (primary.count() == 0) {
-                return;
+                return false;
             }
             String text = primary.innerText(new Locator.InnerTextOptions().setTimeout(1000));
-            primary.click(new Locator.ClickOptions().setTimeout(3000));
+            clickWithFallback(primary);
             log.info("Douyin upload dismissed modal taskId={} button={}", taskId, truncate(text, 50));
             page.waitForTimeout(500);
+            return true;
         } catch (Exception exception) {
             log.debug("Douyin upload modal dismiss skipped taskId={} message={}", taskId, exception.getMessage());
+            return false;
+        }
+    }
+
+    private Locator visibleDialog(Page page) {
+        return page.locator(String.join(", ",
+                ".semi-modal-content:visible",
+                ".dy-creator-content-modal-wrap:visible",
+                "[role='dialog']:visible"
+        ));
+    }
+
+    private boolean clickDialogButtonByText(Page page, String taskId, String buttonText) {
+        try {
+            Locator modal = visibleDialog(page).last();
+            if (modal.count() == 0) {
+                return false;
+            }
+            Locator button = modal.getByRole(com.microsoft.playwright.options.AriaRole.BUTTON,
+                    new Locator.GetByRoleOptions().setName(buttonText).setExact(true)).last();
+            if (button.count() == 0) {
+                button = modal.locator("button:visible:has-text('" + buttonText + "'), [role='button']:visible:has-text('" + buttonText + "')").last();
+            }
+            if (button.count() == 0) {
+                return false;
+            }
+            clickWithFallback(button);
+            log.info("Douyin upload dismissed modal taskId={} button={}", taskId, buttonText);
+            page.waitForTimeout(800);
+            return true;
+        } catch (Exception exception) {
+            log.debug("Douyin upload dialog button skipped taskId={} button={} message={}", taskId, buttonText, exception.getMessage());
+            return false;
+        }
+    }
+
+    private void clickWithFallback(Locator locator) {
+        try {
+            locator.click(new Locator.ClickOptions().setTimeout(3000));
+        } catch (Exception exception) {
+            locator.evaluate("element => element.click()");
         }
     }
 
