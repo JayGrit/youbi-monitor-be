@@ -15,6 +15,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -45,18 +47,21 @@ public class DouyinAccountService {
     private final ObjectMapper objectMapper;
     private final boolean headless;
     private final String browserChannel;
+    private final String stealthInitScript;
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public DouyinAccountService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             @Value("${youbi.douyin.headless:true}") boolean headless,
-            @Value("${youbi.douyin.browser-channel:chrome}") String browserChannel
+            @Value("${youbi.douyin.browser-channel:chrome}") String browserChannel,
+            @Value("${youbi.douyin.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String stealthScriptPath
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.headless = headless;
         this.browserChannel = browserChannel == null || browserChannel.isBlank() ? "chrome" : browserChannel.trim();
+        this.stealthInitScript = loadStealthInitScript(stealthScriptPath);
         ensureSchema();
     }
 
@@ -219,6 +224,18 @@ public class DouyinAccountService {
         return PlaywrightHolder.playwright().chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
     }
 
+    Browser connectBrowserOverCdp(String cdpUrl) {
+        return PlaywrightHolder.playwright().chromium().connectOverCDP(cdpUrl);
+    }
+
+    BrowserContext firstContext(Browser browser) {
+        List<BrowserContext> contexts = browser.contexts();
+        if (contexts.isEmpty()) {
+            return prepareContext(browser.newContext());
+        }
+        return contexts.get(0);
+    }
+
     BrowserContext newContext(Browser browser) {
         return prepareContext(browser.newContext());
     }
@@ -243,8 +260,8 @@ public class DouyinAccountService {
                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
                 normalized,
-                profile.userId(),
-                profile.nickname(),
+                truncate(profile.userId(), 128),
+                truncate(profile.nickname(), 128),
                 storageState
         );
     }
@@ -420,19 +437,52 @@ public class DouyinAccountService {
                     page.waitForURL(PUBLISH_VIDEO_URL, new Page.WaitForURLOptions().setTimeout(8000));
                 } catch (Exception ignored) {
                 }
-                if (page.getByText("手机号登录", new Page.GetByTextOptions().setExact(true)).count() > 0) {
-                    return false;
+                long deadline = System.currentTimeMillis() + 15000;
+                while (System.currentTimeMillis() < deadline) {
+                    if (hasUploadFileInput(page)) {
+                        return true;
+                    }
+                    if (hasVisibleLoginGate(page)) {
+                        return false;
+                    }
+                    page.waitForTimeout(500);
                 }
-                if (page.getByText("扫码登录", new Page.GetByTextOptions().setExact(true)).count() > 0) {
-                    return false;
-                }
-                return page.url().startsWith(PUBLISH_VIDEO_URL);
+                return hasUploadFileInput(page);
             } finally {
                 context.close();
             }
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private boolean hasUploadFileInput(Page page) {
+        try {
+            return page.locator("input[type='file']").count() > 0;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private boolean hasVisibleLoginGate(Page page) {
+        for (Locator marker : List.of(
+                page.getByText("扫码登录").first(),
+                page.getByText("手机号登录").first(),
+                page.getByText("验证码登录").first(),
+                page.getByText("创作者登录").first(),
+                page.getByText("登录/注册").first(),
+                page.getByRole(AriaRole.IMG, new Page.GetByRoleOptions().setName("二维码")).first(),
+                page.locator("input[placeholder*='手机号']").first(),
+                page.locator("input[placeholder*='验证码']").first()
+        )) {
+            try {
+                if (marker.count() > 0 && marker.isVisible()) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
     }
 
     private Optional<String> loadStorageState(String accountKey) {
@@ -577,8 +627,26 @@ public class DouyinAccountService {
     }
 
     private BrowserContext prepareContext(BrowserContext context) {
-        context.addInitScript(STEALTH_INIT_SCRIPT);
+        context.addInitScript(stealthInitScript);
         return context;
+    }
+
+    private String loadStealthInitScript(String stealthScriptPath) {
+        String path = text(stealthScriptPath);
+        if (!path.isBlank()) {
+            try {
+                Path script = Path.of(path);
+                if (Files.isRegularFile(script)) {
+                    String content = Files.readString(script, StandardCharsets.UTF_8);
+                    log.info("Loaded Douyin stealth init script path={} bytes={}", script, content.getBytes(StandardCharsets.UTF_8).length);
+                    return content;
+                }
+                log.warn("Douyin stealth init script not found path={}, using fallback", script);
+            } catch (Exception exception) {
+                log.warn("Cannot load Douyin stealth init script path={}, using fallback: {}", path, exception.getMessage());
+            }
+        }
+        return STEALTH_INIT_SCRIPT;
     }
 
     private String firstText(String... values) {
@@ -594,6 +662,20 @@ public class DouyinAccountService {
     private String blankToNull(String value) {
         String text = text(value);
         return text.isBlank() ? null : text;
+    }
+
+    private String truncate(String value, int max) {
+        String text = text(value);
+        if (text.isBlank()) {
+            return null;
+        }
+        if (text.codePointCount(0, text.length()) <= max) {
+            return text;
+        }
+        return text.codePoints()
+                .limit(max)
+                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
+                .toString();
     }
 
     private String text(String value) {

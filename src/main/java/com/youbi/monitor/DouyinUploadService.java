@@ -10,6 +10,7 @@ import io.minio.MinioClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -24,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -35,23 +37,30 @@ public class DouyinUploadService {
     private static final String PUBLISH_VIDEO_URL = DouyinAccountService.PUBLISH_VIDEO_URL;
     private static final String POST_VIDEO_URL_PATTERN = "**/creator-micro/content/post/video?**";
     private static final String MANAGE_URL_PATTERN = "**/creator-micro/content/manage**";
+    private static final String SMS_CODE_TABLE = "yd_douyin_sms_code";
+    private static final String DOUYIN_LOGIN_PHONE = "15548242598";
 
     private final DouyinAccountService accountService;
+    private final JdbcTemplate jdbcTemplate;
     private final MinioClient minioClient;
     private final String minioBucket;
     private final Path uploadWorkDir;
     private final HttpClient httpClient;
+    private final String cdpUrl;
 
     public DouyinUploadService(
             DouyinAccountService accountService,
+            JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket,
-            @Value("${youbi.minio.work-dir}") String uploadWorkDir
+            @Value("${youbi.minio.work-dir}") String uploadWorkDir,
+            @Value("${youbi.douyin.cdp-url:}") String cdpUrl
     ) {
         this.accountService = accountService;
+        this.jdbcTemplate = jdbcTemplate;
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -59,6 +68,8 @@ public class DouyinUploadService {
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.cdpUrl = text(cdpUrl);
+        ensureSmsSchema();
     }
 
     public DouyinUploadResult upload(DouyinUploadRequest request) throws IOException {
@@ -80,18 +91,28 @@ public class DouyinUploadService {
             log.info("Douyin upload material ready taskId={} video={} videoSizeBytes={} temporaryVideo={} cover={}",
                     taskId, videoPath, Files.size(videoPath), resolvedVideo.temporary(), resolvedCover == null ? "" : resolvedCover.path());
 
-            String storageState = accountService.storageState(accountKey);
-            log.info("Douyin upload storage state loaded taskId={} accountKey={} bytes={}", taskId, accountKey, storageState.getBytes(StandardCharsets.UTF_8).length);
-            try (Browser browser = accountService.launchBrowser()) {
-                log.info("Douyin upload browser launched taskId={} accountKey={}", taskId, accountKey);
-                BrowserContext context = accountService.newContext(browser, accountService.storageContextOptions(storageState));
-                try {
-                    Page page = context.newPage();
-                    uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
-                    accountService.saveStorageState(accountKey, context.storageState());
-                    log.info("Douyin upload storage state saved taskId={} accountKey={}", taskId, accountKey);
-                } finally {
-                    context.close();
+            if (hasText(cdpUrl)) {
+                Browser browser = accountService.connectBrowserOverCdp(cdpUrl);
+                log.info("Douyin upload connected existing Chrome over CDP taskId={} accountKey={} cdpUrl={}", taskId, accountKey, cdpUrl);
+                BrowserContext context = accountService.firstContext(browser);
+                Page page = context.newPage();
+                uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
+                accountService.saveStorageState(accountKey, context.storageState());
+                log.info("Douyin upload CDP storage state saved taskId={} accountKey={}", taskId, accountKey);
+            } else {
+                String storageState = accountService.storageState(accountKey);
+                log.info("Douyin upload storage state loaded taskId={} accountKey={} bytes={}", taskId, accountKey, storageState.getBytes(StandardCharsets.UTF_8).length);
+                try (Browser browser = accountService.launchBrowser()) {
+                    log.info("Douyin upload browser launched taskId={} accountKey={}", taskId, accountKey);
+                    BrowserContext context = accountService.newContext(browser, accountService.storageContextOptions(storageState));
+                    try {
+                        Page page = context.newPage();
+                        uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
+                        accountService.saveStorageState(accountKey, context.storageState());
+                        log.info("Douyin upload storage state saved taskId={} accountKey={}", taskId, accountKey);
+                    } finally {
+                        context.close();
+                    }
                 }
             }
             DouyinAccountStatus account = accountService.status(accountKey);
@@ -117,8 +138,9 @@ public class DouyinUploadService {
         log.info("Douyin upload navigate publish page taskId={} url={}", taskId, PUBLISH_VIDEO_URL);
         page.navigate(PUBLISH_VIDEO_URL);
         page.waitForURL(PUBLISH_VIDEO_URL, new Page.WaitForURLOptions().setTimeout(30000));
+        ensureUploadLandingPage(page, taskId, request.accountKey());
         log.info("Douyin upload set video input taskId={} file={}", taskId, videoPath);
-        page.locator("div[class^='container'] input").setInputFiles(videoPath);
+        page.locator("div[class^='container'] input[type='file']").first().setInputFiles(videoPath);
         waitForPublishPage(page, taskId);
         page.waitForTimeout(1000);
 
@@ -130,6 +152,271 @@ public class DouyinUploadService {
         enableThirdPartySyncIfPresent(page, taskId);
         setSchedule(page, request.schedule(), taskId);
         clickPublish(page, taskId);
+    }
+
+    private void ensureUploadLandingPage(Page page, String taskId, String accountKey) throws IOException {
+        try {
+            long deadline = System.currentTimeMillis() + Duration.ofSeconds(20).toMillis();
+            while (System.currentTimeMillis() < deadline) {
+                if (page.locator("div[class^='container'] input[type='file']").count() > 0) {
+                    return;
+                }
+                if (hasVisibleLoginGate(page)) {
+                    if (completeSmsLogin(page, taskId, accountService.normalizeAccountKey(accountKey))) {
+                        page.navigate(PUBLISH_VIDEO_URL);
+                        page.waitForURL(PUBLISH_VIDEO_URL, new Page.WaitForURLOptions().setTimeout(30000));
+                        deadline = System.currentTimeMillis() + Duration.ofSeconds(20).toMillis();
+                        continue;
+                    }
+                    dumpDiagnostics(page, taskId, "upload-page-login-required");
+                    throw new IOException("Douyin login state is expired or rejected by the publish page. Please refresh accountKey="
+                            + accountService.normalizeAccountKey(accountKey) + " before uploading. url=" + page.url());
+                }
+                page.waitForTimeout(500);
+            }
+            dumpDiagnostics(page, taskId, "upload-page-not-ready");
+            throw new IOException("Douyin upload page is not ready. url=" + page.url());
+        } catch (IOException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            dumpDiagnostics(page, taskId, "upload-page-check-failed");
+            throw new IOException("Cannot verify Douyin upload page: " + exception.getMessage(), exception);
+        }
+    }
+
+    private boolean completeSmsLogin(Page page, String taskId, String accountKey) {
+        try {
+            log.info("Douyin SMS login start taskId={} accountKey={} phone={}", taskId, accountKey, DOUYIN_LOGIN_PHONE);
+            openPhoneLogin(page);
+            Locator phoneInput = firstVisible(page, List.of(
+                    "input[name='normal-input']",
+                    "input[placeholder*='手机号']",
+                    "input[type='tel']",
+                    "input[name*='phone']",
+                    "input[name*='mobile']"
+            ));
+            if (phoneInput == null) {
+                dumpDiagnostics(page, taskId, "sms-login-phone-input-missing");
+                return false;
+            }
+            phoneInput.fill(DOUYIN_LOGIN_PHONE);
+            page.waitForTimeout(500);
+            clickAgreementIfPresent(page);
+            clickSendSmsCode(page);
+            page.waitForTimeout(2000);
+            dumpDiagnostics(page, taskId, "sms-code-send-clicked");
+            long requestId = createSmsCodeRequest(accountKey, DOUYIN_LOGIN_PHONE);
+            LocalDateTime requestedAt = LocalDateTime.now().minusSeconds(5);
+            log.info("Douyin SMS code requested taskId={} accountKey={} requestId={} phone={}", taskId, accountKey, requestId, DOUYIN_LOGIN_PHONE);
+
+            SmsCode smsCode = waitForSmsCode(accountKey, DOUYIN_LOGIN_PHONE, requestedAt, Duration.ofMinutes(3));
+            if (smsCode == null) {
+                dumpDiagnostics(page, taskId, "sms-login-code-timeout");
+                log.warn("Douyin SMS login code timeout taskId={} accountKey={} requestId={}", taskId, accountKey, requestId);
+                return false;
+            }
+
+            Locator codeInput = firstVisible(page, List.of(
+                    "input[name='button-input']",
+                    "input[placeholder*='验证码']",
+                    "input[placeholder*='短信']",
+                    "input[name*='code']"
+            ));
+            if (codeInput == null) {
+                dumpDiagnostics(page, taskId, "sms-login-code-input-missing");
+                return false;
+            }
+            codeInput.fill(smsCode.code());
+            clickLoginSubmit(page);
+            markSmsCodeConsumed(smsCode.id());
+            page.waitForTimeout(3000);
+            log.info("Douyin SMS login submitted taskId={} accountKey={} smsCodeId={} url={}", taskId, accountKey, smsCode.id(), page.url());
+            return true;
+        } catch (Exception exception) {
+            dumpDiagnostics(page, taskId, "sms-login-failed");
+            log.warn("Douyin SMS login failed taskId={} accountKey={} message={}", taskId, accountKey, exception.getMessage());
+            return false;
+        }
+    }
+
+    private void openPhoneLogin(Page page) {
+        for (Locator tab : List.of(
+                page.getByText("手机号登录").first(),
+                page.getByText("验证码登录").first(),
+                page.getByText("短信登录").first()
+        )) {
+            try {
+                if (tab.count() > 0 && tab.isVisible()) {
+                    tab.click(new Locator.ClickOptions().setTimeout(3000));
+                    page.waitForTimeout(500);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void clickAgreementIfPresent(Page page) {
+        for (Locator marker : List.of(
+                page.locator("input[type='checkbox']").first(),
+                page.locator(".semi-checkbox-input").first(),
+                page.getByText("我已阅读并同意").first()
+        )) {
+            try {
+                if (marker.count() > 0 && marker.isVisible()) {
+                    marker.click(new Locator.ClickOptions().setTimeout(2000));
+                    page.waitForTimeout(300);
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void clickSendSmsCode(Page page) {
+        for (Locator button : List.of(
+                page.getByText("获取验证码").first(),
+                page.getByText("发送验证码").first(),
+                page.getByText("获取短信验证码").first(),
+                page.locator("button:has-text('验证码')").first()
+        )) {
+            try {
+                if (button.count() > 0 && button.isVisible()) {
+                    button.click(new Locator.ClickOptions().setTimeout(5000));
+                    page.waitForTimeout(1000);
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        throw new RuntimeException("Douyin SMS send button not found");
+    }
+
+    private void clickLoginSubmit(Page page) {
+        for (Locator button : List.of(
+                page.getByRole(com.microsoft.playwright.options.AriaRole.BUTTON, new Page.GetByRoleOptions().setName("登录").setExact(true)).first(),
+                page.getByText("登录").first(),
+                page.getByText("验证").first(),
+                page.getByText("确认").first()
+        )) {
+            try {
+                if (button.count() > 0 && button.isVisible()) {
+                    button.click(new Locator.ClickOptions().setTimeout(5000));
+                    page.waitForTimeout(1000);
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        throw new RuntimeException("Douyin SMS submit button not found");
+    }
+
+    private Locator firstVisible(Page page, List<String> selectors) {
+        for (String selector : selectors) {
+            try {
+                page.waitForSelector(selector, new Page.WaitForSelectorOptions().setTimeout(3000));
+                return page.locator(selector).first();
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    private long createSmsCodeRequest(String accountKey, String phone) {
+        jdbcTemplate.update(
+                "INSERT INTO " + SMS_CODE_TABLE + " (platform, account_key, purpose, phone, status, requested_at) VALUES (?, ?, ?, ?, ?, NOW())",
+                "douyin", accountKey, "login_verify", phone, "requested"
+        );
+        Long id = jdbcTemplate.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        return id == null ? 0L : id;
+    }
+
+    private SmsCode waitForSmsCode(String accountKey, String phone, LocalDateTime requestedAt, Duration timeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            List<SmsCode> codes = jdbcTemplate.query(
+                    """
+                    SELECT id, code FROM yd_douyin_sms_code
+                    WHERE platform = 'douyin'
+                      AND account_key = ?
+                      AND purpose = 'login_verify'
+                      AND phone = ?
+                      AND status IN ('requested', 'pending')
+                      AND code IS NOT NULL
+                      AND code <> ''
+                      AND updated_at >= ?
+                      AND updated_at >= DATE_SUB(NOW(), INTERVAL 1 MINUTE)
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (rs, rowNum) -> new SmsCode(rs.getLong("id"), rs.getString("code")),
+                    accountKey,
+                    phone,
+                    requestedAt
+            );
+            if (!codes.isEmpty()) {
+                return codes.get(0);
+            }
+            pageSleep(10000);
+        }
+        return null;
+    }
+
+    private void pageSleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted waiting for SMS code", exception);
+        }
+    }
+
+    private void markSmsCodeConsumed(long id) {
+        jdbcTemplate.update(
+                "UPDATE " + SMS_CODE_TABLE + " SET status = 'consumed', consumed_at = NOW(), updated_at = NOW() WHERE id = ?",
+                id
+        );
+    }
+
+    private void ensureSmsSchema() {
+        jdbcTemplate.execute(
+                """
+                CREATE TABLE IF NOT EXISTS yd_douyin_sms_code (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    platform VARCHAR(32) NOT NULL,
+                    account_key VARCHAR(64) NOT NULL,
+                    purpose VARCHAR(64) NOT NULL,
+                    phone VARCHAR(32) NOT NULL,
+                    code VARCHAR(16) NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'requested',
+                    requested_at DATETIME NULL,
+                    consumed_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_douyin_sms_lookup (platform, account_key, purpose, phone, status, updated_at)
+                )
+                """
+        );
+    }
+
+    private boolean hasVisibleLoginGate(Page page) {
+        for (Locator marker : List.of(
+                page.getByText("扫码登录").first(),
+                page.getByText("手机号登录").first(),
+                page.getByText("验证码登录").first(),
+                page.getByText("创作者登录").first(),
+                page.getByText("登录/注册").first(),
+                page.getByRole(com.microsoft.playwright.options.AriaRole.IMG, new Page.GetByRoleOptions().setName("二维码")).first(),
+                page.locator("input[placeholder*='手机号']").first(),
+                page.locator("input[placeholder*='验证码']").first()
+        )) {
+            try {
+                if (marker.count() > 0 && marker.isVisible()) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
     }
 
     private void waitForPublishPage(Page page, String taskId) {
@@ -586,5 +873,8 @@ public class DouyinUploadService {
     }
 
     private record ResolvedFile(Path path, boolean temporary) {
+    }
+
+    private record SmsCode(long id, String code) {
     }
 }
