@@ -66,6 +66,7 @@ public class MonitorService {
             "task_id",
             "source_url",
             "source_platform",
+            "type",
             "created_at",
             "updated_at"
     );
@@ -1152,6 +1153,7 @@ public class MonitorService {
             return;
         }
         ensureColumn("yd_video_info", "source_duration_seconds", "DOUBLE NULL");
+        ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
     }
 
     private boolean tableExists(String table) {
