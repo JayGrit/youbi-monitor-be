@@ -1121,7 +1121,6 @@ public class MonitorService {
                     task_id VARCHAR(64) NOT NULL,
                     platform VARCHAR(32) NOT NULL,
                     account_key VARCHAR(128) NOT NULL,
-                    account_route_key VARCHAR(128) NULL,
                     status VARCHAR(32) NOT NULL DEFAULT 'ready',
                     request_json MEDIUMTEXT NULL,
                     title VARCHAR(512) NULL,
