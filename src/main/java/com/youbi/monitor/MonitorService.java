@@ -937,6 +937,17 @@ public class MonitorService {
                     WHERE task_id = ? AND status = 'failed'
                     """, taskId);
         }
+
+        if ("uploader".equals(failedStage.key()) && tableExists("yd_upload_submission")) {
+            jdbcTemplate.update("""
+                    UPDATE yd_upload_submission
+                    SET status = 'ready',
+                        started_at = NULL,
+                        completed_at = NULL,
+                        error_message = NULL
+                    WHERE task_id = ? AND status IN ('failed', 'running')
+                    """, taskId);
+        }
     }
 
     private boolean hasRunningStage(String taskId) {
