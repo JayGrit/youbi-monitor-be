@@ -940,12 +940,23 @@ public class MonitorService {
 
         if ("uploader".equals(failedStage.key()) && tableExists("yd_upload_submission")) {
             jdbcTemplate.update("""
-                    UPDATE yd_upload_submission
-                    SET status = 'ready',
-                        started_at = NULL,
-                        completed_at = NULL,
-                        error_message = NULL
-                    WHERE task_id = ? AND status IN ('failed', 'running')
+                    UPDATE yd_upload_submission submission
+                    JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                    LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
+                    SET submission.status = 'ready',
+                        submission.started_at = NULL,
+                        submission.completed_at = NULL,
+                        submission.error_message = NULL
+                    WHERE submission.task_id = ?
+                      AND submission.status IN ('failed', 'running')
+                      AND submission.account_key = video_info.type
+                      AND (
+                          COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
+                          OR FIND_IN_SET(
+                              submission.platform,
+                              REPLACE(uploader.upload_platforms, ' ', '')
+                          ) > 0
+                      )
                     """, taskId);
         }
     }
