@@ -161,6 +161,9 @@ public class MonitorService {
               u.status uploader_status,
               u.started_at uploader_started_at,
               u.completed_at uploader_completed_at,
+              us.upload_completed_count uploader_completed_count,
+              us.upload_total_count uploader_total_count,
+              ue.child_error_message uploader_child_error,
               u.bilibili_upload_uid,
               u.bilibili_upload_account_name,
               u.error_message uploader_error
@@ -216,6 +219,26 @@ public class MonitorService {
               WHERE status = 'failed'
               GROUP BY task_id
             ) se ON se.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) upload_completed_count,
+                COUNT(*) upload_total_count
+              FROM yd_upload_submission
+              GROUP BY task_id
+            ) us ON us.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                GROUP_CONCAT(
+                  CONCAT(platform, '/', account_key, ': ', COALESCE(NULLIF(error_message, ''), status))
+                  ORDER BY platform, account_key
+                  SEPARATOR 0x0A
+                ) child_error_message
+              FROM yd_upload_submission
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) ue ON ue.task_id = t.id
             ORDER BY t.created_at DESC
             LIMIT ?
             """;
@@ -250,6 +273,7 @@ public class MonitorService {
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
+        ensureUploaderSubmissionMonitorSchema();
         ensureUploaderMonitorColumns();
         ensureVideoInfoMonitorColumns();
     }
@@ -366,7 +390,10 @@ public class MonitorService {
                 addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
             }
             case "speaker" -> addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
-            case "uploader" -> addLimitedTable(tables, "yd_uploader", taskId, "task_id", "task_id");
+            case "uploader" -> {
+                addLimitedTable(tables, "yd_uploader", taskId, "task_id", "task_id");
+                addLimitedTable(tables, "yd_upload_submission", taskId, "task_id", "platform, account_key, id");
+            }
             default -> {
             }
         }
@@ -1086,6 +1113,40 @@ public class MonitorService {
         ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
     }
 
+    private void ensureUploaderSubmissionMonitorSchema() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS yd_upload_submission (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    task_id VARCHAR(64) NOT NULL,
+                    platform VARCHAR(32) NOT NULL,
+                    account_key VARCHAR(128) NOT NULL,
+                    account_route_key VARCHAR(128) NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'ready',
+                    request_json MEDIUMTEXT NULL,
+                    title VARCHAR(512) NULL,
+                    video_url TEXT NULL,
+                    cover_url TEXT NULL,
+                    description TEXT NULL,
+                    tags VARCHAR(512) NULL,
+                    result_json MEDIUMTEXT NULL,
+                    error_message TEXT NULL,
+                    started_at DATETIME NULL,
+                    completed_at DATETIME NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_upload_submission (task_id, platform, account_key),
+                    KEY idx_upload_submission_status (status, platform, account_key),
+                    KEY idx_upload_submission_task (task_id, status)
+                )
+                """);
+        ensureColumn("yd_upload_submission", "request_json", "MEDIUMTEXT NULL");
+        ensureColumn("yd_upload_submission", "title", "VARCHAR(512) NULL");
+        ensureColumn("yd_upload_submission", "video_url", "TEXT NULL");
+        ensureColumn("yd_upload_submission", "cover_url", "TEXT NULL");
+        ensureColumn("yd_upload_submission", "description", "TEXT NULL");
+        ensureColumn("yd_upload_submission", "tags", "VARCHAR(512) NULL");
+    }
+
     private void ensureVideoInfoMonitorColumns() {
         if (!tableExists("yd_video_info")) {
             return;
@@ -1247,7 +1308,7 @@ public class MonitorService {
         }
 
         private static Integer countValue(ResultSet rs, String stageKey, String suffix) throws SQLException {
-            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey)) {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey) && !"uploader".equals(stageKey)) {
                 return null;
             }
             int value = rs.getInt(stageKey + "_" + suffix);
@@ -1255,7 +1316,7 @@ public class MonitorService {
         }
 
         private static String childErrorMessage(ResultSet rs, String stageKey) throws SQLException {
-            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey)) {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey) && !"uploader".equals(stageKey)) {
                 return null;
             }
             return rs.getString(stageKey + "_child_error");
