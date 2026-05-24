@@ -58,6 +58,11 @@ public class MonitorController {
         return result;
     }
 
+    @GetMapping("/api/submitter-author-types")
+    public MonitorService.SubmitterAuthorType submitterAuthorType(@RequestParam String author) {
+        return monitorService.authorType(author);
+    }
+
     @PostMapping("/api/video-tasks/{taskId}/ready")
     public java.util.Map<String, String> markReady(@PathVariable String taskId) {
         if (!monitorService.markTaskReady(taskId)) {

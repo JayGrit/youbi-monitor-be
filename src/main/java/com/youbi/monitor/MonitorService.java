@@ -277,6 +277,7 @@ public class MonitorService {
         ensureUploaderSubmissionMonitorSchema();
         ensureUploaderMonitorColumns();
         ensureVideoInfoMonitorColumns();
+        ensureSubmitterAuthorTypeSchema();
     }
 
     public MonitorResponse listTasks(int limit) {
@@ -326,6 +327,20 @@ public class MonitorService {
                 stringValue(row.get("dst_text")),
                 localDateTime(row.get("updated_at"))
         );
+    }
+
+    public SubmitterAuthorType authorType(String author) {
+        String normalized = text(author);
+        if (normalized.isBlank()) {
+            return new SubmitterAuthorType("", "");
+        }
+        List<String> rows = jdbcTemplate.queryForList("""
+                SELECT type
+                FROM yd_submitter_author_type
+                WHERE author = ?
+                LIMIT 1
+                """, String.class, normalized);
+        return new SubmitterAuthorType(normalized, rows.isEmpty() ? "" : text(rows.get(0)));
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
@@ -1155,6 +1170,19 @@ public class MonitorService {
         ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
     }
 
+    private void ensureSubmitterAuthorTypeSchema() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS yd_submitter_author_type (
+                    author VARCHAR(255) NOT NULL PRIMARY KEY,
+                    type VARCHAR(128) NOT NULL,
+                    note VARCHAR(255) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    KEY idx_submitter_author_type_type (type)
+                )
+                """);
+    }
+
     private boolean tableExists(String table) {
         Integer count = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
@@ -1231,6 +1259,9 @@ public class MonitorService {
             String dstText,
             LocalDateTime updatedAt
     ) {
+    }
+
+    public record SubmitterAuthorType(String author, String type) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
