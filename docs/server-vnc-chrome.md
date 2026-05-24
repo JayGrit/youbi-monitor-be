@@ -10,7 +10,7 @@
 | Xvfb display | `:99` |
 | VNC 端口 | `127.0.0.1:5901` |
 | Chrome CDP 端口 | `127.0.0.1:9333` |
-| Chrome Profile | `/hoshuuch/YouBi/douyin-chrome-profile` |
+| Chrome Profile | `/hoshuuch/YouBi/douyin-chrome-profile-animal` |
 | 日志目录 | `/hoshuuch/YouBi/logs` |
 | VNC 密码文件 | `/root/.vnc/passwd` |
 
@@ -55,7 +55,7 @@ chmod 600 /root/.vnc/passwd
 ## 3. 启动可视化 Chrome
 
 ```bash
-mkdir -p /hoshuuch/YouBi/douyin-chrome-profile /hoshuuch/YouBi/logs
+mkdir -p /hoshuuch/YouBi/douyin-chrome-profile-animal /hoshuuch/YouBi/logs
 
 nohup Xvfb :99 -screen 0 1400x900x24 \
   > /hoshuuch/YouBi/logs/douyin-xvfb.log 2>&1 &
@@ -75,13 +75,13 @@ nohup x11vnc \
 DISPLAY=:99 nohup google-chrome \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9333 \
-  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile \
+  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile-animal \
   --no-first-run \
   --no-default-browser-check \
   --disable-dev-shm-usage \
   --no-sandbox \
   https://creator.douyin.com/creator-micro/content/upload \
-  > /hoshuuch/YouBi/logs/douyin-chrome.log 2>&1 &
+  > /hoshuuch/YouBi/logs/douyin-animal-chrome.log 2>&1 &
 ```
 
 ## 4. 本机连接屏幕共享
@@ -116,7 +116,7 @@ Hoshuuch0815@
 服务器上检查进程和端口：
 
 ```bash
-ps -ef | grep -E 'Xvfb :99|x11vnc|fluxbox|google-chrome.*douyin-chrome-profile' | grep -v grep
+ps -ef | grep -E 'Xvfb :99|x11vnc|fluxbox|google-chrome.*douyin-chrome-profile-animal' | grep -v grep
 ss -lntp | grep -E ':(5901|9333) '
 curl -sS http://127.0.0.1:9333/json/version
 curl -sS http://127.0.0.1:9333/json/list
@@ -141,7 +141,7 @@ curl -sS http://127.0.0.1:9333/json/version
 如果 Chrome 或 VNC 卡住，可以在服务器上重启这一套环境：
 
 ```bash
-pkill -f 'google-chrome.*douyin-chrome-profile' || true
+pkill -f 'google-chrome.*douyin-chrome-profile-animal' || true
 pkill -f 'x11vnc.*:99' || true
 pkill -f 'fluxbox' || true
 pkill -f 'Xvfb :99' || true

@@ -23,6 +23,20 @@ public class DouyinAccountController {
         return accountService.accounts();
     }
 
+    @GetMapping("/api/douyin/cdp-sessions")
+    public Object cdpSessions() {
+        return accountService.cdpSessions();
+    }
+
+    @PostMapping("/api/douyin/cdp-sessions")
+    public ResponseEntity<?> saveCdpSession(@RequestBody DouyinCdpSessionUpdateRequest request) {
+        try {
+            return ResponseEntity.ok(accountService.saveCdpSession(request));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
+
     @GetMapping("/api/douyin/account")
     public ResponseEntity<?> account(@RequestParam(defaultValue = "default") String accountKey) {
         try {

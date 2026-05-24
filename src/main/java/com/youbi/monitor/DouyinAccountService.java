@@ -86,6 +86,63 @@ public class DouyinAccountService {
         );
     }
 
+    public List<DouyinCdpSession> cdpSessions() {
+        return jdbcTemplate.query(
+                """
+                SELECT account_key, cdp_port, cdp_endpoint, note, updated_at
+                FROM yd_douyin_cdp_session
+                ORDER BY account_key
+                """,
+                (rs, rowNum) -> new DouyinCdpSession(
+                        rs.getString("account_key"),
+                        nullableInt(rs, "cdp_port"),
+                        rs.getString("cdp_endpoint"),
+                        rs.getString("note"),
+                        rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime()
+                )
+        );
+    }
+
+    public DouyinCdpSession saveCdpSession(DouyinCdpSessionUpdateRequest request) throws IOException {
+        String originalKey = request == null ? "" : text(request.originalAccountKey());
+        String accountKey = normalizeAccountKey(request == null ? "" : request.accountKey());
+        Integer cdpPort = request == null ? null : request.cdpPort();
+        if (cdpPort == null || cdpPort < 1 || cdpPort > 65535) {
+            throw new IOException("Invalid Douyin CDP port: " + cdpPort);
+        }
+        if (!originalKey.isBlank()) {
+            String normalizedOriginal = normalizeAccountKey(originalKey);
+            if (!normalizedOriginal.equals(accountKey)) {
+                Integer targetExists = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM yd_douyin_cdp_session WHERE account_key = ?",
+                        Integer.class,
+                        accountKey
+                );
+                if (targetExists != null && targetExists > 0) {
+                    throw new IOException("Douyin CDP account key already exists: " + accountKey);
+                }
+                jdbcTemplate.update(
+                        "UPDATE yd_douyin_cdp_session SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
+                        accountKey,
+                        normalizedOriginal
+                );
+            }
+        }
+        jdbcTemplate.update(
+                """
+                INSERT INTO yd_douyin_cdp_session (account_key, cdp_port, cdp_endpoint, note)
+                VALUES (?, ?, NULL, NULL)
+                ON DUPLICATE KEY UPDATE cdp_port = VALUES(cdp_port), cdp_endpoint = NULL, updated_at = NOW()
+                """,
+                accountKey,
+                cdpPort
+        );
+        return cdpSessions().stream()
+                .filter(session -> session.accountKey().equals(accountKey))
+                .findFirst()
+                .orElseThrow(() -> new IOException("Cannot load Douyin CDP session: " + accountKey));
+    }
+
     public DouyinAccountStatus status(String accountKey) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         Optional<String> storageState = loadStorageState(normalized);
@@ -113,6 +170,51 @@ public class DouyinAccountService {
         String normalized = normalizeAccountKey(accountKey);
         return loadStorageState(normalized)
                 .orElseThrow(() -> new IOException("Douyin account is not logged in: " + normalized));
+    }
+
+    public Optional<String> cdpEndpoint(String accountKey) {
+        String normalized = normalizeAccountKey(accountKey);
+        List<String> sessionEndpoints = jdbcTemplate.query(
+                """
+                SELECT cdp_endpoint, cdp_port
+                FROM yd_douyin_cdp_session
+                WHERE account_key = ?
+                LIMIT 1
+                """,
+                (rs, rowNum) -> cdpEndpointFromRow(rs.getString("cdp_endpoint"), rs.getInt("cdp_port"), rs.wasNull()),
+                normalized
+        );
+        Optional<String> sessionEndpoint = sessionEndpoints.stream().map(this::text).filter(value -> !value.isBlank()).findFirst();
+        if (sessionEndpoint.isPresent()) {
+            return sessionEndpoint;
+        }
+        List<String> endpoints = jdbcTemplate.query(
+                """
+                SELECT cdp_endpoint, cdp_port
+                FROM yd_douyin_account
+                WHERE account_key = ?
+                LIMIT 1
+                """,
+                (rs, rowNum) -> cdpEndpointFromRow(rs.getString("cdp_endpoint"), rs.getInt("cdp_port"), rs.wasNull()),
+                normalized
+        );
+        return endpoints.stream().map(this::text).filter(value -> !value.isBlank()).findFirst();
+    }
+
+    private String cdpEndpointFromRow(String rawEndpoint, int port, boolean portWasNull) {
+        String endpoint = text(rawEndpoint);
+        if (!endpoint.isBlank()) {
+            return endpoint;
+        }
+        if (!portWasNull && port > 0) {
+            return "http://127.0.0.1:" + port;
+        }
+        return "";
+    }
+
+    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 
     public DouyinQrCode createQrCode(String accountKey) throws IOException {
@@ -587,6 +689,38 @@ public class DouyinAccountService {
                 )
                 """
         );
+        ensureColumn("yd_douyin_account", "cdp_port", "INT NULL");
+        ensureColumn("yd_douyin_account", "cdp_endpoint", "VARCHAR(255) NULL");
+        jdbcTemplate.execute(
+                """
+                CREATE TABLE IF NOT EXISTS yd_douyin_cdp_session (
+                    account_key VARCHAR(64) NOT NULL PRIMARY KEY,
+                    cdp_port INT NULL,
+                    cdp_endpoint VARCHAR(255) NULL,
+                    note VARCHAR(255) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+                """
+        );
+    }
+
+    private void ensureColumn(String table, String column, String definition) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                table,
+                column
+        );
+        if (count == null || count == 0) {
+            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        }
     }
 
     private void closeSession(String authCode) {

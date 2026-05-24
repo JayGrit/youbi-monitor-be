@@ -94,7 +94,7 @@ x11vnc -display :99 -localhost -forever -shared -rfbport 5901 -rfbauth /root/.vn
 DISPLAY=:99 google-chrome \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9333 \
-  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile \
+  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile-animal \
   --no-first-run \
   --no-default-browser-check \
   --disable-dev-shm-usage \
@@ -137,6 +137,79 @@ docker run -d \
 ```bash
 docker exec monitor-be curl -sS http://127.0.0.1:9333/json/version
 ```
+
+### 多账号 CDP 路由
+
+如果需要按视频 `type` 使用不同的已登录抖音 Chrome，会话可以用多个独立 Chrome Profile 和多个 CDP 端口。后端按上传请求里的 `accountKey` 选择 CDP endpoint；当前 uploader 会把 `yd_video_info.type` 作为各平台上传账号路由键，所以无需额外传 `type` 字段。
+
+同一个 `DISPLAY=:99` 下可以启动两个 Chrome：
+
+```bash
+DISPLAY=:99 nohup google-chrome \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9333 \
+  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile-animal \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-dev-shm-usage \
+  --no-sandbox \
+  https://creator.douyin.com/creator-micro/content/upload \
+  > /hoshuuch/YouBi/logs/douyin-animal-chrome.log 2>&1 &
+
+DISPLAY=:99 nohup google-chrome \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9334 \
+  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile-knowledge \
+  --no-first-run \
+  --no-default-browser-check \
+  --disable-dev-shm-usage \
+  --no-sandbox \
+  https://creator.douyin.com/creator-micro/content/upload \
+  > /hoshuuch/YouBi/logs/douyin-knowledge-chrome.log 2>&1 &
+```
+
+CDP 端口维护在 `yd_douyin_cdp_session`，不依赖账号是否已经有登录态：
+
+```sql
+CREATE TABLE IF NOT EXISTS yd_douyin_cdp_session (
+  account_key VARCHAR(64) NOT NULL PRIMARY KEY,
+  cdp_port INT NULL,
+  cdp_endpoint VARCHAR(255) NULL,
+  note VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+INSERT INTO yd_douyin_cdp_session (account_key, cdp_port, cdp_endpoint, note)
+VALUES
+  ('animal', 9333, NULL, 'animal chrome profile on DISPLAY=:99'),
+  ('knowledge', 9334, NULL, 'knowledge chrome profile on DISPLAY=:99')
+ON DUPLICATE KEY UPDATE
+  cdp_port = VALUES(cdp_port),
+  cdp_endpoint = VALUES(cdp_endpoint),
+  note = VALUES(note),
+  updated_at = NOW();
+```
+
+如果需要跨主机或非本机端口，也可以直接写 `cdp_endpoint`，例如 `http://127.0.0.1:9334` 或 `ws://127.0.0.1:9334/devtools/browser/<id>`。推荐只维护 `cdp_port` 或 HTTP endpoint，不固定 `ws://.../devtools/browser/<id>`。Chrome 重启后 browser websocket id 会变化，后端会在每次上传前从 `/json/version` 读取最新 `webSocketDebuggerUrl`。
+
+兼容规则：
+
+- `yd_douyin_cdp_session` 命中 `accountKey` 的 `cdp_endpoint` 或 `cdp_port` 时优先使用对应会话。
+- `yd_douyin_account` 上的 `cdp_endpoint` / `cdp_port` 字段保留为兼容 fallback。
+- `YDBI_DOUYIN_CDP_ENDPOINTS` 仍保留为环境变量兜底，格式为 `animal=http://127.0.0.1:9333;knowledge=http://127.0.0.1:9334`。
+- 可配置 `default=http://127.0.0.1:9333` 作为映射默认值。
+- 没有命中映射时，仍会回退到旧的 `YDBI_DOUYIN_CDP_URL`。
+- 同一个 endpoint 内部加了上传锁，避免并发请求同时操作同一个 Chrome Profile。
+
+本地打开服务器 VNC 可以直接运行：
+
+```bash
+scripts/open_douyin_server_vnc.command
+```
+
+脚本会建立 SSH 隧道，转发 `5901`、`9333`、`9334`，然后用 macOS `open vnc://127.0.0.1:5901` 打开屏幕共享。
+VNC 密码会自动复制到本机剪贴板，连接弹窗出现后直接粘贴即可。
 
 ## 4. 触发抖音上传
 
