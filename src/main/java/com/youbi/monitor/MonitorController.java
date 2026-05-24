@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.util.List;
 
 import static org.springframework.http.HttpStatus.CONFLICT;
 import static org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR;
@@ -61,6 +62,25 @@ public class MonitorController {
     @GetMapping("/api/submitter-author-types")
     public MonitorService.SubmitterAuthorType submitterAuthorType(@RequestParam String author) {
         return monitorService.authorType(author);
+    }
+
+    @GetMapping("/api/submitter-author-types/all")
+    public List<MonitorService.SubmitterAuthorType> submitterAuthorTypes() {
+        return monitorService.authorTypes();
+    }
+
+    @PostMapping("/api/submitter-author-types")
+    public MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
+            @RequestBody MonitorService.SubmitterAuthorTypeUpdateRequest request
+    ) {
+        try {
+            return monitorService.saveAuthorType(
+                    request == null ? null : request.author(),
+                    request == null ? null : request.type()
+            );
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        }
     }
 
     @PostMapping("/api/video-tasks/{taskId}/ready")

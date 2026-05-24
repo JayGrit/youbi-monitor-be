@@ -345,6 +345,34 @@ public class MonitorService {
         return new SubmitterAuthorType(normalized, rows.isEmpty() ? "" : text(rows.get(0)));
     }
 
+    public List<SubmitterAuthorType> authorTypes() {
+        return jdbcTemplate.query("""
+                SELECT author, type
+                FROM yd_submitter_author_type
+                ORDER BY author
+                """, (rs, rowNum) -> new SubmitterAuthorType(
+                text(rs.getString("author")),
+                text(rs.getString("type"))
+        ));
+    }
+
+    public SubmitterAuthorType saveAuthorType(String author, String type) {
+        String normalizedAuthor = text(author);
+        String normalizedType = text(type);
+        if (normalizedAuthor.isBlank()) {
+            throw new IllegalArgumentException("author is required");
+        }
+        if (normalizedType.isBlank()) {
+            throw new IllegalArgumentException("type is required");
+        }
+        jdbcTemplate.update("""
+                INSERT INTO yd_submitter_author_type (author, type)
+                VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE type = VALUES(type), updated_at = NOW()
+                """, normalizedAuthor, normalizedType);
+        return new SubmitterAuthorType(normalizedAuthor, normalizedType);
+    }
+
     private TaskFlowDetail.TaskFlowStage flowStage(
             String taskId,
             StageDefinition definition,
@@ -1264,6 +1292,9 @@ public class MonitorService {
     }
 
     public record SubmitterAuthorType(String author, String type) {
+    }
+
+    public record SubmitterAuthorTypeUpdateRequest(String author, String type) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
