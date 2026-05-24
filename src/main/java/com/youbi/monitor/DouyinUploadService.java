@@ -140,7 +140,8 @@ public class DouyinUploadService {
         page.waitForURL(PUBLISH_VIDEO_URL, new Page.WaitForURLOptions().setTimeout(30000));
         ensureUploadLandingPage(page, taskId, request.accountKey());
         log.info("Douyin upload set video input taskId={} file={}", taskId, videoPath);
-        page.locator("div[class^='container'] input[type='file']").first().setInputFiles(videoPath);
+        page.locator("div[class^='container'] input[type='file']").first()
+                .setInputFiles(videoPath, new Locator.SetInputFilesOptions().setTimeout(300000));
         waitForPublishPage(page, taskId);
         page.waitForTimeout(1000);
 
@@ -472,7 +473,8 @@ public class DouyinUploadService {
                 }
                 if (page.locator("div.progress-div > div:has-text('上传失败')").count() > 0) {
                     log.warn("Douyin upload retry failed upload taskId={} file={}", taskId, videoPath);
-                    page.locator("div.progress-div [class^='upload-btn-input']").setInputFiles(videoPath);
+                    page.locator("div.progress-div [class^='upload-btn-input']")
+                            .setInputFiles(videoPath, new Locator.SetInputFilesOptions().setTimeout(300000));
                 }
             } catch (Exception ignored) {
             }
@@ -493,7 +495,8 @@ public class DouyinUploadService {
         page.click("text=\"选择封面\"");
         Locator modal = page.locator("div[id*='creator-content-modal']").first();
         modal.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        modal.locator("div[class^='semi-upload upload'] input.semi-upload-hidden-input").first().setInputFiles(coverPath);
+        modal.locator("div[class^='semi-upload upload'] input.semi-upload-hidden-input").first()
+                .setInputFiles(coverPath, new Locator.SetInputFilesOptions().setTimeout(120000));
         page.waitForTimeout(2000);
         modal.locator("button:visible:has-text('完成')").first().click();
         page.waitForSelector("div.extractFooter", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED).setTimeout(30000));
