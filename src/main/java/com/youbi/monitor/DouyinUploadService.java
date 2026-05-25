@@ -109,9 +109,13 @@ public class DouyinUploadService {
                             taskId, accountKey, cdpTarget.key(), cdpTarget.endpoint(), browserWsUrl);
                     BrowserContext context = accountService.firstContext(browser);
                     Page page = context.newPage();
-                    uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
-                    accountService.saveStorageState(accountKey, context.storageState());
-                    log.info("Douyin upload CDP storage state saved taskId={} accountKey={} cdpKey={}", taskId, accountKey, cdpTarget.key());
+                    try {
+                        uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
+                        accountService.saveStorageState(accountKey, context.storageState());
+                        log.info("Douyin upload CDP storage state saved taskId={} accountKey={} cdpKey={}", taskId, accountKey, cdpTarget.key());
+                    } finally {
+                        page.close();
+                    }
                 }
             } else {
                 String storageState = accountService.storageState(accountKey);
