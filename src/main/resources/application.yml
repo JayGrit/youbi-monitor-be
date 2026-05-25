@@ -39,3 +39,4 @@ youbi:
     playwright:
       headless: ${YDBI_BILIBILI_PLAYWRIGHT_HEADLESS:false}
       browser-channel: ${YDBI_BILIBILI_PLAYWRIGHT_BROWSER_CHANNEL:}
+      cdp-url: ${YDBI_BILIBILI_PLAYWRIGHT_CDP_URL:}

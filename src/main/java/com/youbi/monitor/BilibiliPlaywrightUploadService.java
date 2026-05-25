@@ -75,8 +75,8 @@ public class BilibiliPlaywrightUploadService {
             }
 
             String storageState = accountService.storageState(accountKey);
-            try (Browser browser = accountService.launchBrowser()) {
-                BrowserContext context = browser.newContext(accountService.storageContextOptions(storageState));
+            try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
+                BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
                 try {
                     Page page = context.newPage();
                     uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
@@ -108,8 +108,8 @@ public class BilibiliPlaywrightUploadService {
         String normalized = accountService.normalizeAccountKey(accountKey);
         String taskId = "inspect-" + UUID.randomUUID();
         String storageState = accountService.storageState(normalized);
-        try (Browser browser = accountService.launchBrowser()) {
-            BrowserContext context = browser.newContext(accountService.storageContextOptions(storageState));
+        try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
+            BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
             try {
                 Page page = context.newPage();
                 page.navigate(PUBLISH_VIDEO_URL);
@@ -133,8 +133,8 @@ public class BilibiliPlaywrightUploadService {
         ResolvedFile resolvedVideo = resolveVideo(request);
         try {
             String storageState = accountService.storageState(accountKey);
-            try (Browser browser = accountService.launchBrowser()) {
-                BrowserContext context = browser.newContext(accountService.storageContextOptions(storageState));
+            try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
+                BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
                 try {
                     Page page = context.newPage();
                     page.navigate(PUBLISH_VIDEO_URL);

@@ -38,6 +38,7 @@ public class BilibiliPlaywrightAccountService {
     private final HttpClient httpClient;
     private final boolean headless;
     private final String browserChannel;
+    private final String cdpUrl;
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public BilibiliPlaywrightAccountService(
@@ -45,7 +46,8 @@ public class BilibiliPlaywrightAccountService {
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             @Value("${youbi.bilibili.playwright.headless:false}") boolean headless,
-            @Value("${youbi.bilibili.playwright.browser-channel:chrome}") String browserChannel
+            @Value("${youbi.bilibili.playwright.browser-channel:chrome}") String browserChannel,
+            @Value("${youbi.bilibili.playwright.cdp-url:}") String cdpUrl
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
@@ -53,6 +55,7 @@ public class BilibiliPlaywrightAccountService {
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NORMAL).build();
         this.headless = headless;
         this.browserChannel = browserChannel == null ? "" : browserChannel.trim();
+        this.cdpUrl = text(cdpUrl);
         ensureSchema();
     }
 
@@ -174,6 +177,13 @@ public class BilibiliPlaywrightAccountService {
         return PlaywrightHolder.playwright().chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
     }
 
+    BrowserHandle openUploadBrowser() throws IOException {
+        if (!cdpUrl.isBlank()) {
+            return new BrowserHandle(PlaywrightHolder.playwright().chromium().connectOverCDP(browserWsUrl(cdpUrl)), false);
+        }
+        return new BrowserHandle(launchBrowser(), true);
+    }
+
     Browser.NewContextOptions storageContextOptions(String storageState) {
         return new Browser.NewContextOptions().setStorageState(storageState);
     }
@@ -257,6 +267,37 @@ public class BilibiliPlaywrightAccountService {
             }
         }
         return builder.toString();
+    }
+
+    private String browserWsUrl(String endpoint) throws IOException {
+        String value = text(endpoint);
+        if (value.startsWith("ws://") || value.startsWith("wss://")) {
+            return value;
+        }
+        URI base;
+        try {
+            base = URI.create(value);
+        } catch (IllegalArgumentException exception) {
+            throw new IOException("Invalid Bilibili Playwright CDP URL: " + endpoint, exception);
+        }
+        HttpRequest request = HttpRequest.newBuilder(base.resolve("/json/version"))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build();
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() / 100 != 2) {
+                throw new IOException("Bilibili Playwright CDP version endpoint returned HTTP " + response.statusCode());
+            }
+            String browserWsUrl = objectMapper.readTree(response.body()).path("webSocketDebuggerUrl").asText("");
+            if (browserWsUrl.isBlank()) {
+                throw new IOException("Bilibili Playwright CDP version endpoint missing webSocketDebuggerUrl");
+            }
+            return browserWsUrl;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted resolving Bilibili Playwright CDP endpoint", exception);
+        }
     }
 
     private boolean hasBilibiliLoginCookie(String storageState) throws IOException {
@@ -385,6 +426,27 @@ public class BilibiliPlaywrightAccountService {
                 options.setChannel(channel);
             }
             return options;
+        }
+    }
+
+    static class BrowserHandle implements AutoCloseable {
+        private final Browser browser;
+        private final boolean closeBrowser;
+
+        BrowserHandle(Browser browser, boolean closeBrowser) {
+            this.browser = browser;
+            this.closeBrowser = closeBrowser;
+        }
+
+        Browser browser() {
+            return browser;
+        }
+
+        @Override
+        public void close() {
+            if (closeBrowser) {
+                browser.close();
+            }
         }
     }
 
