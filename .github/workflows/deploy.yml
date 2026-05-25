@@ -52,8 +52,11 @@ jobs:
             echo "Douyin CDP URL not detected; monitor-be will use storage-state mode."
           fi
           DOCKER_ENV_ARGS+=(
+            -e "YDBI_MONITOR_UPLOAD_WORK_DIR=/work/monitor-be/uploads"
+            -e "YDBI_DOUYIN_BROWSER_UPLOAD_WORK_DIR=/hoshuuch/YouBi/workfolder/monitor-be/uploads"
             -e "YDBI_BILIBILI_PLAYWRIGHT_BROWSER_CHANNEL=chrome"
             -e "YDBI_BILIBILI_PLAYWRIGHT_HEADLESS=true"
+            -e "YDBI_BILIBILI_PLAYWRIGHT_BROWSER_UPLOAD_WORK_DIR=/hoshuuch/YouBi/workfolder/monitor-be/uploads"
           )
           echo "Bilibili Playwright will launch system Chrome in headless mode."
 

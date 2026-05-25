@@ -1,7 +1,10 @@
 package com.youbi.monitor;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import io.minio.GetObjectArgs;
@@ -37,6 +40,7 @@ public class BilibiliPlaywrightUploadService {
     private final MinioClient minioClient;
     private final String minioBucket;
     private final Path uploadWorkDir;
+    private final Path browserUploadWorkDir;
     private final HttpClient httpClient;
 
     public BilibiliPlaywrightUploadService(
@@ -45,7 +49,8 @@ public class BilibiliPlaywrightUploadService {
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket,
-            @Value("${youbi.minio.work-dir}") String uploadWorkDir
+            @Value("${youbi.minio.work-dir}") String uploadWorkDir,
+            @Value("${youbi.bilibili.playwright.browser-upload-work-dir:}") String browserUploadWorkDir
     ) {
         this.accountService = accountService;
         this.minioClient = MinioClient.builder()
@@ -54,6 +59,7 @@ public class BilibiliPlaywrightUploadService {
                 .build();
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
+        this.browserUploadWorkDir = text(browserUploadWorkDir).isBlank() ? null : Path.of(browserUploadWorkDir).toAbsolutePath().normalize();
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
     }
 
@@ -79,7 +85,14 @@ public class BilibiliPlaywrightUploadService {
                 BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
                 try {
                     Page page = context.newPage();
-                    uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
+                    uploadVideoContent(
+                            page,
+                            request,
+                            new UploadPaths(videoPath, browserPath(videoPath)),
+                            resolvedCover == null ? null : new UploadPaths(resolvedCover.path(), browserPath(resolvedCover.path())),
+                            browserHandle.browserSideFiles(),
+                            taskId
+                    );
                     accountService.saveStorageState(accountKey, context.storageState());
                 } finally {
                     context.close();
@@ -144,7 +157,7 @@ public class BilibiliPlaywrightUploadService {
                     fileInput.waitFor(new Locator.WaitForOptions()
                             .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
                             .setTimeout(30000));
-                    fileInput.setInputFiles(resolvedVideo.path());
+                    setInputFiles(page, "input[type='file']", new UploadPaths(resolvedVideo.path(), browserPath(resolvedVideo.path())), browserHandle.browserSideFiles(), 30000, taskId, "inspect-video");
                     page.waitForTimeout(5000);
                     DiagnosticSnapshot selected = dumpDiagnostics(page, taskId, "02-after-select");
                     waitForMetadataForm(page, taskId);
@@ -174,7 +187,7 @@ public class BilibiliPlaywrightUploadService {
         }
     }
 
-    private void uploadVideoContent(Page page, BilibiliUploadRequest request, Path videoPath, Path coverPath, String taskId) throws IOException {
+    private void uploadVideoContent(Page page, BilibiliUploadRequest request, UploadPaths videoPaths, UploadPaths coverPaths, boolean browserSideFiles, String taskId) throws IOException {
         String title = truncate(required(request.title(), "title"), 80);
         log.info("Bilibili Playwright navigate upload page taskId={} url={}", taskId, PUBLISH_VIDEO_URL);
         page.navigate(PUBLISH_VIDEO_URL);
@@ -182,12 +195,9 @@ public class BilibiliPlaywrightUploadService {
         dumpDiagnostics(page, taskId, "01-open-upload-page");
         ensureLoggedIn(page, taskId);
 
-        Locator fileInput = page.locator("input[type='file']").first();
-        fileInput.waitFor(new Locator.WaitForOptions()
-                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
-                .setTimeout(30000));
-        log.info("Bilibili Playwright set video input taskId={} file={}", taskId, videoPath);
-        fileInput.setInputFiles(videoPath);
+        log.info("Bilibili Playwright set video input taskId={} file={} browserFile={} browserSide={}",
+                taskId, videoPaths.localPath(), videoPaths.browserPath(), browserSideFiles);
+        setInputFiles(page, "input[type='file']", videoPaths, browserSideFiles, 30000, taskId, "video");
         page.waitForTimeout(3000);
         dumpDiagnostics(page, taskId, "02-video-selected");
 
@@ -196,7 +206,7 @@ public class BilibiliPlaywrightUploadService {
         fillDescription(page, request.description(), taskId);
         setCreationStatement(page, taskId);
         fillTags(page, request.tags(), taskId);
-        setCoverIfPresent(page, coverPath, taskId);
+        setCoverIfPresent(page, coverPaths, browserSideFiles, taskId);
         dumpDiagnostics(page, taskId, "03-metadata-filled");
         clickPublishWhenReady(page, taskId);
     }
@@ -316,23 +326,80 @@ public class BilibiliPlaywrightUploadService {
         }
     }
 
-    private void setCoverIfPresent(Page page, Path coverPath, String taskId) {
-        if (coverPath == null) {
+    private void setCoverIfPresent(Page page, UploadPaths coverPaths, boolean browserSideFiles, String taskId) {
+        if (coverPaths == null) {
             return;
         }
         try {
-            Locator coverInput = page.locator("input[type='file'][accept*='image']").first();
+            String selector = "input[type='file'][accept*='image']";
+            Locator coverInput = page.locator(selector).first();
             if (coverInput.count() > 0) {
-                coverInput.setInputFiles(coverPath);
+                setInputFiles(page, selector, coverPaths, browserSideFiles, 30000, taskId, "cover");
                 page.waitForTimeout(1000);
-                log.info("Bilibili Playwright cover input filled taskId={} cover={}", taskId, coverPath);
+                log.info("Bilibili Playwright cover input filled taskId={} cover={} browserCover={}",
+                        taskId, coverPaths.localPath(), coverPaths.browserPath());
                 return;
             }
-            log.warn("Bilibili Playwright cover input not found taskId={} cover={}", taskId, coverPath);
+            log.warn("Bilibili Playwright cover input not found taskId={} cover={}", taskId, coverPaths.localPath());
         } catch (Exception exception) {
-            log.warn("Bilibili Playwright cover skipped taskId={} cover={} message={}", taskId, coverPath, exception.getMessage());
+            log.warn("Bilibili Playwright cover skipped taskId={} cover={} message={}", taskId, coverPaths.localPath(), exception.getMessage());
             dumpDiagnostics(page, taskId, "cover-skipped");
         }
+    }
+
+    private void setInputFiles(Page page, String selector, UploadPaths paths, boolean browserSideFiles, double timeoutMs, String taskId, String label) throws IOException {
+        Locator input = page.locator(selector).first();
+        input.waitFor(new Locator.WaitForOptions()
+                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
+                .setTimeout(timeoutMs));
+        if (!browserSideFiles) {
+            input.setInputFiles(paths.localPath(), new Locator.SetInputFilesOptions().setTimeout(timeoutMs));
+            return;
+        }
+        setInputFilesOverCdp(page, selector, paths.browserPath(), taskId, label);
+    }
+
+    private void setInputFilesOverCdp(Page page, String selector, Path browserPath, String taskId, String label) throws IOException {
+        CDPSession session = page.context().newCDPSession(page);
+        try {
+            JsonObject documentParams = new JsonObject();
+            documentParams.addProperty("pierce", true);
+            JsonObject document = session.send("DOM.getDocument", documentParams);
+            int rootNodeId = document.getAsJsonObject("root").get("nodeId").getAsInt();
+
+            JsonObject queryParams = new JsonObject();
+            queryParams.addProperty("nodeId", rootNodeId);
+            queryParams.addProperty("selector", selector);
+            JsonObject queryResult = session.send("DOM.querySelector", queryParams);
+            int nodeId = queryResult.get("nodeId").getAsInt();
+            if (nodeId == 0) {
+                throw new IOException("Cannot find Bilibili file input over CDP: " + selector);
+            }
+
+            JsonArray files = new JsonArray();
+            files.add(browserPath.toString());
+            JsonObject setParams = new JsonObject();
+            setParams.addProperty("nodeId", nodeId);
+            setParams.add("files", files);
+            session.send("DOM.setFileInputFiles", setParams);
+            log.info("Bilibili Playwright set input over CDP taskId={} label={} browserFile={}", taskId, label, browserPath);
+        } catch (RuntimeException exception) {
+            throw new IOException("Cannot set Bilibili " + label + " file input over CDP with browser-visible path "
+                    + browserPath + ": " + exception.getMessage(), exception);
+        } finally {
+            try {
+                session.detach();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private Path browserPath(Path localPath) {
+        Path normalized = localPath.toAbsolutePath().normalize();
+        if (browserUploadWorkDir == null || !normalized.startsWith(uploadWorkDir)) {
+            return normalized;
+        }
+        return browserUploadWorkDir.resolve(uploadWorkDir.relativize(normalized)).toAbsolutePath().normalize();
     }
 
     private void clickPublishWhenReady(Page page, String taskId) {
@@ -628,6 +695,9 @@ public class BilibiliPlaywrightUploadService {
     }
 
     private record ResolvedFile(Path path, boolean temporary) {
+    }
+
+    private record UploadPaths(Path localPath, Path browserPath) {
     }
 
     private record DiagnosticSnapshot(Path screenshot, Path html) {

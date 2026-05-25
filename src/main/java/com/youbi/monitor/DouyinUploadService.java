@@ -3,8 +3,11 @@ package com.youbi.monitor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
@@ -47,6 +50,7 @@ public class DouyinUploadService {
     private final MinioClient minioClient;
     private final String minioBucket;
     private final Path uploadWorkDir;
+    private final Path browserUploadWorkDir;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final String cdpUrl;
@@ -62,6 +66,7 @@ public class DouyinUploadService {
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket,
             @Value("${youbi.minio.work-dir}") String uploadWorkDir,
+            @Value("${youbi.douyin.browser-upload-work-dir:}") String browserUploadWorkDir,
             @Value("${youbi.douyin.cdp-url:}") String cdpUrl,
             @Value("${youbi.douyin.cdp-endpoints:}") String cdpEndpoints
     ) {
@@ -74,6 +79,7 @@ public class DouyinUploadService {
                 .build();
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
+        this.browserUploadWorkDir = text(browserUploadWorkDir).isBlank() ? null : Path.of(browserUploadWorkDir).toAbsolutePath().normalize();
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
         this.cdpUrl = text(cdpUrl);
         this.cdpEndpoints = parseCdpEndpoints(cdpEndpoints);
@@ -110,7 +116,14 @@ public class DouyinUploadService {
                     BrowserContext context = accountService.firstContext(browser);
                     Page page = context.newPage();
                     try {
-                        uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
+                        uploadVideoContent(
+                                page,
+                                request,
+                                new UploadPaths(videoPath, browserPath(videoPath)),
+                                resolvedCover == null ? null : new UploadPaths(resolvedCover.path(), browserPath(resolvedCover.path())),
+                                true,
+                                taskId
+                        );
                         accountService.saveStorageState(accountKey, context.storageState());
                         log.info("Douyin upload CDP storage state saved taskId={} accountKey={} cdpKey={}", taskId, accountKey, cdpTarget.key());
                     } finally {
@@ -125,7 +138,14 @@ public class DouyinUploadService {
                     BrowserContext context = accountService.newContext(browser, accountService.storageContextOptions(storageState));
                     try {
                         Page page = context.newPage();
-                        uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
+                        uploadVideoContent(
+                                page,
+                                request,
+                                new UploadPaths(videoPath, videoPath),
+                                resolvedCover == null ? null : new UploadPaths(resolvedCover.path(), resolvedCover.path()),
+                                false,
+                                taskId
+                        );
                         accountService.saveStorageState(accountKey, context.storageState());
                         log.info("Douyin upload storage state saved taskId={} accountKey={}", taskId, accountKey);
                     } finally {
@@ -225,23 +245,23 @@ public class DouyinUploadService {
         return Map.copyOf(endpoints);
     }
 
-    private void uploadVideoContent(Page page, DouyinUploadRequest request, Path videoPath, Path coverPath, String taskId) throws IOException {
+    private void uploadVideoContent(Page page, DouyinUploadRequest request, UploadPaths videoPaths, UploadPaths coverPaths, boolean browserSideFiles, String taskId) throws IOException {
         String title = truncate(required(request.title(), "title"), 30);
         log.info("Douyin upload navigate publish page taskId={} url={}", taskId, PUBLISH_VIDEO_URL);
         page.navigate(PUBLISH_VIDEO_URL);
         page.waitForURL(PUBLISH_VIDEO_URL, new Page.WaitForURLOptions().setTimeout(30000));
         ensureUploadLandingPage(page, taskId, request.accountKey());
-        log.info("Douyin upload set video input taskId={} file={}", taskId, videoPath);
-        page.locator("div[class^='container'] input[type='file']").first()
-                .setInputFiles(videoPath, new Locator.SetInputFilesOptions().setTimeout(300000));
+        log.info("Douyin upload set video input taskId={} file={} browserFile={} browserSide={}",
+                taskId, videoPaths.localPath(), videoPaths.browserPath(), browserSideFiles);
+        setInputFiles(page, "div[class^='container'] input[type='file']", videoPaths, browserSideFiles, 300000, taskId, "video");
         waitForPublishPage(page, taskId);
         page.waitForTimeout(1000);
 
         log.info("Douyin upload fill metadata taskId={} title={} tags={}", taskId, title, text(request.tags()));
         fillTitleDescriptionAndTags(page, title, firstText(request.description(), title), request.tags());
-        waitForVideoUploaded(page, videoPath, taskId);
+        waitForVideoUploaded(page, videoPaths, browserSideFiles, taskId);
         setProductLink(page, request.productLink(), request.productTitle(), taskId);
-        setCover(page, coverPath, taskId);
+        setCover(page, coverPaths, browserSideFiles, taskId);
         enableThirdPartySyncIfPresent(page, taskId);
         setSchedule(page, request.schedule(), taskId);
         clickPublish(page, taskId);
@@ -553,7 +573,7 @@ public class DouyinUploadService {
         }
     }
 
-    private void waitForVideoUploaded(Page page, Path videoPath, String taskId) {
+    private void waitForVideoUploaded(Page page, UploadPaths videoPaths, boolean browserSideFiles, String taskId) {
         long deadline = System.currentTimeMillis() + Duration.ofMinutes(30).toMillis();
         int checks = 0;
         while (System.currentTimeMillis() < deadline) {
@@ -564,9 +584,9 @@ public class DouyinUploadService {
                     return;
                 }
                 if (page.locator("div.progress-div > div:has-text('上传失败')").count() > 0) {
-                    log.warn("Douyin upload retry failed upload taskId={} file={}", taskId, videoPath);
-                    page.locator("div.progress-div [class^='upload-btn-input']")
-                            .setInputFiles(videoPath, new Locator.SetInputFilesOptions().setTimeout(300000));
+                    log.warn("Douyin upload retry failed upload taskId={} file={} browserFile={}",
+                            taskId, videoPaths.localPath(), videoPaths.browserPath());
+                    setInputFiles(page, "div.progress-div [class^='upload-btn-input']", videoPaths, browserSideFiles, 300000, taskId, "video-retry");
                 }
             } catch (Exception ignored) {
             }
@@ -579,19 +599,72 @@ public class DouyinUploadService {
         throw new RuntimeException("Timed out waiting for Douyin video upload");
     }
 
-    private void setCover(Page page, Path coverPath, String taskId) {
-        if (coverPath == null) {
+    private void setCover(Page page, UploadPaths coverPaths, boolean browserSideFiles, String taskId) throws IOException {
+        if (coverPaths == null) {
             return;
         }
-        log.info("Douyin upload set cover taskId={} cover={}", taskId, coverPath);
+        log.info("Douyin upload set cover taskId={} cover={} browserCover={} browserSide={}",
+                taskId, coverPaths.localPath(), coverPaths.browserPath(), browserSideFiles);
         page.click("text=\"选择封面\"");
         Locator modal = page.locator("div[id*='creator-content-modal']").first();
         modal.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        modal.locator("div[class^='semi-upload upload'] input.semi-upload-hidden-input").first()
-                .setInputFiles(coverPath, new Locator.SetInputFilesOptions().setTimeout(120000));
+        setInputFiles(page, "div[id*='creator-content-modal'] div[class^='semi-upload upload'] input.semi-upload-hidden-input", coverPaths, browserSideFiles, 120000, taskId, "cover");
         page.waitForTimeout(2000);
         modal.locator("button:visible:has-text('完成')").first().click();
         page.waitForSelector("div.extractFooter", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED).setTimeout(30000));
+    }
+
+    private void setInputFiles(Page page, String selector, UploadPaths paths, boolean browserSideFiles, double timeoutMs, String taskId, String label) throws IOException {
+        Locator input = page.locator(selector).first();
+        input.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
+        if (!browserSideFiles) {
+            input.setInputFiles(paths.localPath(), new Locator.SetInputFilesOptions().setTimeout(timeoutMs));
+            return;
+        }
+        setInputFilesOverCdp(page, selector, paths.browserPath(), taskId, label);
+    }
+
+    private void setInputFilesOverCdp(Page page, String selector, Path browserPath, String taskId, String label) throws IOException {
+        CDPSession session = page.context().newCDPSession(page);
+        try {
+            JsonObject documentParams = new JsonObject();
+            documentParams.addProperty("pierce", true);
+            JsonObject document = session.send("DOM.getDocument", documentParams);
+            int rootNodeId = document.getAsJsonObject("root").get("nodeId").getAsInt();
+
+            JsonObject queryParams = new JsonObject();
+            queryParams.addProperty("nodeId", rootNodeId);
+            queryParams.addProperty("selector", selector);
+            JsonObject queryResult = session.send("DOM.querySelector", queryParams);
+            int nodeId = queryResult.get("nodeId").getAsInt();
+            if (nodeId == 0) {
+                throw new IOException("Cannot find Douyin file input over CDP: " + selector);
+            }
+
+            JsonArray files = new JsonArray();
+            files.add(browserPath.toString());
+            JsonObject setParams = new JsonObject();
+            setParams.addProperty("nodeId", nodeId);
+            setParams.add("files", files);
+            session.send("DOM.setFileInputFiles", setParams);
+            log.info("Douyin upload set input over CDP taskId={} label={} browserFile={}", taskId, label, browserPath);
+        } catch (RuntimeException exception) {
+            throw new IOException("Cannot set Douyin " + label + " file input over CDP with browser-visible path "
+                    + browserPath + ": " + exception.getMessage(), exception);
+        } finally {
+            try {
+                session.detach();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private Path browserPath(Path localPath) {
+        Path normalized = localPath.toAbsolutePath().normalize();
+        if (browserUploadWorkDir == null || !normalized.startsWith(uploadWorkDir)) {
+            return normalized;
+        }
+        return browserUploadWorkDir.resolve(uploadWorkDir.relativize(normalized)).toAbsolutePath().normalize();
     }
 
     private void setProductLink(Page page, String productLink, String productTitle, String taskId) {
@@ -1015,6 +1088,9 @@ public class DouyinUploadService {
     }
 
     private record ResolvedFile(Path path, boolean temporary) {
+    }
+
+    private record UploadPaths(Path localPath, Path browserPath) {
     }
 
     private record CdpTarget(String key, String endpoint) {

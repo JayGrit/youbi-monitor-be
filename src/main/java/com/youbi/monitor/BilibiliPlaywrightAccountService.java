@@ -446,6 +446,10 @@ public class BilibiliPlaywrightAccountService {
             return browser;
         }
 
+        boolean browserSideFiles() {
+            return !closeBrowser;
+        }
+
         @Override
         public void close() {
             if (closeBrowser) {

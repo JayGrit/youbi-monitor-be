@@ -33,6 +33,7 @@ youbi:
   douyin:
     headless: ${YDBI_DOUYIN_HEADLESS:true}
     browser-channel: ${YDBI_DOUYIN_BROWSER_CHANNEL:chrome}
+    browser-upload-work-dir: ${YDBI_DOUYIN_BROWSER_UPLOAD_WORK_DIR:}
     cdp-url: ${YDBI_DOUYIN_CDP_URL:}
     cdp-endpoints: ${YDBI_DOUYIN_CDP_ENDPOINTS:}
   bilibili:
@@ -40,3 +41,4 @@ youbi:
       headless: ${YDBI_BILIBILI_PLAYWRIGHT_HEADLESS:false}
       browser-channel: ${YDBI_BILIBILI_PLAYWRIGHT_BROWSER_CHANNEL:}
       cdp-url: ${YDBI_BILIBILI_PLAYWRIGHT_CDP_URL:}
+      browser-upload-work-dir: ${YDBI_BILIBILI_PLAYWRIGHT_BROWSER_UPLOAD_WORK_DIR:}
