@@ -75,6 +75,8 @@ public class XiaohongshuAccountService {
                             rs.getString("nickname"),
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
+                            sendAvailability.todayUploadCount(),
+                            sendAvailability.cooldownWaitingCount(),
                             null,
                             "已保存",
                             Map.of()
@@ -88,7 +90,7 @@ public class XiaohongshuAccountService {
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         if (storageState.isEmpty()) {
-            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), false, "未登录", Map.of());
+            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -103,6 +105,8 @@ public class XiaohongshuAccountService {
                 profile.nickname(),
                 sendAvailability.lastUploadAt(),
                 sendAvailability.nextUploadAllowedAt(),
+                sendAvailability.todayUploadCount(),
+                sendAvailability.cooldownWaitingCount(),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -233,7 +237,7 @@ public class XiaohongshuAccountService {
     }
 
     private XiaohongshuAccountStatus emptyStatus(String accountKey) {
-        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, false, "等待扫码", Map.of());
+        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, false, "等待扫码", Map.of());
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {

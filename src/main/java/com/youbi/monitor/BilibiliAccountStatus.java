@@ -15,6 +15,8 @@ public record BilibiliAccountStatus(
         Integer level,
         LocalDateTime lastUploadAt,
         LocalDateTime nextUploadAllowedAt,
+        int todayUploadCount,
+        int cooldownWaitingCount,
         Boolean valid,
         String message,
         Map<String, Object> raw

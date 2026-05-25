@@ -123,6 +123,8 @@ public class BilibiliPlaywrightAccountService {
                             blankToNull(rs.getString("playwright_uname")) == null ? rs.getString("uname") : rs.getString("playwright_uname"),
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
+                            sendAvailability.todayUploadCount(),
+                            sendAvailability.cooldownWaitingCount(),
                             null,
                             "已保存",
                             Map.of()
@@ -150,6 +152,8 @@ public class BilibiliPlaywrightAccountService {
                 profile.uname(),
                 sendAvailability.lastUploadAt(),
                 sendAvailability.nextUploadAllowedAt(),
+                sendAvailability.todayUploadCount(),
+                sendAvailability.cooldownWaitingCount(),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -350,7 +354,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private BilibiliPlaywrightAccountStatus emptyStatus(String accountKey, String message) {
-        return new BilibiliPlaywrightAccountStatus("database", accountKey, false, 0, null, null, null, null, null, false, message, Map.of());
+        return new BilibiliPlaywrightAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, false, message, Map.of());
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {

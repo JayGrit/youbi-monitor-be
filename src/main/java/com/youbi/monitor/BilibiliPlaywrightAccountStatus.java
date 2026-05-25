@@ -13,6 +13,8 @@ public record BilibiliPlaywrightAccountStatus(
         String uname,
         LocalDateTime lastUploadAt,
         LocalDateTime nextUploadAllowedAt,
+        int todayUploadCount,
+        int cooldownWaitingCount,
         Boolean valid,
         String message,
         Map<String, Object> raw

@@ -19,13 +19,21 @@ public class AccountSendAvailabilityService {
     public AccountSendAvailability availability(String platform, String accountKey, String platformAccountTable) {
         LocalDateTime lastUploadAt = null;
         LocalDateTime nextUploadAllowedAt = null;
+        int todayUploadCount = 0;
+        int cooldownWaitingCount = 0;
 
-        if (tableExists("yd_upload_account")) {
+        boolean uploadAccountExists = tableExists("yd_upload_account");
+        if (uploadAccountExists) {
             Optional<AccountSendAvailability> shared = querySharedUploadAccount(platform, accountKey);
             if (shared.isPresent()) {
                 lastUploadAt = latest(lastUploadAt, shared.get().lastUploadAt());
                 nextUploadAllowedAt = latest(nextUploadAllowedAt, shared.get().nextUploadAllowedAt());
             }
+        }
+
+        if (tableExists("yd_upload_submission")) {
+            todayUploadCount = todayUploadCount(platform, accountKey);
+            cooldownWaitingCount = uploadAccountExists ? cooldownWaitingCount(platform, accountKey) : 0;
         }
 
         if (platformAccountTable != null
@@ -38,7 +46,7 @@ public class AccountSendAvailabilityService {
             }
         }
 
-        return new AccountSendAvailability(lastUploadAt, nextUploadAllowedAt);
+        return new AccountSendAvailability(lastUploadAt, nextUploadAllowedAt, todayUploadCount, cooldownWaitingCount);
     }
 
     private Optional<AccountSendAvailability> querySharedUploadAccount(String platform, String accountKey) {
@@ -51,7 +59,9 @@ public class AccountSendAvailabilityService {
                 """,
                 (rs, rowNum) -> new AccountSendAvailability(
                         toLocalDateTime(rs.getTimestamp("last_upload_at")),
-                        toLocalDateTime(rs.getTimestamp("next_upload_allowed_at"))
+                        toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
+                        0,
+                        0
                 ),
                 platform,
                 accountKey
@@ -65,11 +75,62 @@ public class AccountSendAvailabilityService {
                 "SELECT " + lastUploadSelect + " AS last_upload_at, next_upload_allowed_at FROM " + table + " WHERE account_key = ? LIMIT 1",
                 (rs, rowNum) -> new AccountSendAvailability(
                         toLocalDateTime(rs.getTimestamp("last_upload_at")),
-                        toLocalDateTime(rs.getTimestamp("next_upload_allowed_at"))
+                        toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
+                        0,
+                        0
                 ),
                 accountKey
         );
         return rows.stream().findFirst();
+    }
+
+    private int todayUploadCount(String platform, String accountKey) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM yd_upload_submission
+                WHERE platform = ?
+                  AND account_key = ?
+                  AND status = 'success'
+                  AND completed_at >= DATE_ADD(
+                      CASE
+                          WHEN TIME(NOW()) >= '08:00:00' THEN CURDATE()
+                          ELSE DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+                      END,
+                      INTERVAL 8 HOUR
+                  )
+                  AND completed_at < DATE_ADD(
+                      CASE
+                          WHEN TIME(NOW()) >= '08:00:00' THEN DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                          ELSE CURDATE()
+                      END,
+                      INTERVAL 2 HOUR
+                  )
+                """,
+                Integer.class,
+                platform,
+                accountKey
+        );
+        return count == null ? 0 : count;
+    }
+
+    private int cooldownWaitingCount(String platform, String accountKey) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM yd_upload_submission s
+                JOIN yd_upload_account a
+                  ON a.platform = s.platform AND a.account_key = s.account_key
+                WHERE s.platform = ?
+                  AND s.account_key = ?
+                  AND s.status = 'ready'
+                  AND a.next_upload_allowed_at > NOW()
+                """,
+                Integer.class,
+                platform,
+                accountKey
+        );
+        return count == null ? 0 : count;
     }
 
     private boolean tableExists(String table) {

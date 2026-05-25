@@ -4,6 +4,8 @@ import java.time.LocalDateTime;
 
 public record AccountSendAvailability(
         LocalDateTime lastUploadAt,
-        LocalDateTime nextUploadAllowedAt
+        LocalDateTime nextUploadAllowedAt,
+        int todayUploadCount,
+        int cooldownWaitingCount
 ) {
 }
