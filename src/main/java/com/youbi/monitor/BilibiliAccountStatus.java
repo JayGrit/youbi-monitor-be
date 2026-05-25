@@ -13,6 +13,8 @@ public record BilibiliAccountStatus(
         String uname,
         String face,
         Integer level,
+        LocalDateTime lastUploadAt,
+        LocalDateTime nextUploadAllowedAt,
         Boolean valid,
         String message,
         Map<String, Object> raw

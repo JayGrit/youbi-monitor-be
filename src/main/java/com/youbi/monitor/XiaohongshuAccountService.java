@@ -38,6 +38,7 @@ public class XiaohongshuAccountService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final AccountSendAvailabilityService sendAvailabilityService;
     private final boolean headless;
     private final String browserChannel;
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
@@ -45,11 +46,13 @@ public class XiaohongshuAccountService {
     public XiaohongshuAccountService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
+            AccountSendAvailabilityService sendAvailabilityService,
             @Value("${youbi.xiaohongshu.headless:true}") boolean headless,
             @Value("${youbi.xiaohongshu.browser-channel:chrome}") String browserChannel
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.sendAvailabilityService = sendAvailabilityService;
         this.headless = headless;
         this.browserChannel = browserChannel == null || browserChannel.isBlank() ? "chrome" : browserChannel.trim();
         ensureSchema();
@@ -59,15 +62,19 @@ public class XiaohongshuAccountService {
         return jdbcTemplate.query(
                 "SELECT account_key, user_id, nickname, storage_state_json, updated_at FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
+                    String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
+                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
                     return new XiaohongshuAccountStatus(
                             "database",
-                            rs.getString("account_key"),
+                            accountKey,
                             json != null && !json.isBlank(),
                             json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
                             rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime(),
                             rs.getString("user_id"),
                             rs.getString("nickname"),
+                            sendAvailability.lastUploadAt(),
+                            sendAvailability.nextUploadAllowedAt(),
                             null,
                             "已保存",
                             Map.of()
@@ -79,8 +86,9 @@ public class XiaohongshuAccountService {
     public XiaohongshuAccountStatus status(String accountKey) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         Optional<String> storageState = loadStorageState(normalized);
+        AccountSendAvailability sendAvailability = sendAvailability(normalized);
         if (storageState.isEmpty()) {
-            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, false, "未登录", Map.of());
+            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -93,6 +101,8 @@ public class XiaohongshuAccountService {
                 updatedAt,
                 profile.userId(),
                 profile.nickname(),
+                sendAvailability.lastUploadAt(),
+                sendAvailability.nextUploadAllowedAt(),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -223,7 +233,11 @@ public class XiaohongshuAccountService {
     }
 
     private XiaohongshuAccountStatus emptyStatus(String accountKey) {
-        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, false, "等待扫码", Map.of());
+        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, false, "等待扫码", Map.of());
+    }
+
+    private AccountSendAvailability sendAvailability(String accountKey) {
+        return sendAvailabilityService.availability("xiaohongshu", accountKey, TABLE);
     }
 
     private String extractQrImage(Page page) {

@@ -11,6 +11,8 @@ public record XiaohongshuAccountStatus(
         LocalDateTime cookieUpdatedAt,
         String userId,
         String nickname,
+        LocalDateTime lastUploadAt,
+        LocalDateTime nextUploadAllowedAt,
         Boolean valid,
         String message,
         Map<String, Object> raw

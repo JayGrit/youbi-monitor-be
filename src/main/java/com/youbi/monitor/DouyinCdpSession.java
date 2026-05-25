@@ -7,6 +7,8 @@ public record DouyinCdpSession(
         Integer cdpPort,
         String cdpEndpoint,
         String note,
+        LocalDateTime lastUploadAt,
+        LocalDateTime nextUploadAllowedAt,
         LocalDateTime updatedAt
 ) {
 }

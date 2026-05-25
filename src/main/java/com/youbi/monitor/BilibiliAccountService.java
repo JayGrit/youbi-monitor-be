@@ -38,9 +38,11 @@ public class BilibiliAccountService {
     private final JdbcTemplate jdbcTemplate;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final AccountSendAvailabilityService sendAvailabilityService;
 
-    public BilibiliAccountService(JdbcTemplate jdbcTemplate) {
+    public BilibiliAccountService(JdbcTemplate jdbcTemplate, AccountSendAvailabilityService sendAvailabilityService) {
         this.jdbcTemplate = jdbcTemplate;
+        this.sendAvailabilityService = sendAvailabilityService;
         this.httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
         this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         ensureSchema();
@@ -62,6 +64,7 @@ public class BilibiliAccountService {
                     String json = rs.getString("login_info_json");
                     Long mid = rs.getObject("mid") == null ? null : rs.getLong("mid");
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
+                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
                     return new BilibiliAccountStatus(
                             "database",
                             accountKey,
@@ -72,6 +75,8 @@ public class BilibiliAccountService {
                             rs.getString("uname"),
                             null,
                             null,
+                            sendAvailability.lastUploadAt(),
+                            sendAvailability.nextUploadAllowedAt(),
                             null,
                             "已保存",
                             Map.of()
@@ -213,7 +218,7 @@ public class BilibiliAccountService {
 
     private BilibiliAccountStatus emptyAutoStatus() {
         return new BilibiliAccountStatus("database", AUTO_ACCOUNT_KEY, false, 0, null,
-                null, null, null, null, false, "等待扫码", Map.of());
+                null, null, null, null, null, null, false, "等待扫码", Map.of());
     }
 
     private String automaticAccountKey(JsonNode loginInfo) {
@@ -247,9 +252,10 @@ public class BilibiliAccountService {
 
     private BilibiliAccountStatus status(String accountKey, Optional<JsonNode> knownLoginInfo) throws IOException {
         Optional<JsonNode> stored = knownLoginInfo.isPresent() ? knownLoginInfo : loadLoginInfo(accountKey);
+        AccountSendAvailability sendAvailability = sendAvailability(accountKey);
         if (stored.isEmpty()) {
             return new BilibiliAccountStatus("database", accountKey, false, 0, null,
-                    null, null, null, null, false, "未登录", Map.of());
+                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), false, "未登录", Map.of());
         }
 
         JsonNode loginInfo = stored.get();
@@ -273,6 +279,8 @@ public class BilibiliAccountService {
                     data.path("name").asText(null),
                     data.path("face").asText(null),
                     data.path("level").canConvertToInt() ? data.path("level").asInt() : null,
+                    sendAvailability.lastUploadAt(),
+                    sendAvailability.nextUploadAllowedAt(),
                     code == 0,
                     code == 0 ? "已登录" : myInfo.path("message").asText("账号状态异常"),
                     raw
@@ -280,8 +288,12 @@ public class BilibiliAccountService {
         } catch (Exception exception) {
             return new BilibiliAccountStatus("database", accountKey, true,
                     json.getBytes(StandardCharsets.UTF_8).length, updatedAt,
-                    mid, null, null, null, null, exception.getMessage(), Map.of());
+                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), null, exception.getMessage(), Map.of());
         }
+    }
+
+    private AccountSendAvailability sendAvailability(String accountKey) {
+        return sendAvailabilityService.availability("bilibili", accountKey, TABLE);
     }
 
     private JsonNode getMyInfo(JsonNode loginInfo) throws IOException, InterruptedException {

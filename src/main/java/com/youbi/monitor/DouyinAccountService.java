@@ -45,6 +45,7 @@ public class DouyinAccountService {
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final AccountSendAvailabilityService sendAvailabilityService;
     private final boolean headless;
     private final String browserChannel;
     private final String stealthInitScript;
@@ -53,12 +54,14 @@ public class DouyinAccountService {
     public DouyinAccountService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
+            AccountSendAvailabilityService sendAvailabilityService,
             @Value("${youbi.douyin.headless:true}") boolean headless,
             @Value("${youbi.douyin.browser-channel:chrome}") String browserChannel,
             @Value("${youbi.douyin.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String stealthScriptPath
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.sendAvailabilityService = sendAvailabilityService;
         this.headless = headless;
         this.browserChannel = browserChannel == null || browserChannel.isBlank() ? "chrome" : browserChannel.trim();
         this.stealthInitScript = loadStealthInitScript(stealthScriptPath);
@@ -69,15 +72,19 @@ public class DouyinAccountService {
         return jdbcTemplate.query(
                 "SELECT account_key, user_id, nickname, storage_state_json, updated_at FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
+                    String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
+                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
                     return new DouyinAccountStatus(
                             "database",
-                            rs.getString("account_key"),
+                            accountKey,
                             json != null && !json.isBlank(),
                             json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
                             rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime(),
                             rs.getString("user_id"),
                             rs.getString("nickname"),
+                            sendAvailability.lastUploadAt(),
+                            sendAvailability.nextUploadAllowedAt(),
                             null,
                             "已保存",
                             Map.of()
@@ -93,13 +100,19 @@ public class DouyinAccountService {
                 FROM yd_douyin_cdp_session
                 ORDER BY account_key
                 """,
-                (rs, rowNum) -> new DouyinCdpSession(
-                        rs.getString("account_key"),
-                        nullableInt(rs, "cdp_port"),
-                        rs.getString("cdp_endpoint"),
-                        rs.getString("note"),
-                        rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime()
-                )
+                (rs, rowNum) -> {
+                    String accountKey = rs.getString("account_key");
+                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
+                    return new DouyinCdpSession(
+                            accountKey,
+                            nullableInt(rs, "cdp_port"),
+                            rs.getString("cdp_endpoint"),
+                            rs.getString("note"),
+                            sendAvailability.lastUploadAt(),
+                            sendAvailability.nextUploadAllowedAt(),
+                            rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime()
+                    );
+                }
         );
     }
 
@@ -146,8 +159,9 @@ public class DouyinAccountService {
     public DouyinAccountStatus status(String accountKey) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         Optional<String> storageState = loadStorageState(normalized);
+        AccountSendAvailability sendAvailability = sendAvailability(normalized);
         if (storageState.isEmpty()) {
-            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, false, "未登录", Map.of());
+            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -160,6 +174,8 @@ public class DouyinAccountService {
                 updatedAt,
                 profile.userId(),
                 profile.nickname(),
+                sendAvailability.lastUploadAt(),
+                sendAvailability.nextUploadAllowedAt(),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -380,7 +396,11 @@ public class DouyinAccountService {
     }
 
     private DouyinAccountStatus emptyStatus(String accountKey) {
-        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, false, "等待扫码", Map.of());
+        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, false, "等待扫码", Map.of());
+    }
+
+    private AccountSendAvailability sendAvailability(String accountKey) {
+        return sendAvailabilityService.availability("douyin", accountKey, TABLE);
     }
 
     private String extractQrImage(Page page) {
