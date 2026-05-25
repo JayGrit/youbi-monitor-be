@@ -362,29 +362,34 @@ public class MonitorService {
     public SubmitterAuthorType authorType(String author) {
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new SubmitterAuthorType("", "");
+            return new SubmitterAuthorType("", "", true);
         }
-        List<String> rows = jdbcTemplate.queryForList("""
-                SELECT type
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT type, need_dubbing
                 FROM yd_submitter_author_type
                 WHERE author = ?
                 LIMIT 1
-                """, String.class, normalized);
-        return new SubmitterAuthorType(normalized, rows.isEmpty() ? "" : text(rows.get(0)));
+                """, normalized);
+        if (rows.isEmpty()) {
+            return new SubmitterAuthorType(normalized, "", true);
+        }
+        Map<String, Object> row = rows.get(0);
+        return new SubmitterAuthorType(normalized, stringValue(row.get("type")), boolValue(row.get("need_dubbing"), true));
     }
 
     public List<SubmitterAuthorType> authorTypes() {
         return jdbcTemplate.query("""
-                SELECT author, type
+                SELECT author, type, need_dubbing
                 FROM yd_submitter_author_type
                 ORDER BY author
                 """, (rs, rowNum) -> new SubmitterAuthorType(
                 text(rs.getString("author")),
-                text(rs.getString("type"))
+                text(rs.getString("type")),
+                boolValue(rs.getObject("need_dubbing"), true)
         ));
     }
 
-    public SubmitterAuthorType saveAuthorType(String author, String type) {
+    public SubmitterAuthorType saveAuthorType(String author, String type, Boolean needDubbing) {
         String normalizedAuthor = text(author);
         String normalizedType = text(type);
         if (normalizedAuthor.isBlank()) {
@@ -394,11 +399,11 @@ public class MonitorService {
             throw new IllegalArgumentException("type is required");
         }
         jdbcTemplate.update("""
-                INSERT INTO yd_submitter_author_type (author, type)
-                VALUES (?, ?)
-                ON DUPLICATE KEY UPDATE type = VALUES(type), updated_at = NOW()
-                """, normalizedAuthor, normalizedType);
-        return new SubmitterAuthorType(normalizedAuthor, normalizedType);
+                INSERT INTO yd_submitter_author_type (author, type, need_dubbing)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE type = VALUES(type), need_dubbing = VALUES(need_dubbing), updated_at = NOW()
+                """, normalizedAuthor, normalizedType, Boolean.FALSE.equals(needDubbing) ? 0 : 1);
+        return new SubmitterAuthorType(normalizedAuthor, normalizedType, !Boolean.FALSE.equals(needDubbing));
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
@@ -666,6 +671,23 @@ public class MonitorService {
 
     private static String stringValue(Object value) {
         return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static boolean boolValue(Object value, boolean fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof Number number) {
+            return number.intValue() != 0;
+        }
+        String text = String.valueOf(value).trim().toLowerCase();
+        if (text.isBlank()) {
+            return fallback;
+        }
+        return !Set.of("0", "false", "no", "off").contains(text);
     }
 
     private String publicObjectUrl(String objectName) {
@@ -1272,6 +1294,7 @@ public class MonitorService {
         }
         ensureColumn("yd_video_info", "source_duration_seconds", "DOUBLE NULL");
         ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
+        ensureColumn("yd_video_info", "need_dubbing", "TINYINT(1) NULL");
     }
 
     private void ensureSubmitterAuthorTypeSchema() {
@@ -1279,12 +1302,14 @@ public class MonitorService {
                 CREATE TABLE IF NOT EXISTS yd_submitter_author_type (
                     author VARCHAR(255) NOT NULL PRIMARY KEY,
                     type VARCHAR(128) NOT NULL,
+                    need_dubbing TINYINT(1) NOT NULL DEFAULT 1,
                     note VARCHAR(255) NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     KEY idx_submitter_author_type_type (type)
                 )
                 """);
+        ensureColumn("yd_submitter_author_type", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private boolean tableExists(String table) {
@@ -1365,10 +1390,10 @@ public class MonitorService {
     ) {
     }
 
-    public record SubmitterAuthorType(String author, String type) {
+    public record SubmitterAuthorType(String author, String type, boolean needDubbing) {
     }
 
-    public record SubmitterAuthorTypeUpdateRequest(String author, String type) {
+    public record SubmitterAuthorTypeUpdateRequest(String author, String type, Boolean needDubbing) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {

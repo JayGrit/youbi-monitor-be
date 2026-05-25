@@ -76,7 +76,8 @@ public class MonitorController {
         try {
             return monitorService.saveAuthorType(
                     request == null ? null : request.author(),
-                    request == null ? null : request.type()
+                    request == null ? null : request.type(),
+                    request == null ? null : request.needDubbing()
             );
         } catch (IllegalArgumentException exc) {
             throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
