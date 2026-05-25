@@ -140,19 +140,21 @@ public class MonitorService {
               w.completed_at whisper_completed_at,
               w.error_message whisper_error,
 
-              tr.status translator_status,
+              CASE WHEN COALESCE(tf.translator_failed_count, 0) > 0 THEN 'failed' ELSE tr.status END translator_status,
               tr.started_at translator_started_at,
               tr.completed_at translator_completed_at,
               tr.error_message translator_error,
               ts.translated_count translator_completed_count,
+              tf.translator_failed_count translator_failed_count,
               GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0)) translator_total_count,
               te.child_error_message translator_child_error,
 
-              sp.status speaker_status,
+              CASE WHEN COALESCE(ss.speaker_failed_count, 0) > 0 THEN 'failed' ELSE sp.status END speaker_status,
               sp.started_at speaker_started_at,
               sp.completed_at speaker_completed_at,
               sp.error_message speaker_error,
               ss.speaker_completed_count,
+              ss.speaker_failed_count,
               ss.speaker_total_count,
               se.child_error_message speaker_child_error,
 
@@ -161,10 +163,11 @@ public class MonitorService {
               m.completed_at combiner_completed_at,
               m.error_message combiner_error,
 
-              u.status uploader_status,
+              CASE WHEN COALESCE(us.upload_failed_count, 0) > 0 THEN 'failed' ELSE u.status END uploader_status,
               u.started_at uploader_started_at,
               u.completed_at uploader_completed_at,
               us.upload_completed_count uploader_completed_count,
+              us.upload_failed_count uploader_failed_count,
               us.upload_total_count uploader_total_count,
               ue.child_error_message uploader_child_error,
               u.bilibili_upload_uid,
@@ -191,9 +194,16 @@ public class MonitorService {
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
             LEFT JOIN (
+              SELECT task_id, COUNT(*) translator_failed_count
+              FROM yd_translator_api_task
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) tf ON tf.task_id = t.id
+            LEFT JOIN (
               SELECT
                 task_id,
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) speaker_completed_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) speaker_failed_count,
                 COUNT(*) speaker_total_count
               FROM yd_speaker_segment
               GROUP BY task_id
@@ -226,6 +236,7 @@ public class MonitorService {
               SELECT
                 task_id,
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) upload_completed_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) upload_failed_count,
                 COUNT(*) upload_total_count
               FROM yd_upload_submission
               GROUP BY task_id
@@ -1359,6 +1370,7 @@ public class MonitorService {
                         completedAt,
                         elapsedSeconds(startedAt, completedAt, now),
                         countValue(rs, stage.key(), "completed_count"),
+                        countValue(rs, stage.key(), "failed_count"),
                         countValue(rs, stage.key(), "total_count"),
                         rs.getString(stage.errorColumn()),
                         childErrorMessage(rs, stage.key())

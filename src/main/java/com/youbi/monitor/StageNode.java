@@ -10,6 +10,7 @@ public record StageNode(
         LocalDateTime completedAt,
         long elapsedSeconds,
         Integer completedCount,
+        Integer failedCount,
         Integer totalCount,
         String errorMessage,
         String childErrorMessage
