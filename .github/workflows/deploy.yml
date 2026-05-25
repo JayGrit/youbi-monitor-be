@@ -44,10 +44,6 @@ jobs:
           if curl -fsS http://127.0.0.1:9333/json/version >/tmp/douyin-cdp-version.json 2>/dev/null; then
             DOUYIN_CDP_URL="$(python3 -c 'import json,sys; print(json.load(open("/tmp/douyin-cdp-version.json")).get("webSocketDebuggerUrl", ""))')"
           fi
-          BILIBILI_PLAYWRIGHT_CDP_URL=""
-          if curl -fsS http://127.0.0.1:9334/json/version >/tmp/bilibili-playwright-cdp-version.json 2>/dev/null; then
-            BILIBILI_PLAYWRIGHT_CDP_URL="$(python3 -c 'import json,sys; print(json.load(open("/tmp/bilibili-playwright-cdp-version.json")).get("webSocketDebuggerUrl", ""))')"
-          fi
           DOCKER_ENV_ARGS=()
           if [ -n "${DOUYIN_CDP_URL}" ]; then
             DOCKER_ENV_ARGS+=(-e "YDBI_DOUYIN_CDP_URL=${DOUYIN_CDP_URL}")
@@ -55,12 +51,11 @@ jobs:
           else
             echo "Douyin CDP URL not detected; monitor-be will use storage-state mode."
           fi
-          if [ -n "${BILIBILI_PLAYWRIGHT_CDP_URL}" ]; then
-            DOCKER_ENV_ARGS+=(-e "YDBI_BILIBILI_PLAYWRIGHT_CDP_URL=${BILIBILI_PLAYWRIGHT_CDP_URL}")
-            echo "Bilibili Playwright CDP URL detected; monitor-be will connect to existing Chrome."
-          else
-            echo "Bilibili Playwright CDP URL not detected; monitor-be will launch browser locally."
-          fi
+          DOCKER_ENV_ARGS+=(
+            -e "YDBI_BILIBILI_PLAYWRIGHT_BROWSER_CHANNEL=chrome"
+            -e "YDBI_BILIBILI_PLAYWRIGHT_HEADLESS=true"
+          )
+          echo "Bilibili Playwright will launch system Chrome in headless mode."
 
           docker run -d \
             --name monitor-be \
