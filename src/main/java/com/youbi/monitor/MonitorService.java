@@ -62,6 +62,11 @@ public class MonitorService {
             "yd_asr_segment",
             "yd_asr_result"
     );
+    private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
+            "bilibili", "uploader_bilibili_task",
+            "douyin", "uploader_douyin_task",
+            "xiaohongshu", "uploader_xiaohongshu_task"
+    );
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
             "source_url",
@@ -238,7 +243,13 @@ public class MonitorService {
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) upload_completed_count,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) upload_failed_count,
                 COUNT(*) upload_total_count
-              FROM yd_upload_submission
+              FROM (
+                SELECT task_id, status FROM uploader_bilibili_task
+                UNION ALL
+                SELECT task_id, status FROM uploader_douyin_task
+                UNION ALL
+                SELECT task_id, status FROM uploader_xiaohongshu_task
+              ) upload_task
               GROUP BY task_id
             ) us ON us.task_id = t.id
             LEFT JOIN (
@@ -249,7 +260,13 @@ public class MonitorService {
                   ORDER BY platform, account_key
                   SEPARATOR 0x0A
                 ) child_error_message
-              FROM yd_upload_submission
+              FROM (
+                SELECT task_id, account_key, status, error_message, 'bilibili' platform FROM uploader_bilibili_task
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'douyin' platform FROM uploader_douyin_task
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_xiaohongshu_task
+              ) upload_task
               WHERE status = 'failed'
               GROUP BY task_id
             ) ue ON ue.task_id = t.id
@@ -449,12 +466,33 @@ public class MonitorService {
             case "speaker" -> addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
             case "uploader" -> {
                 addLimitedTable(tables, "yd_uploader", taskId, "task_id", "task_id");
-                addLimitedTable(tables, "yd_upload_submission", taskId, "task_id", "platform, account_key, id");
+                UPLOADER_TASK_TABLES.forEach((platform, table) -> addUploaderTaskTable(tables, platform, table, taskId));
             }
             default -> {
             }
         }
         return tables;
+    }
+
+    private void addUploaderTaskTable(List<TaskFlowDetail.TaskFlowTable> tables, String platform, String table, String taskId) {
+        if (!tableExists(table)) {
+            return;
+        }
+        List<Map<String, Object>> rows = rows(table, "task_id", taskId, "account_key, id", CHILD_ROW_LIMIT + 1);
+        boolean truncated = rows.size() > CHILD_ROW_LIMIT;
+        if (truncated) {
+            rows = rows.subList(0, CHILD_ROW_LIMIT);
+        }
+        if (rows.isEmpty()) {
+            return;
+        }
+        List<Map<String, Object>> decorated = new ArrayList<>();
+        for (Map<String, Object> row : rows) {
+            Map<String, Object> decoratedRow = new LinkedHashMap<>(row);
+            decoratedRow.put("platform", platform);
+            decorated.add(decoratedRow);
+        }
+        tables.add(new TaskFlowDetail.TaskFlowTable(table, decorated, truncated));
     }
 
     private void addLimitedTable(List<TaskFlowDetail.TaskFlowTable> tables, String table, String id, String idColumn, String orderBy) {
@@ -949,26 +987,28 @@ public class MonitorService {
                     """, taskId);
         }
 
-        if ("uploader".equals(failedStage.key()) && tableExists("yd_upload_submission")) {
-            jdbcTemplate.update("""
-                    UPDATE yd_upload_submission submission
-                    JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
-                    LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
-                    SET submission.status = 'ready',
-                        submission.started_at = NULL,
-                        submission.completed_at = NULL,
-                        submission.error_message = NULL
-                    WHERE submission.task_id = ?
-                      AND submission.status IN ('failed', 'running')
-                      AND submission.account_key = video_info.type
-                      AND (
-                          COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
-                          OR FIND_IN_SET(
-                              submission.platform,
-                              REPLACE(uploader.upload_platforms, ' ', '')
-                          ) > 0
-                      )
-                    """, taskId);
+        if ("uploader".equals(failedStage.key())) {
+            UPLOADER_TASK_TABLES.forEach((platform, table) -> {
+                if (!tableExists(table)) {
+                    return;
+                }
+                jdbcTemplate.update("""
+                        UPDATE %s submission
+                        JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                        LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
+                        SET submission.status = 'ready',
+                            submission.started_at = NULL,
+                            submission.completed_at = NULL,
+                            submission.error_message = NULL
+                        WHERE submission.task_id = ?
+                          AND submission.status IN ('failed', 'running')
+                          AND submission.account_key = video_info.type
+                          AND (
+                              COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
+                              OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
+                          )
+                        """.formatted(table), taskId, platform);
+            });
         }
     }
 
@@ -1193,36 +1233,37 @@ public class MonitorService {
     }
 
     private void ensureUploaderSubmissionMonitorSchema() {
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS yd_upload_submission (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    task_id VARCHAR(64) NOT NULL,
-                    platform VARCHAR(32) NOT NULL,
-                    account_key VARCHAR(128) NOT NULL,
-                    status VARCHAR(32) NOT NULL DEFAULT 'ready',
-                    request_json MEDIUMTEXT NULL,
-                    title VARCHAR(512) NULL,
-                    video_url TEXT NULL,
-                    cover_url TEXT NULL,
-                    description TEXT NULL,
-                    tags VARCHAR(512) NULL,
-                    result_json MEDIUMTEXT NULL,
-                    error_message TEXT NULL,
-                    started_at DATETIME NULL,
-                    completed_at DATETIME NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_upload_submission (task_id, platform, account_key),
-                    KEY idx_upload_submission_status (status, platform, account_key),
-                    KEY idx_upload_submission_task (task_id, status)
-                )
-                """);
-        ensureColumn("yd_upload_submission", "request_json", "MEDIUMTEXT NULL");
-        ensureColumn("yd_upload_submission", "title", "VARCHAR(512) NULL");
-        ensureColumn("yd_upload_submission", "video_url", "TEXT NULL");
-        ensureColumn("yd_upload_submission", "cover_url", "TEXT NULL");
-        ensureColumn("yd_upload_submission", "description", "TEXT NULL");
-        ensureColumn("yd_upload_submission", "tags", "VARCHAR(512) NULL");
+        UPLOADER_TASK_TABLES.forEach((platform, table) -> {
+            jdbcTemplate.execute("""
+                    CREATE TABLE IF NOT EXISTS %s (
+                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                        task_id VARCHAR(64) NOT NULL,
+                        account_key VARCHAR(128) NOT NULL,
+                        status VARCHAR(32) NOT NULL DEFAULT 'ready',
+                        request_json MEDIUMTEXT NULL,
+                        title VARCHAR(512) NULL,
+                        video_url TEXT NULL,
+                        cover_url TEXT NULL,
+                        description TEXT NULL,
+                        tags VARCHAR(512) NULL,
+                        result_json MEDIUMTEXT NULL,
+                        error_message TEXT NULL,
+                        started_at DATETIME NULL,
+                        completed_at DATETIME NULL,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        UNIQUE KEY uniq_uploader_task (task_id, account_key),
+                        KEY idx_uploader_task_status (status, account_key),
+                        KEY idx_uploader_task_task (task_id, status)
+                    )
+                    """.formatted(table));
+            ensureColumn(table, "request_json", "MEDIUMTEXT NULL");
+            ensureColumn(table, "title", "VARCHAR(512) NULL");
+            ensureColumn(table, "video_url", "TEXT NULL");
+            ensureColumn(table, "cover_url", "TEXT NULL");
+            ensureColumn(table, "description", "TEXT NULL");
+            ensureColumn(table, "tags", "VARCHAR(512) NULL");
+        });
     }
 
     private void ensureVideoInfoMonitorColumns() {

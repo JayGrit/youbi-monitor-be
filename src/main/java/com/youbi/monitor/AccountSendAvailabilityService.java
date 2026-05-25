@@ -6,10 +6,17 @@ import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
 public class AccountSendAvailabilityService {
+    private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
+            "bilibili", "uploader_bilibili_task",
+            "douyin", "uploader_douyin_task",
+            "xiaohongshu", "uploader_xiaohongshu_task"
+    );
+
     private final JdbcTemplate jdbcTemplate;
 
     public AccountSendAvailabilityService(JdbcTemplate jdbcTemplate) {
@@ -31,7 +38,7 @@ public class AccountSendAvailabilityService {
             }
         }
 
-        if (tableExists("yd_upload_submission")) {
+        if (tableExists(uploadTaskTable(platform))) {
             todayUploadCount = todayUploadCount(platform, accountKey);
             cooldownWaitingCount = uploadAccountExists ? cooldownWaitingCount(platform, accountKey) : 0;
         }
@@ -85,12 +92,12 @@ public class AccountSendAvailabilityService {
     }
 
     private int todayUploadCount(String platform, String accountKey) {
+        String uploadTaskTable = uploadTaskTable(platform);
         Integer count = jdbcTemplate.queryForObject(
-                """
+                ("""
                 SELECT COUNT(*)
-                FROM yd_upload_submission
-                WHERE platform = ?
-                  AND account_key = ?
+                FROM %s
+                WHERE account_key = ?
                   AND status = 'success'
                   AND completed_at >= DATE_ADD(
                       CASE
@@ -106,7 +113,25 @@ public class AccountSendAvailabilityService {
                       END,
                       INTERVAL 2 HOUR
                   )
-                """,
+                """).formatted(uploadTaskTable),
+                Integer.class,
+                accountKey
+        );
+        return count == null ? 0 : count;
+    }
+
+    private int cooldownWaitingCount(String platform, String accountKey) {
+        String uploadTaskTable = uploadTaskTable(platform);
+        Integer count = jdbcTemplate.queryForObject(
+                ("""
+                SELECT COUNT(*)
+                FROM %s s
+                JOIN yd_upload_account a
+                  ON a.platform = ? AND a.account_key = s.account_key
+                WHERE s.account_key = ?
+                  AND s.status = 'ready'
+                  AND a.next_upload_allowed_at > NOW()
+                """).formatted(uploadTaskTable),
                 Integer.class,
                 platform,
                 accountKey
@@ -114,23 +139,8 @@ public class AccountSendAvailabilityService {
         return count == null ? 0 : count;
     }
 
-    private int cooldownWaitingCount(String platform, String accountKey) {
-        Integer count = jdbcTemplate.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM yd_upload_submission s
-                JOIN yd_upload_account a
-                  ON a.platform = s.platform AND a.account_key = s.account_key
-                WHERE s.platform = ?
-                  AND s.account_key = ?
-                  AND s.status = 'ready'
-                  AND a.next_upload_allowed_at > NOW()
-                """,
-                Integer.class,
-                platform,
-                accountKey
-        );
-        return count == null ? 0 : count;
+    private String uploadTaskTable(String platform) {
+        return UPLOADER_TASK_TABLES.getOrDefault(platform, "");
     }
 
     private boolean tableExists(String table) {
