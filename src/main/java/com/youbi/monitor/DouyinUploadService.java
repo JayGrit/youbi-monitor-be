@@ -616,7 +616,9 @@ public class DouyinUploadService {
 
     private void setInputFiles(Page page, String selector, UploadPaths paths, boolean browserSideFiles, double timeoutMs, String taskId, String label) throws IOException {
         Locator input = page.locator(selector).first();
-        input.waitFor(new Locator.WaitForOptions().setTimeout(timeoutMs));
+        input.waitFor(new Locator.WaitForOptions()
+                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
+                .setTimeout(timeoutMs));
         if (!browserSideFiles) {
             input.setInputFiles(paths.localPath(), new Locator.SetInputFilesOptions().setTimeout(timeoutMs));
             return;
