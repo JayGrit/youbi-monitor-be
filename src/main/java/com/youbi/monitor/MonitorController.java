@@ -92,6 +92,27 @@ public class MonitorController {
         return java.util.Map.of("status", "ready");
     }
 
+    @GetMapping("/api/upload-submissions/failed")
+    public MonitorService.FailedUploadSubmissionList failedUploadSubmissions(@RequestParam String platform) {
+        try {
+            return monitorService.failedUploadSubmissions(platform);
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        }
+    }
+
+    @PostMapping("/api/upload-submissions/failed/{platform}/retry")
+    public MonitorService.UploadSubmissionRetryResult retryUploadSubmissions(
+            @PathVariable String platform,
+            @RequestBody MonitorService.UploadSubmissionRetryRequest request
+    ) {
+        try {
+            return monitorService.retryUploadSubmissions(platform, request == null ? List.of() : request.ids());
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        }
+    }
+
     @PostMapping("/api/video-tasks/{taskId}/restart")
     public MonitorService.TaskRestartResult restart(@PathVariable String taskId) {
         try {

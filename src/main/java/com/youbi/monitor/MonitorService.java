@@ -67,6 +67,11 @@ public class MonitorService {
             "douyin", "uploader_douyin_task",
             "xiaohongshu", "uploader_xiaohongshu_task"
     );
+    private static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
+            "bilibili", "yd_bilibili_account",
+            "douyin", "yd_douyin_account",
+            "xiaohongshu", "yd_xiaohongshu_account"
+    );
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
             "source_url",
@@ -357,6 +362,123 @@ public class MonitorService {
                 stringValue(row.get("dst_text")),
                 localDateTime(row.get("updated_at"))
         );
+    }
+
+    public FailedUploadSubmissionList failedUploadSubmissions(String platform) {
+        String normalized = normalizeUploadPlatform(platform);
+        String table = UPLOADER_TASK_TABLES.get(normalized);
+        String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        boolean accountTableExists = tableExists(accountTable);
+        String accountJoin = accountTableExists
+                ? "LEFT JOIN " + quotedIdentifier(accountTable) + " account ON account.account_key = submission.account_key"
+                : "";
+        String accountExistsSql = accountTableExists ? "account.account_key IS NOT NULL" : "FALSE";
+        List<FailedUploadSubmission> rows = jdbcTemplate.query("""
+                SELECT
+                  submission.id,
+                  submission.task_id,
+                  COALESCE(NULLIF(submission.title, ''), NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), submission.task_id) title,
+                  submission.account_key,
+                  submission.error_message,
+                  submission.completed_at,
+                  submission.updated_at,
+                  task.status task_status,
+                  uploader.status uploader_status,
+                  COALESCE(NULLIF(uploader.upload_platforms, ''), '') upload_platforms,
+                  video_info.type routed_account_key,
+                  %s account_exists
+                FROM %s submission
+                JOIN yd_task task ON task.id = submission.task_id
+                JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
+                LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                %s
+                WHERE submission.status = 'failed'
+                ORDER BY submission.updated_at DESC, submission.id DESC
+                LIMIT 200
+                """.formatted(accountExistsSql, quotedIdentifier(table), accountJoin), (rs, rowNum) -> {
+            boolean accountExists = rs.getBoolean("account_exists");
+            String retryBlockedReason = accountExists ? "" : "账号表中不存在该 account_key，worker 不会拉取";
+            return new FailedUploadSubmission(
+                    rs.getLong("id"),
+                    normalized,
+                    rs.getString("task_id"),
+                    rs.getString("title"),
+                    rs.getString("account_key"),
+                    rs.getString("error_message"),
+                    timestamp(rs, "completed_at"),
+                    timestamp(rs, "updated_at"),
+                    rs.getString("task_status"),
+                    rs.getString("uploader_status"),
+                    rs.getString("upload_platforms"),
+                    rs.getString("routed_account_key"),
+                    accountExists,
+                    retryBlockedReason
+            );
+        });
+        return new FailedUploadSubmissionList(normalized, rows.size(), rows);
+    }
+
+    @Transactional
+    public UploadSubmissionRetryResult retryUploadSubmissions(String platform, List<Long> ids) {
+        String normalized = normalizeUploadPlatform(platform);
+        List<Long> normalizedIds = ids == null ? List.of() : ids.stream()
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        if (normalizedIds.isEmpty()) {
+            throw new IllegalArgumentException("No upload submission selected.");
+        }
+        String table = UPLOADER_TASK_TABLES.get(normalized);
+        String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(accountTable)) {
+            throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
+        }
+
+        String placeholders = placeholders(normalizedIds.size());
+        List<String> taskIds = jdbcTemplate.queryForList("""
+                SELECT DISTINCT submission.task_id
+                FROM %s submission
+                JOIN %s account ON account.account_key = submission.account_key
+                WHERE submission.id IN (%s)
+                  AND submission.status = 'failed'
+                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), String.class, normalizedIds.toArray());
+        if (taskIds.isEmpty()) {
+            return new UploadSubmissionRetryResult(normalized, 0, 0, 0);
+        }
+
+        int retried = jdbcTemplate.update("""
+                UPDATE %s submission
+                JOIN %s account ON account.account_key = submission.account_key
+                SET submission.status = 'ready',
+                    submission.started_at = NULL,
+                    submission.completed_at = NULL,
+                    submission.error_message = NULL
+                WHERE submission.id IN (%s)
+                  AND submission.status = 'failed'
+                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), normalizedIds.toArray());
+
+        String taskPlaceholders = placeholders(taskIds.size());
+        Object[] taskArgs = taskIds.toArray();
+        int uploaderUpdated = jdbcTemplate.update("""
+                UPDATE yd_uploader
+                SET status = 'running',
+                    started_at = COALESCE(started_at, NOW()),
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE task_id IN (%s)
+                """.formatted(taskPlaceholders), taskArgs);
+        int taskUpdated = jdbcTemplate.update("""
+                UPDATE yd_task
+                SET status = 'running',
+                    current_stage = 'uploader',
+                    started_at = COALESCE(started_at, NOW()),
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE id IN (%s)
+                """.formatted(taskPlaceholders), taskArgs);
+        return new UploadSubmissionRetryResult(normalized, retried, uploaderUpdated, taskUpdated);
     }
 
     public SubmitterAuthorType authorType(String author) {
@@ -1198,6 +1320,25 @@ public class MonitorService {
                 .orElse("");
     }
 
+    private static String placeholders(int count) {
+        return "?,".repeat(Math.max(0, count)).replaceFirst(",$", "");
+    }
+
+    private static String normalizeUploadPlatform(String platform) {
+        String normalized = text(platform).toLowerCase();
+        if ("bili".equals(normalized)) {
+            normalized = "bilibili";
+        } else if ("xhs".equals(normalized) || "red".equals(normalized)) {
+            normalized = "xiaohongshu";
+        } else if ("dy".equals(normalized)) {
+            normalized = "douyin";
+        }
+        if (!UPLOADER_TASK_TABLES.containsKey(normalized)) {
+            throw new IllegalArgumentException("Unsupported upload platform: " + platform);
+        }
+        return normalized;
+    }
+
     private static String minioPrefix(String taskId) {
         String clean = text(taskId).replaceFirst("^/+", "").replaceFirst("/+$", "");
         if (clean.isBlank()) {
@@ -1388,6 +1529,33 @@ public class MonitorService {
             String dstText,
             LocalDateTime updatedAt
     ) {
+    }
+
+    public record FailedUploadSubmission(
+            long id,
+            String platform,
+            String taskId,
+            String title,
+            String accountKey,
+            String errorMessage,
+            LocalDateTime completedAt,
+            LocalDateTime updatedAt,
+            String taskStatus,
+            String uploaderStatus,
+            String uploadPlatforms,
+            String routedAccountKey,
+            boolean accountExists,
+            String retryBlockedReason
+    ) {
+    }
+
+    public record FailedUploadSubmissionList(String platform, int count, List<FailedUploadSubmission> rows) {
+    }
+
+    public record UploadSubmissionRetryRequest(List<Long> ids) {
+    }
+
+    public record UploadSubmissionRetryResult(String platform, int retriedCount, int uploaderTaskCount, int taskCount) {
     }
 
     public record SubmitterAuthorType(String author, String type, boolean needDubbing) {
