@@ -6,7 +6,6 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.BoundingBox;
-import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -14,21 +13,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.URLDecoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 public class XiaohongshuUploadService {
@@ -37,10 +29,9 @@ public class XiaohongshuUploadService {
     private static final String SUCCESS_URL_PATTERN = "**/publish/success?**";
 
     private final XiaohongshuAccountService accountService;
-    private final MinioClient minioClient;
-    private final String minioBucket;
     private final Path uploadWorkDir;
-    private final HttpClient httpClient;
+    private final Path diagnosticsRoot;
+    private final UploadMaterialResolver materialResolver;
 
     public XiaohongshuUploadService(
             XiaohongshuAccountService accountService,
@@ -52,13 +43,15 @@ public class XiaohongshuUploadService {
             @Value("${youbi.minio.work-dir}") String uploadWorkDir
     ) {
         this.accountService = accountService;
-        this.minioClient = MinioClient.builder()
+        MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
-        this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
+        String bucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.diagnosticsRoot = this.uploadWorkDir.resolve("diagnostics");
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, log, "XHS upload", true);
     }
 
     public XiaohongshuUploadResult upload(XiaohongshuUploadRequest request) throws IOException {
@@ -67,8 +60,8 @@ public class XiaohongshuUploadService {
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         log.info("XHS upload start taskId={} accountKey={} videoPath={} videoUrl={} minioUrl={} title={}",
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
-        ResolvedFile resolvedVideo = resolveVideo(request);
-        ResolvedFile resolvedCover = resolveCover(request);
+        UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
+        UploadMaterialResolver.ResolvedFile resolvedCover = resolveCover(request);
         try {
             Path videoPath = resolvedVideo.path();
             if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
@@ -352,184 +345,25 @@ public class XiaohongshuUploadService {
     }
 
     private void dumpDiagnostics(Page page, String taskId, String label) {
-        try {
-            Path dir = uploadWorkDir.resolve("diagnostics").resolve(safeSegment(taskId));
-            Files.createDirectories(dir);
-            Path screenshot = dir.resolve(label + ".png");
-            Path html = dir.resolve(label + ".html");
-            page.screenshot(new Page.ScreenshotOptions().setPath(screenshot).setFullPage(true).setTimeout(10000));
-            Files.writeString(html, page.content(), StandardCharsets.UTF_8);
-            log.info("XHS upload diagnostics dumped taskId={} label={} screenshot={} html={}", taskId, label, screenshot, html);
-        } catch (Exception exception) {
-            log.warn("XHS upload diagnostics dump failed taskId={} label={} message={}", taskId, label, exception.getMessage());
-        }
+        PlaywrightDiagnostics.dump(page, diagnosticsRoot, taskId, label, log, "XHS upload", false);
     }
 
     private PageState pageState(Page page, String buttonText) {
-        String body = "";
-        try {
-            body = page.locator("body").innerText(new Locator.InnerTextOptions().setTimeout(3000));
-        } catch (Exception ignored) {
-        }
+        String body = PlaywrightDiagnostics.safeBodyText(page);
         return new PageState(
                 containsAny(body, "视频上传中", "上传中", "智能推荐封面生成中"),
-                visibleButtonTexts(page),
-                exactTextElements(page, buttonText),
-                exactTextMatchCount(page, buttonText)
+                PlaywrightDiagnostics.visibleButtonTexts(page),
+                PlaywrightDiagnostics.exactTextElements(page, buttonText),
+                PlaywrightDiagnostics.exactTextMatchCount(page, buttonText)
         );
     }
 
-    private int exactTextMatchCount(Page page, String buttonText) {
-        try {
-            return page.locator("text=\"" + buttonText + "\"").count();
-        } catch (Exception ignored) {
-            return 0;
-        }
+    private UploadMaterialResolver.ResolvedFile resolveVideo(XiaohongshuUploadRequest request) throws IOException {
+        return materialResolver.resolveVideo(request.videoUrl(), request.minioUrl(), request.videoPath(), request.taskId());
     }
 
-    private String visibleButtonTexts(Page page) {
-        try {
-            return String.join(" | ", page.locator("button:visible").allTextContents().stream()
-                    .map(this::text)
-                    .filter(value -> !value.isBlank())
-                    .toList());
-        } catch (Exception exception) {
-            return "cannot-read-buttons: " + exception.getMessage();
-        }
-    }
-
-    private String exactTextElements(Page page, String buttonText) {
-        try {
-            return page.locator("text=\"" + buttonText + "\"").evaluateAll(
-                    """
-                    (els) => els.map((el, i) => {
-                      const rect = el.getBoundingClientRect();
-                      const style = window.getComputedStyle(el);
-                      return `${i}:${el.tagName}.${el.className || ''}:visible=${!!(rect.width && rect.height) && style.visibility !== 'hidden' && style.display !== 'none'}:rect=${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}:text=${(el.innerText || el.textContent || '').trim()}`;
-                    }).join(' | ')
-                    """
-            ).toString();
-        } catch (Exception exception) {
-            return "cannot-read-exact-text: " + exception.getMessage();
-        }
-    }
-
-    private ResolvedFile resolveVideo(XiaohongshuUploadRequest request) throws IOException {
-        String minioUrl = firstText(request.videoUrl(), request.minioUrl());
-        if (!minioUrl.isBlank()) {
-            return new ResolvedFile(downloadMinioFile(minioUrl, request.taskId(), "video.mp4"), true);
-        }
-        return new ResolvedFile(Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize(), false);
-    }
-
-    private ResolvedFile resolveCover(XiaohongshuUploadRequest request) throws IOException {
-        if (hasText(request.coverPath())) {
-            return new ResolvedFile(Path.of(request.coverPath()).toAbsolutePath().normalize(), false);
-        }
-        if (!hasText(request.coverUrl())) {
-            return null;
-        }
-        String coverUrl = text(request.coverUrl());
-        if (isMinioRef(coverUrl)) {
-            return new ResolvedFile(downloadMinioFile(coverUrl, request.taskId(), "cover.jpg"), true);
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(request.taskId(), "manual"))).resolve(UUID.randomUUID().toString());
-        Files.createDirectories(taskDir);
-        Path destination = taskDir.resolve("cover.jpg");
-        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(coverUrl))
-                .timeout(Duration.ofMinutes(2))
-                .header("User-Agent", "Mozilla/5.0")
-                .GET()
-                .build();
-        try {
-            HttpResponse<byte[]> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() / 100 != 2 || response.body().length == 0) {
-                throw new IOException("Cannot download coverUrl: " + response.statusCode() + " " + coverUrl);
-            }
-            Files.write(destination, response.body());
-            return new ResolvedFile(destination, true);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted downloading coverUrl", exception);
-        }
-    }
-
-    private Path downloadMinioFile(String minioUrl, String taskId, String fallbackFilename) throws IOException {
-        ObjectRef objectRef = parseObjectRef(minioUrl);
-        String filename = sanitizeFilename(Path.of(objectRef.objectName()).getFileName().toString());
-        if (filename.isBlank()) {
-            filename = fallbackFilename;
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(taskId, "manual"))).resolve(UUID.randomUUID().toString());
-        Path destination = taskDir.resolve(filename);
-        Files.createDirectories(taskDir);
-        long startedAt = System.currentTimeMillis();
-        log.info("XHS upload download minio start taskId={} bucket={} object={} destination={}", firstText(taskId, "manual"), objectRef.bucket(), objectRef.objectName(), destination);
-        try (InputStream input = minioClient.getObject(
-                GetObjectArgs.builder()
-                        .bucket(objectRef.bucket())
-                        .object(objectRef.objectName())
-                        .build()
-        )) {
-            Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
-        } catch (Exception exc) {
-            throw new IOException("Cannot download MinIO file: " + minioUrl, exc);
-        }
-        log.info("XHS upload download minio done taskId={} bytes={} elapsedMs={}", firstText(taskId, "manual"), Files.size(destination), System.currentTimeMillis() - startedAt);
-        return destination;
-    }
-
-    private ObjectRef parseObjectRef(String ref) throws IOException {
-        String value = text(ref);
-        URI uri;
-        try {
-            uri = URI.create(value);
-        } catch (IllegalArgumentException exc) {
-            throw new IOException("Invalid MinIO URL: " + ref, exc);
-        }
-        if ("s3".equals(uri.getScheme())) {
-            return requiredObjectRef(text(uri.getHost()).isBlank() ? minioBucket : uri.getHost(), decode(uri.getPath()).replaceFirst("^/+", ""), ref);
-        }
-        if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(decode(uri.getPath())), ref);
-        }
-        if (value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(value), ref);
-        }
-        throw new IOException("Unsupported MinIO URL: " + ref);
-    }
-
-    private ObjectRef requiredObjectRef(String bucket, String objectName, String ref) throws IOException {
-        String cleanObjectName = text(objectName).replaceFirst("^/+", "");
-        if (cleanObjectName.isBlank()) {
-            throw new IOException("Cannot resolve MinIO object from URL: " + ref);
-        }
-        return new ObjectRef(text(bucket).isBlank() ? minioBucket : text(bucket), cleanObjectName);
-    }
-
-    private String stripKnownPrefix(String path) {
-        String value = text(path).split("\\?", 2)[0].replaceFirst("^/+", "");
-        for (String prefix : List.of("minio/" + minioBucket + "/", minioBucket + "/")) {
-            if (value.startsWith(prefix)) {
-                return value.substring(prefix.length());
-            }
-        }
-        return value;
-    }
-
-    private boolean isMinioRef(String ref) {
-        String value = text(ref);
-        if (value.startsWith("s3:") || value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return true;
-        }
-        try {
-            URI uri = URI.create(value);
-            String path = decode(uri.getPath());
-            return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
-                    && (path.startsWith("/minio/" + minioBucket + "/") || path.startsWith("/" + minioBucket + "/"));
-        } catch (Exception ignored) {
-            return false;
-        }
+    private UploadMaterialResolver.ResolvedFile resolveCover(XiaohongshuUploadRequest request) throws IOException {
+        return materialResolver.resolveCover(request.coverPath(), request.coverUrl(), request.taskId());
     }
 
     private List<String> parseTags(String tags) {
@@ -540,76 +374,31 @@ public class XiaohongshuUploadService {
     }
 
     private boolean containsAny(String text, String... values) {
-        String source = text(text);
-        for (String value : values) {
-            if (source.contains(value)) {
-                return true;
-            }
-        }
-        return false;
+        return TextSupport.containsAny(text, values);
     }
 
-    private void cleanup(ResolvedFile file) throws IOException {
-        if (file != null && file.temporary()) {
-            Files.deleteIfExists(file.path());
-        }
+    private void cleanup(UploadMaterialResolver.ResolvedFile file) throws IOException {
+        materialResolver.cleanupThrowing(file);
     }
 
     private String truncate(String value, int max) {
-        String text = text(value);
-        if (text.codePointCount(0, text.length()) <= max) {
-            return text;
-        }
-        return text.codePoints()
-                .limit(max)
-                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
-                .toString();
+        return TextSupport.truncate(value, max);
     }
 
     private String required(String value, String field) throws IOException {
-        String text = text(value);
-        if (text.isBlank()) {
-            throw new IOException("Missing field: " + field);
-        }
-        return text;
+        return TextSupport.required(value, field);
     }
 
     private boolean hasText(String value) {
-        return !text(value).isBlank();
+        return TextSupport.hasText(value);
     }
 
     private String firstText(String... values) {
-        for (String value : values) {
-            String text = text(value);
-            if (!text.isBlank()) {
-                return text;
-            }
-        }
-        return "";
+        return TextSupport.firstText(values);
     }
 
     private String text(String value) {
-        return value == null ? "" : value.trim();
-    }
-
-    private String decode(String value) {
-        return URLDecoder.decode(text(value), StandardCharsets.UTF_8);
-    }
-
-    private String sanitizeFilename(String value) {
-        String sanitized = text(value).replaceAll("[\\\\/:*?\"<>|]+", "_");
-        return sanitized.isBlank() ? "" : sanitized;
-    }
-
-    private String safeSegment(String value) {
-        String sanitized = text(value).replaceAll("[^A-Za-z0-9._-]+", "_");
-        return sanitized.isBlank() ? "manual" : sanitized;
-    }
-
-    private record ObjectRef(String bucket, String objectName) {
-    }
-
-    private record ResolvedFile(Path path, boolean temporary) {
+        return TextSupport.text(value);
     }
 
     private record PageState(boolean uploading, String visibleButtons, String exactTextElements, int exactTextMatches) {

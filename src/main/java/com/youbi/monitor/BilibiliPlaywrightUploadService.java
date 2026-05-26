@@ -7,7 +7,6 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,16 +14,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.URLDecoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
@@ -37,11 +29,10 @@ public class BilibiliPlaywrightUploadService {
     private static final String PUBLISH_VIDEO_URL = BilibiliPlaywrightAccountService.PUBLISH_VIDEO_URL;
 
     private final BilibiliPlaywrightAccountService accountService;
-    private final MinioClient minioClient;
-    private final String minioBucket;
     private final Path uploadWorkDir;
+    private final Path diagnosticsRoot;
     private final Path browserUploadWorkDir;
-    private final HttpClient httpClient;
+    private final UploadMaterialResolver materialResolver;
 
     public BilibiliPlaywrightUploadService(
             BilibiliPlaywrightAccountService accountService,
@@ -53,14 +44,16 @@ public class BilibiliPlaywrightUploadService {
             @Value("${youbi.bilibili.playwright.browser-upload-work-dir:}") String browserUploadWorkDir
     ) {
         this.accountService = accountService;
-        this.minioClient = MinioClient.builder()
+        MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
-        this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
+        String bucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
+        this.diagnosticsRoot = this.uploadWorkDir.resolve("diagnostics").resolve("bilibili-playwright");
         this.browserUploadWorkDir = text(browserUploadWorkDir).isBlank() ? null : Path.of(browserUploadWorkDir).toAbsolutePath().normalize();
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, log, "Bilibili Playwright", false);
     }
 
     public BilibiliUploadResult upload(BilibiliUploadRequest request) throws IOException {
@@ -69,8 +62,8 @@ public class BilibiliPlaywrightUploadService {
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         log.info("Bilibili Playwright upload start taskId={} accountKey={} videoPath={} videoUrl={} minioUrl={} title={}",
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
-        ResolvedFile resolvedVideo = resolveVideo(request);
-        ResolvedFile resolvedCover = resolveCover(request);
+        UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
+        UploadMaterialResolver.ResolvedFile resolvedCover = resolveCover(request);
         try {
             Path videoPath = resolvedVideo.path();
             if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
@@ -127,7 +120,7 @@ public class BilibiliPlaywrightUploadService {
                 Page page = context.newPage();
                 page.navigate(PUBLISH_VIDEO_URL);
                 page.waitForTimeout(5000);
-                DiagnosticSnapshot snapshot = dumpDiagnostics(page, taskId, "upload-page");
+                PlaywrightDiagnostics.DiagnosticSnapshot snapshot = dumpDiagnostics(page, taskId, "upload-page");
                 return Map.of(
                         "accountKey", normalized,
                         "url", page.url(),
@@ -143,7 +136,7 @@ public class BilibiliPlaywrightUploadService {
     public Map<String, Object> inspectUploadSelection(BilibiliUploadRequest request) throws IOException {
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         String taskId = "inspect-select-" + UUID.randomUUID();
-        ResolvedFile resolvedVideo = resolveVideo(request);
+        UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
         try {
             String storageState = accountService.storageState(accountKey);
             try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
@@ -152,21 +145,21 @@ public class BilibiliPlaywrightUploadService {
                     Page page = context.newPage();
                     page.navigate(PUBLISH_VIDEO_URL);
                     page.waitForTimeout(3000);
-                    DiagnosticSnapshot before = dumpDiagnostics(page, taskId, "01-before-select");
+                    PlaywrightDiagnostics.DiagnosticSnapshot before = dumpDiagnostics(page, taskId, "01-before-select");
                     Locator fileInput = page.locator("input[type='file']").first();
                     fileInput.waitFor(new Locator.WaitForOptions()
                             .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
                             .setTimeout(30000));
                     setInputFiles(page, "input[type='file']", new UploadPaths(resolvedVideo.path(), browserPath(resolvedVideo.path())), browserHandle.browserSideFiles(), 30000, taskId, "inspect-video");
                     page.waitForTimeout(5000);
-                    DiagnosticSnapshot selected = dumpDiagnostics(page, taskId, "02-after-select");
+                    PlaywrightDiagnostics.DiagnosticSnapshot selected = dumpDiagnostics(page, taskId, "02-after-select");
                     waitForMetadataForm(page, taskId);
-                    DiagnosticSnapshot form = dumpDiagnostics(page, taskId, "03-form-ready");
+                    PlaywrightDiagnostics.DiagnosticSnapshot form = dumpDiagnostics(page, taskId, "03-form-ready");
                     fillTitle(page, truncate(required(request.title(), "title"), 80), taskId);
                     fillDescription(page, request.description(), taskId);
                     fillTags(page, request.tags(), taskId);
                     page.waitForTimeout(1000);
-                    DiagnosticSnapshot filled = dumpDiagnostics(page, taskId, "04-metadata-filled");
+                    PlaywrightDiagnostics.DiagnosticSnapshot filled = dumpDiagnostics(page, taskId, "04-metadata-filled");
                     return Map.of(
                             "accountKey", accountKey,
                             "url", page.url(),
@@ -470,154 +463,24 @@ public class BilibiliPlaywrightUploadService {
         throw new RuntimeException("Timed out waiting for Bilibili publish accepted page");
     }
 
-    private DiagnosticSnapshot dumpDiagnostics(Page page, String taskId, String label) {
-        try {
-            Path dir = uploadWorkDir.resolve("diagnostics").resolve("bilibili-playwright").resolve(safeSegment(taskId));
-            Files.createDirectories(dir);
-            Path screenshot = dir.resolve(label + ".png");
-            Path html = dir.resolve(label + ".html");
-            page.screenshot(new Page.ScreenshotOptions().setPath(screenshot).setFullPage(true).setTimeout(10000));
-            Files.writeString(html, page.content(), StandardCharsets.UTF_8);
-            log.info("Bilibili Playwright diagnostics dumped taskId={} label={} screenshot={} html={}", taskId, label, screenshot, html);
-            return new DiagnosticSnapshot(screenshot, html);
-        } catch (Exception exception) {
-            log.warn("Bilibili Playwright diagnostics dump failed taskId={} label={} message={}", taskId, label, exception.getMessage());
-            throw new RuntimeException("Cannot dump Bilibili Playwright diagnostics: " + exception.getMessage(), exception);
-        }
+    private PlaywrightDiagnostics.DiagnosticSnapshot dumpDiagnostics(Page page, String taskId, String label) {
+        return PlaywrightDiagnostics.dump(page, diagnosticsRoot, taskId, label, log, "Bilibili Playwright", true);
     }
 
     private String safeBodyText(Page page) {
-        try {
-            return page.locator("body").innerText(new Locator.InnerTextOptions().setTimeout(3000));
-        } catch (Exception exception) {
-            return "";
-        }
+        return PlaywrightDiagnostics.safeBodyText(page);
     }
 
-    private ResolvedFile resolveVideo(BilibiliUploadRequest request) throws IOException {
-        String minioUrl = firstText(request.videoUrl(), request.minioUrl());
-        if (!minioUrl.isBlank()) {
-            return new ResolvedFile(downloadMinioFile(minioUrl, request.taskId(), "video.mp4"), true);
-        }
-        return new ResolvedFile(Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize(), false);
+    private UploadMaterialResolver.ResolvedFile resolveVideo(BilibiliUploadRequest request) throws IOException {
+        return materialResolver.resolveVideo(request.videoUrl(), request.minioUrl(), request.videoPath(), request.taskId());
     }
 
-    private ResolvedFile resolveCover(BilibiliUploadRequest request) throws IOException {
-        if (hasText(request.coverPath())) {
-            return new ResolvedFile(Path.of(request.coverPath()).toAbsolutePath().normalize(), false);
-        }
-        if (!hasText(request.coverUrl())) {
-            return null;
-        }
-        String coverUrl = text(request.coverUrl());
-        if (isMinioRef(coverUrl)) {
-            return new ResolvedFile(downloadMinioFile(coverUrl, request.taskId(), "cover.jpg"), true);
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(request.taskId(), "manual"))).resolve(UUID.randomUUID().toString());
-        Files.createDirectories(taskDir);
-        Path destination = taskDir.resolve("cover.jpg");
-        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(coverUrl))
-                .timeout(Duration.ofMinutes(2))
-                .header("User-Agent", "Mozilla/5.0")
-                .GET()
-                .build();
-        try {
-            HttpResponse<byte[]> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() / 100 != 2 || response.body().length == 0) {
-                throw new IOException("Cannot download coverUrl: " + response.statusCode() + " " + coverUrl);
-            }
-            Files.write(destination, response.body());
-            return new ResolvedFile(destination, true);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted downloading coverUrl", exception);
-        }
+    private UploadMaterialResolver.ResolvedFile resolveCover(BilibiliUploadRequest request) throws IOException {
+        return materialResolver.resolveCover(request.coverPath(), request.coverUrl(), request.taskId());
     }
 
-    private Path downloadMinioFile(String minioUrl, String taskId, String fallbackFilename) throws IOException {
-        ObjectRef objectRef = parseObjectRef(minioUrl);
-        String filename = sanitizeFilename(Path.of(objectRef.objectName()).getFileName().toString());
-        if (filename.isBlank()) {
-            filename = fallbackFilename;
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(taskId, "manual"))).resolve(UUID.randomUUID().toString());
-        Path destination = taskDir.resolve(filename);
-        Files.createDirectories(taskDir);
-        try (InputStream input = minioClient.getObject(
-                GetObjectArgs.builder()
-                        .bucket(objectRef.bucket())
-                        .object(objectRef.objectName())
-                        .build()
-        )) {
-            Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
-        } catch (Exception exc) {
-            throw new IOException("Cannot download MinIO file: " + minioUrl, exc);
-        }
-        return destination;
-    }
-
-    private ObjectRef parseObjectRef(String ref) throws IOException {
-        String value = text(ref);
-        URI uri;
-        try {
-            uri = URI.create(value);
-        } catch (IllegalArgumentException exc) {
-            throw new IOException("Invalid MinIO URL: " + ref, exc);
-        }
-        if ("s3".equals(uri.getScheme())) {
-            return requiredObjectRef(text(uri.getHost()).isBlank() ? minioBucket : uri.getHost(), decode(uri.getPath()).replaceFirst("^/+", ""), ref);
-        }
-        if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(decode(uri.getPath())), ref);
-        }
-        if (value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(value), ref);
-        }
-        throw new IOException("Unsupported MinIO URL: " + ref);
-    }
-
-    private ObjectRef requiredObjectRef(String bucket, String objectName, String ref) throws IOException {
-        String cleanObjectName = text(objectName).replaceFirst("^/+", "");
-        if (cleanObjectName.isBlank()) {
-            throw new IOException("Cannot resolve MinIO object from URL: " + ref);
-        }
-        return new ObjectRef(text(bucket).isBlank() ? minioBucket : text(bucket), cleanObjectName);
-    }
-
-    private String stripKnownPrefix(String path) {
-        String value = text(path).split("\\?", 2)[0].replaceFirst("^/+", "");
-        for (String prefix : List.of("minio/" + minioBucket + "/", minioBucket + "/")) {
-            if (value.startsWith(prefix)) {
-                return value.substring(prefix.length());
-            }
-        }
-        return value;
-    }
-
-    private boolean isMinioRef(String ref) {
-        String value = text(ref);
-        if (value.startsWith("s3:") || value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return true;
-        }
-        try {
-            URI uri = URI.create(value);
-            String path = decode(uri.getPath());
-            return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
-                    && (path.startsWith("/minio/" + minioBucket + "/") || path.startsWith("/" + minioBucket + "/"));
-        } catch (Exception ignored) {
-            return false;
-        }
-    }
-
-    private void cleanup(ResolvedFile resolvedFile) {
-        if (resolvedFile == null || !resolvedFile.temporary()) {
-            return;
-        }
-        try {
-            Files.deleteIfExists(resolvedFile.path());
-        } catch (Exception exception) {
-            log.warn("Bilibili Playwright cleanup failed path={} message={}", resolvedFile.path(), exception.getMessage());
-        }
+    private void cleanup(UploadMaterialResolver.ResolvedFile resolvedFile) {
+        materialResolver.cleanupQuietly(resolvedFile);
     }
 
     private List<String> parseTags(String tags) {
@@ -630,76 +493,29 @@ public class BilibiliPlaywrightUploadService {
     }
 
     private boolean containsAny(String value, String... needles) {
-        String text = text(value);
-        for (String needle : needles) {
-            if (text.contains(needle)) {
-                return true;
-            }
-        }
-        return false;
+        return TextSupport.containsAny(value, needles);
     }
 
     private boolean hasText(String value) {
-        return !text(value).isBlank();
+        return TextSupport.hasText(value);
     }
 
     private String required(String value, String field) throws IOException {
-        String text = text(value);
-        if (text.isBlank()) {
-            throw new IOException("Missing field: " + field);
-        }
-        return text;
+        return TextSupport.required(value, field);
     }
 
     private String firstText(String... values) {
-        for (String value : values) {
-            String text = text(value);
-            if (!text.isBlank()) {
-                return text;
-            }
-        }
-        return "";
+        return TextSupport.firstText(values);
     }
 
     private String truncate(String value, int max) {
-        String text = text(value);
-        if (text.codePointCount(0, text.length()) <= max) {
-            return text;
-        }
-        return text.codePoints()
-                .limit(max - 3L)
-                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
-                .append("...")
-                .toString();
-    }
-
-    private String decode(String value) {
-        return URLDecoder.decode(text(value), StandardCharsets.UTF_8);
-    }
-
-    private String sanitizeFilename(String value) {
-        String sanitized = text(value).replaceAll("[\\\\/:*?\"<>|]+", "_");
-        return sanitized.isBlank() ? "video.mp4" : sanitized;
-    }
-
-    private String safeSegment(String value) {
-        String sanitized = text(value).replaceAll("[^A-Za-z0-9._-]+", "_");
-        return sanitized.isBlank() ? "manual" : sanitized;
+        return TextSupport.truncateWithEllipsis(value, max);
     }
 
     private String text(String value) {
-        return value == null ? "" : value.trim();
-    }
-
-    private record ObjectRef(String bucket, String objectName) {
-    }
-
-    private record ResolvedFile(Path path, boolean temporary) {
+        return TextSupport.text(value);
     }
 
     private record UploadPaths(Path localPath, Path browserPath) {
-    }
-
-    private record DiagnosticSnapshot(Path screenshot, Path html) {
     }
 }
