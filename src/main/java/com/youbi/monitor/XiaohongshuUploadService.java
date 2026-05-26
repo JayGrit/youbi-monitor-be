@@ -33,10 +33,12 @@ public class XiaohongshuUploadService {
     private final Path diagnosticsRoot;
     private final UploadMaterialResolver materialResolver;
     private final SocialHumanActions humanActions;
+    private final SocialRiskDetector riskDetector;
 
     public XiaohongshuUploadService(
             XiaohongshuAccountService accountService,
             SocialHumanActions humanActions,
+            SocialRiskDetector riskDetector,
             ObjectMapper objectMapper,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
@@ -46,6 +48,7 @@ public class XiaohongshuUploadService {
     ) {
         this.accountService = accountService;
         this.humanActions = humanActions;
+        this.riskDetector = riskDetector;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -113,6 +116,7 @@ public class XiaohongshuUploadService {
         log.info("XHS upload navigate publish page taskId={} url={}", taskId, PUBLISH_VIDEO_URL);
         page.navigate(PUBLISH_VIDEO_URL);
         page.waitForURL(PUBLISH_VIDEO_URL, new Page.WaitForURLOptions().setTimeout(30000));
+        ensureNotBlocked(page, taskId, "open-publish-page");
         log.info("XHS upload set video input taskId={} file={}", taskId, videoPath);
         page.locator("div[class^='upload-content'] input[class='upload-input']").setInputFiles(videoPath);
         waitForVideoReady(page, taskId);
@@ -153,6 +157,11 @@ public class XiaohongshuUploadService {
             } catch (Exception ignored) {
             }
             page.waitForTimeout(2000);
+        }
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.XIAOHONGSHU, page);
+        if (risk.blocking()) {
+            dumpDiagnostics(page, taskId, "video-ready-risk-blocked");
+            throw new RuntimeException("Xiaohongshu upload blocked while waiting video ready: " + risk.message());
         }
         throw new RuntimeException("Timed out waiting for Xiaohongshu video upload to become editable");
     }
@@ -276,7 +285,19 @@ public class XiaohongshuUploadService {
             }
         }
         dumpDiagnostics(page, taskId, "publish-timeout");
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.XIAOHONGSHU, page);
+        if (risk.blocking()) {
+            throw new RuntimeException("Xiaohongshu publish blocked: " + risk.message());
+        }
         throw last == null ? new RuntimeException("Timed out publishing Xiaohongshu video") : last;
+    }
+
+    private void ensureNotBlocked(Page page, String taskId, String label) {
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.XIAOHONGSHU, page);
+        if (risk.blocking()) {
+            dumpDiagnostics(page, taskId, label + "-risk-blocked");
+            throw new RuntimeException("Xiaohongshu upload blocked: " + risk.message());
+        }
     }
 
     private void clickPublishButton(Page page, String buttonText, String taskId) {

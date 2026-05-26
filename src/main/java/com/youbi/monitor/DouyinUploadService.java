@@ -57,12 +57,14 @@ public class DouyinUploadService {
     private final Map<String, String> cdpEndpoints;
     private final Map<String, Object> cdpLocks = new ConcurrentHashMap<>();
     private final SocialHumanActions humanActions;
+    private final SocialRiskDetector riskDetector;
 
     public DouyinUploadService(
             DouyinAccountService accountService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             SocialHumanActions humanActions,
+            SocialRiskDetector riskDetector,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -76,6 +78,7 @@ public class DouyinUploadService {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.humanActions = humanActions;
+        this.riskDetector = riskDetector;
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -274,6 +277,11 @@ public class DouyinUploadService {
         try {
             long deadline = System.currentTimeMillis() + Duration.ofSeconds(20).toMillis();
             while (System.currentTimeMillis() < deadline) {
+                SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.DOUYIN, page);
+                if (risk.blocking() && !"login_required".equals(risk.code())) {
+                    dumpDiagnostics(page, taskId, "upload-page-risk-blocked");
+                    throw new IOException("Douyin upload blocked: " + risk.message());
+                }
                 if (page.locator("div[class^='container'] input[type='file']").count() > 0) {
                     return;
                 }
@@ -599,6 +607,10 @@ public class DouyinUploadService {
             page.waitForTimeout(2000);
         }
         dumpDiagnostics(page, taskId, "video-upload-timeout");
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.DOUYIN, page);
+        if (risk.blocking()) {
+            throw new RuntimeException("Douyin upload blocked while waiting video upload: " + risk.message());
+        }
         throw new RuntimeException("Timed out waiting for Douyin video upload");
     }
 
@@ -803,6 +815,10 @@ public class DouyinUploadService {
             }
         }
         dumpDiagnostics(page, taskId, "publish-timeout");
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.DOUYIN, page);
+        if (risk.blocking()) {
+            throw new RuntimeException("Douyin publish blocked: " + risk.message());
+        }
         throw last == null ? new RuntimeException("Timed out publishing Douyin video") : last;
     }
 

@@ -34,10 +34,12 @@ public class BilibiliPlaywrightUploadService {
     private final Path browserUploadWorkDir;
     private final UploadMaterialResolver materialResolver;
     private final SocialHumanActions humanActions;
+    private final SocialRiskDetector riskDetector;
 
     public BilibiliPlaywrightUploadService(
             BilibiliPlaywrightAccountService accountService,
             SocialHumanActions humanActions,
+            SocialRiskDetector riskDetector,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -47,6 +49,7 @@ public class BilibiliPlaywrightUploadService {
     ) {
         this.accountService = accountService;
         this.humanActions = humanActions;
+        this.riskDetector = riskDetector;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -124,9 +127,12 @@ public class BilibiliPlaywrightUploadService {
                 page.navigate(PUBLISH_VIDEO_URL);
                 page.waitForTimeout(5000);
                 PlaywrightDiagnostics.DiagnosticSnapshot snapshot = dumpDiagnostics(page, taskId, "upload-page");
+                SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
                 return Map.of(
                         "accountKey", normalized,
                         "url", page.url(),
+                        "risk", risk,
+                        "ready", !risk.blocking() && containsAny(safeBodyText(page), "上传视频", "稿件", "发布"),
                         "screenshot", snapshot.screenshot().toString(),
                         "html", snapshot.html().toString()
                 );
@@ -209,6 +215,11 @@ public class BilibiliPlaywrightUploadService {
 
     private void ensureLoggedIn(Page page, String taskId) throws IOException {
         String body = safeBodyText(page);
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
+        if (risk.blocking()) {
+            dumpDiagnostics(page, taskId, "risk-blocked");
+            throw new IOException("Bilibili Playwright upload blocked: " + risk.message());
+        }
         if (containsAny(body, "登录", "扫码登录") && !containsAny(body, "上传视频", "稿件", "发布")) {
             dumpDiagnostics(page, taskId, "login-required");
             throw new IOException("Bilibili Playwright account is not logged in. Open /api/bilibili/playwright/login/open first.");
@@ -231,6 +242,10 @@ public class BilibiliPlaywrightUploadService {
             page.waitForTimeout(2000);
         }
         dumpDiagnostics(page, taskId, "metadata-timeout");
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
+        if (risk.blocking()) {
+            throw new RuntimeException("Bilibili Playwright upload blocked while waiting metadata form: " + risk.message());
+        }
         throw new RuntimeException("Timed out waiting for Bilibili upload metadata form");
     }
 
@@ -428,6 +443,10 @@ public class BilibiliPlaywrightUploadService {
             page.waitForTimeout(2000);
         }
         dumpDiagnostics(page, taskId, "publish-timeout");
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
+        if (risk.blocking()) {
+            throw new RuntimeException("Bilibili Playwright publish blocked: " + risk.message());
+        }
         throw last == null ? new RuntimeException("Timed out publishing Bilibili video") : last;
     }
 
@@ -463,6 +482,10 @@ public class BilibiliPlaywrightUploadService {
             page.waitForTimeout(2000);
         }
         dumpDiagnostics(page, taskId, "publish-accept-timeout");
+        SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
+        if (risk.blocking()) {
+            throw new RuntimeException("Bilibili Playwright publish accept blocked: " + risk.message());
+        }
         throw new RuntimeException("Timed out waiting for Bilibili publish accepted page");
     }
 
