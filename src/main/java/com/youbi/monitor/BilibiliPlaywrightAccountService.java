@@ -124,6 +124,7 @@ public class BilibiliPlaywrightAccountService {
                             sendAvailability.nextUploadAllowedAt(),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            sendAvailability.uploadRunningCount(),
                             rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
@@ -154,6 +155,7 @@ public class BilibiliPlaywrightAccountService {
                 sendAvailability.nextUploadAllowedAt(),
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
+                sendAvailability.uploadRunningCount(),
                 accountEnabled(normalized),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
@@ -359,7 +361,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private BilibiliPlaywrightAccountStatus emptyStatus(String accountKey, String message) {
-        return new BilibiliPlaywrightAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, true, false, message, Map.of());
+        return new BilibiliPlaywrightAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, 0, true, false, message, Map.of());
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {

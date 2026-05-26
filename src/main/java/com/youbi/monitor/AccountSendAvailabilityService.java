@@ -28,13 +28,15 @@ public class AccountSendAvailabilityService {
         LocalDateTime nextUploadAllowedAt = null;
         int todayUploadCount = 0;
         int cooldownWaitingCount = 0;
+        int uploadRunningCount = 0;
 
         if (tableExists(uploadTaskTable(platform))) {
             todayUploadCount = todayUploadCount(platform, accountKey);
+            uploadRunningCount = uploadRunningCount(platform, accountKey);
             cooldownWaitingCount = platformAccountTable != null
                     && tableExists(platformAccountTable)
                     && columnExists(platformAccountTable, "next_upload_allowed_at")
-                    ? cooldownWaitingCount(platform, accountKey, platformAccountTable)
+                    ? cooldownWaitingCount(platform, accountKey, platformAccountTable, uploadRunningCount)
                     : 0;
         }
 
@@ -48,7 +50,7 @@ public class AccountSendAvailabilityService {
             }
         }
 
-        return new AccountSendAvailability(lastUploadAt, nextUploadAllowedAt, todayUploadCount, cooldownWaitingCount);
+        return new AccountSendAvailability(lastUploadAt, nextUploadAllowedAt, todayUploadCount, cooldownWaitingCount, uploadRunningCount);
     }
 
     private Optional<AccountSendAvailability> queryPlatformAccount(String table, String accountKey) {
@@ -58,6 +60,7 @@ public class AccountSendAvailabilityService {
                 (rs, rowNum) -> new AccountSendAvailability(
                         toLocalDateTime(rs.getTimestamp("last_upload_at")),
                         toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
+                        0,
                         0,
                         0
                 ),
@@ -95,7 +98,7 @@ public class AccountSendAvailabilityService {
         return count == null ? 0 : count;
     }
 
-    private int cooldownWaitingCount(String platform, String accountKey, String platformAccountTable) {
+    private int cooldownWaitingCount(String platform, String accountKey, String platformAccountTable, int uploadRunningCount) {
         String uploadTaskTable = uploadTaskTable(platform);
         Integer count = jdbcTemplate.queryForObject(
                 ("""
@@ -107,6 +110,21 @@ public class AccountSendAvailabilityService {
                   AND s.status = 'ready'
                   AND a.next_upload_allowed_at > NOW()
                 """).formatted(uploadTaskTable, platformAccountTable),
+                Integer.class,
+                accountKey
+        );
+        return (count == null ? 0 : count) + uploadRunningCount;
+    }
+
+    private int uploadRunningCount(String platform, String accountKey) {
+        String uploadTaskTable = uploadTaskTable(platform);
+        Integer count = jdbcTemplate.queryForObject(
+                ("""
+                SELECT COUNT(*)
+                FROM %s
+                WHERE account_key = ?
+                  AND status = 'running'
+                """).formatted(uploadTaskTable),
                 Integer.class,
                 accountKey
         );

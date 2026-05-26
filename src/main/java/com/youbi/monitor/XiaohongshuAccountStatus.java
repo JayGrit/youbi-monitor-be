@@ -17,6 +17,7 @@ public record XiaohongshuAccountStatus(
         Integer uploadCooldownMaxSeconds,
         int todayUploadCount,
         int cooldownWaitingCount,
+        int uploadRunningCount,
         boolean enabled,
         Boolean valid,
         String message,

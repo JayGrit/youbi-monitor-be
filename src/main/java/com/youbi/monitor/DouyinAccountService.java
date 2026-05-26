@@ -73,6 +73,7 @@ public class DouyinAccountService {
                             nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            sendAvailability.uploadRunningCount(),
                             rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
@@ -103,6 +104,7 @@ public class DouyinAccountService {
                             nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            sendAvailability.uploadRunningCount(),
                             rs.getBoolean("is_enabled"),
                             rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime()
                     );
@@ -156,7 +158,7 @@ public class DouyinAccountService {
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         int[] cooldown = cooldownConfig(normalized);
         if (storageState.isEmpty()) {
-            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
+            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -175,6 +177,7 @@ public class DouyinAccountService {
                 cooldown[1],
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
+                sendAvailability.uploadRunningCount(),
                 accountEnabled(normalized),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
@@ -428,7 +431,7 @@ public class DouyinAccountService {
     }
 
     private DouyinAccountStatus emptyStatus(String accountKey) {
-        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private int[] cooldownConfig(String accountKey) {

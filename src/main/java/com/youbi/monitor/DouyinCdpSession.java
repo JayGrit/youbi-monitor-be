@@ -13,6 +13,7 @@ public record DouyinCdpSession(
         Integer uploadCooldownMaxSeconds,
         int todayUploadCount,
         int cooldownWaitingCount,
+        int uploadRunningCount,
         boolean enabled,
         LocalDateTime updatedAt
 ) {

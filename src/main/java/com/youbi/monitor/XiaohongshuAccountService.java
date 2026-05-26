@@ -74,6 +74,7 @@ public class XiaohongshuAccountService {
                             nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            sendAvailability.uploadRunningCount(),
                             rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
@@ -89,7 +90,7 @@ public class XiaohongshuAccountService {
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         int[] cooldown = cooldownConfig(normalized);
         if (storageState.isEmpty()) {
-            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
+            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -108,6 +109,7 @@ public class XiaohongshuAccountService {
                 cooldown[1],
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
+                sendAvailability.uploadRunningCount(),
                 accountEnabled(normalized),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
@@ -273,7 +275,7 @@ public class XiaohongshuAccountService {
     }
 
     private XiaohongshuAccountStatus emptyStatus(String accountKey) {
-        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private int[] cooldownConfig(String accountKey) {

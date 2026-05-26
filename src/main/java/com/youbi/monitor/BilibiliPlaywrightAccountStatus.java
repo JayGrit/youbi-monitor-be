@@ -15,6 +15,7 @@ public record BilibiliPlaywrightAccountStatus(
         LocalDateTime nextUploadAllowedAt,
         int todayUploadCount,
         int cooldownWaitingCount,
+        int uploadRunningCount,
         boolean enabled,
         Boolean valid,
         String message,

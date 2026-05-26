@@ -6,6 +6,7 @@ public record AccountSendAvailability(
         LocalDateTime lastUploadAt,
         LocalDateTime nextUploadAllowedAt,
         int todayUploadCount,
-        int cooldownWaitingCount
+        int cooldownWaitingCount,
+        int uploadRunningCount
 ) {
 }

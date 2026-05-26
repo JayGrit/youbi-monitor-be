@@ -81,6 +81,7 @@ public class BilibiliAccountService {
                             nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            sendAvailability.uploadRunningCount(),
                             rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
@@ -251,7 +252,7 @@ public class BilibiliAccountService {
 
     private BilibiliAccountStatus emptyAutoStatus() {
         return new BilibiliAccountStatus("database", AUTO_ACCOUNT_KEY, false, 0, null,
-                null, null, null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+                null, null, null, null, null, null, null, null, 0, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private String automaticAccountKey(JsonNode loginInfo) {
@@ -289,7 +290,7 @@ public class BilibiliAccountService {
         int[] cooldown = cooldownConfig(accountKey);
         if (stored.isEmpty()) {
             return new BilibiliAccountStatus("database", accountKey, false, 0, null,
-                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), false, "未登录", Map.of());
+                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(accountKey), false, "未登录", Map.of());
         }
 
         JsonNode loginInfo = stored.get();
@@ -319,6 +320,7 @@ public class BilibiliAccountService {
                     cooldown[1],
                     sendAvailability.todayUploadCount(),
                     sendAvailability.cooldownWaitingCount(),
+                    sendAvailability.uploadRunningCount(),
                     accountEnabled(accountKey),
                     code == 0,
                     code == 0 ? "已登录" : myInfo.path("message").asText("账号状态异常"),
@@ -327,7 +329,7 @@ public class BilibiliAccountService {
         } catch (Exception exception) {
             return new BilibiliAccountStatus("database", accountKey, true,
                     json.getBytes(StandardCharsets.UTF_8).length, updatedAt,
-                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), null, exception.getMessage(), Map.of());
+                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(accountKey), null, exception.getMessage(), Map.of());
         }
     }
 
