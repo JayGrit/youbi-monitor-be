@@ -342,19 +342,85 @@ public class BilibiliPlaywrightUploadService {
             return;
         }
         try {
-            String selector = "input[type='file'][accept*='image']";
-            Locator coverInput = page.locator(selector).first();
-            if (coverInput.count() > 0) {
-                setInputFiles(page, selector, coverPaths, browserSideFiles, 30000, taskId, "cover");
-                page.waitForTimeout(1000);
-                log.info("Bilibili Playwright cover input filled taskId={} cover={} browserCover={}",
-                        taskId, coverPaths.localPath(), coverPaths.browserPath());
+            if (setCoverInputIfPresent(page, coverPaths, browserSideFiles, taskId, "cover-direct")) {
                 return;
             }
-            log.warn("Bilibili Playwright cover input not found taskId={} cover={}", taskId, coverPaths.localPath());
+
+            if (!clickCoverSetting(page, taskId)) {
+                throw new RuntimeException("Bilibili cover setting entry not found");
+            }
+            page.waitForTimeout(1000);
+            dumpDiagnostics(page, taskId, "cover-dialog-opened");
+            if (!setCoverInputIfPresent(page, coverPaths, browserSideFiles, taskId, "cover-dialog")) {
+                throw new RuntimeException("Bilibili cover file input not found after opening cover dialog");
+            }
+            clickCoverConfirmIfPresent(page, taskId);
+            page.waitForTimeout(1500);
+            dumpDiagnostics(page, taskId, "cover-filled");
         } catch (Exception exception) {
-            log.warn("Bilibili Playwright cover skipped taskId={} cover={} message={}", taskId, coverPaths.localPath(), exception.getMessage());
             dumpDiagnostics(page, taskId, "cover-skipped");
+            throw new RuntimeException("Bilibili Playwright cover failed taskId=" + taskId + " cover=" + coverPaths.localPath() + ": " + exception.getMessage(), exception);
+        }
+    }
+
+    private boolean setCoverInputIfPresent(Page page, UploadPaths coverPaths, boolean browserSideFiles, String taskId, String label) throws IOException {
+        for (String selector : List.of(
+                "input[type='file'][accept*='image']",
+                "input[type='file'][accept*='.jpg']",
+                "input[type='file'][accept*='.jpeg']",
+                "input[type='file'][accept*='.png']",
+                "input[type='file'][accept*='.webp']"
+        )) {
+            try {
+                Locator coverInput = page.locator(selector).last();
+                if (coverInput.count() > 0) {
+                    setInputFiles(page, selector, coverPaths, browserSideFiles, 30000, taskId, label);
+                    page.waitForTimeout(1000);
+                    log.info("Bilibili Playwright cover input filled taskId={} label={} cover={} browserCover={}",
+                            taskId, label, coverPaths.localPath(), coverPaths.browserPath());
+                    return true;
+                }
+            } catch (Exception exception) {
+                log.warn("Bilibili Playwright cover input candidate failed taskId={} label={} selector={} message={}",
+                        taskId, label, selector, exception.getMessage());
+            }
+        }
+        return false;
+    }
+
+    private boolean clickCoverSetting(Page page, String taskId) {
+        for (String selector : List.of(
+                "text=\"封面设置\"",
+                ".cover:has-text('封面设置')",
+                ".cover-upload:has-text('封面')",
+                ".cover-container:has-text('封面')",
+                ".cover-edit:visible",
+                "[class*='cover']:has-text('封面')"
+        )) {
+            try {
+                Locator entry = page.locator(selector).first();
+                if (entry.count() > 0 && entry.isVisible()) {
+                    humanActions.click(page, entry);
+                    log.info("Bilibili Playwright cover setting clicked taskId={} selector={}", taskId, selector);
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
+    }
+
+    private void clickCoverConfirmIfPresent(Page page, String taskId) {
+        for (String text : List.of("完成", "确认", "确定", "保存", "应用")) {
+            try {
+                Locator button = page.locator("button:has-text('" + text + "'):visible, .bcc-button:has-text('" + text + "'):visible, span:has-text('" + text + "'):visible").last();
+                if (button.count() > 0 && button.isEnabled()) {
+                    humanActions.click(page, button);
+                    log.info("Bilibili Playwright cover confirm clicked taskId={} text={}", taskId, text);
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -430,7 +496,7 @@ public class BilibiliPlaywrightUploadService {
                     continue;
                 }
                 if (clickPublishButton(page, taskId)) {
-                    waitForPublishAccepted(page, taskId);
+                    waitForPublishFinished(page, taskId);
                     dumpDiagnostics(page, taskId, "04-after-publish-click");
                     return;
                 }
@@ -465,28 +531,109 @@ public class BilibiliPlaywrightUploadService {
         return false;
     }
 
-    private void waitForPublishAccepted(Page page, String taskId) {
-        long deadline = System.currentTimeMillis() + Duration.ofMinutes(2).toMillis();
+    private void waitForPublishFinished(Page page, String taskId) {
+        long deadline = System.currentTimeMillis() + Duration.ofMinutes(5).toMillis();
         int attempts = 0;
         while (System.currentTimeMillis() < deadline) {
             attempts += 1;
             String body = safeBodyText(page);
-            if (containsAny(body, "稿件处理进度", "稿件审核", "稿件上传", "上传完成")) {
-                log.info("Bilibili Playwright publish accepted taskId={} attempts={} url={}", taskId, attempts, page.url());
+            String url = page.url();
+            if (isPublishSuccessPage(url, body)) {
+                log.info("Bilibili Playwright publish finished taskId={} attempts={} url={}", taskId, attempts, url);
                 return;
             }
+            if (hasSubmitValidationError(body)) {
+                dumpDiagnostics(page, taskId, "publish-validation-error");
+                throw new RuntimeException("Bilibili publish validation failed: " + submitValidationSummary(body));
+            }
             if (attempts % 5 == 1) {
-                log.info("Bilibili Playwright waiting publish accepted taskId={} attempts={} url={} body={}",
-                        taskId, attempts, page.url(), truncate(body, 300));
+                log.info("Bilibili Playwright waiting publish finished taskId={} attempts={} url={} body={}",
+                        taskId, attempts, url, truncate(body, 300));
+                dumpDiagnostics(page, taskId, "publish-finish-wait-" + attempts);
             }
             page.waitForTimeout(2000);
         }
-        dumpDiagnostics(page, taskId, "publish-accept-timeout");
+        dumpDiagnostics(page, taskId, "publish-finish-timeout");
         SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
         if (risk.blocking()) {
-            throw new RuntimeException("Bilibili Playwright publish accept blocked: " + risk.message());
+            throw new RuntimeException("Bilibili Playwright publish finish blocked: " + risk.message());
         }
-        throw new RuntimeException("Timed out waiting for Bilibili publish accepted page");
+        if (hasEditableTitle(page) && hasVisiblePublishButton(page)) {
+            throw new RuntimeException("Bilibili publish did not finish: still on editable upload form after clicking publish");
+        }
+        throw new RuntimeException("Timed out waiting for Bilibili publish finished page");
+    }
+
+    private boolean isPublishSuccessPage(String url, String body) {
+        String normalizedUrl = text(url).toLowerCase();
+        if (normalizedUrl.contains("/platform/upload-manager")
+                || normalizedUrl.contains("/platform/article")
+                || normalizedUrl.contains("archive-process")
+                || normalizedUrl.contains("upload-manager/article")) {
+            return true;
+        }
+        return containsAny(body,
+                "投稿成功",
+                "发布成功",
+                "提交成功",
+                "稿件已提交",
+                "稿件提交成功",
+                "稿件已进入审核",
+                "已进入审核",
+                "正在审核",
+                "查看稿件",
+                "稿件处理进度");
+    }
+
+    private boolean hasSubmitValidationError(String body) {
+        return containsAny(body,
+                "请设置封面",
+                "请上传封面",
+                "封面不能为空",
+                "请选择分区",
+                "请输入标题",
+                "标题不能为空",
+                "请选择创作声明",
+                "投稿失败",
+                "发布失败",
+                "提交失败",
+                "操作频繁",
+                "风控");
+    }
+
+    private String submitValidationSummary(String body) {
+        for (String message : List.of(
+                "请设置封面",
+                "请上传封面",
+                "封面不能为空",
+                "请选择分区",
+                "请输入标题",
+                "标题不能为空",
+                "请选择创作声明",
+                "投稿失败",
+                "发布失败",
+                "提交失败",
+                "操作频繁",
+                "风控"
+        )) {
+            if (containsAny(body, message)) {
+                return message;
+            }
+        }
+        return truncate(body, 200);
+    }
+
+    private boolean hasVisiblePublishButton(Page page) {
+        for (String text : List.of("立即投稿", "投稿", "发布")) {
+            try {
+                Locator button = page.locator("button:has-text('" + text + "'):visible, span.submit-add:has-text('" + text + "'):visible, .submit-add:has-text('" + text + "'):visible").last();
+                if (button.count() > 0 && button.isVisible()) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
     }
 
     private PlaywrightDiagnostics.DiagnosticSnapshot dumpDiagnostics(Page page, String taskId, String label) {
