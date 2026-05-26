@@ -7,9 +7,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.TimeoutError;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -39,28 +37,25 @@ public class XiaohongshuAccountService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
-    private final boolean headless;
-    private final String browserChannel;
+    private final SocialBrowserFactory browserFactory;
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public XiaohongshuAccountService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
-            @Value("${youbi.xiaohongshu.headless:true}") boolean headless,
-            @Value("${youbi.xiaohongshu.browser-channel:chrome}") String browserChannel
+            SocialBrowserFactory browserFactory
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
-        this.headless = headless;
-        this.browserChannel = browserChannel == null || browserChannel.isBlank() ? "chrome" : browserChannel.trim();
+        this.browserFactory = browserFactory;
         ensureSchema();
     }
 
     public List<XiaohongshuAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -75,6 +70,8 @@ public class XiaohongshuAccountService {
                             rs.getString("nickname"),
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
                             rs.getBoolean("is_enabled"),
@@ -90,8 +87,9 @@ public class XiaohongshuAccountService {
         String normalized = normalizeAccountKey(accountKey);
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
+        int[] cooldown = cooldownConfig(normalized);
         if (storageState.isEmpty()) {
-            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
+            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -106,6 +104,8 @@ public class XiaohongshuAccountService {
                 profile.nickname(),
                 sendAvailability.lastUploadAt(),
                 sendAvailability.nextUploadAllowedAt(),
+                cooldown[0],
+                cooldown[1],
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
                 accountEnabled(normalized),
@@ -126,16 +126,18 @@ public class XiaohongshuAccountService {
         String authCode = UUID.randomUUID().toString();
         closeSession(authCode);
 
+        Browser browser = null;
+        BrowserContext context = null;
         try {
-            Playwright playwright = Playwright.create();
-            Browser browser = playwright.chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
-            BrowserContext context = browser.newContext();
+            browser = launchBrowser();
+            context = browserFactory.newContext(SocialBrowserPlatform.XIAOHONGSHU, browser);
             Page page = context.newPage();
             page.navigate(LOGIN_URL);
             String imageDataUrl = extractQrImage(page);
-            loginSessions.put(authCode, new LoginSession(normalized, authCode, playwright, browser, context, page, Instant.now().plusSeconds(180)));
+            loginSessions.put(authCode, new LoginSession(normalized, authCode, browser, context, page, Instant.now().plusSeconds(180)));
             return new XiaohongshuQrCode(normalized, authCode, imageDataUrl, Instant.now().getEpochSecond() + 180);
         } catch (Exception exception) {
+            closeQuietly(context, browser);
             throw new IOException("Cannot create Xiaohongshu qrcode: " + exception.getMessage(), exception);
         }
     }
@@ -205,6 +207,21 @@ public class XiaohongshuAccountService {
         return status(normalized);
     }
 
+    public XiaohongshuAccountStatus setCooldown(String accountKey, Integer minSeconds, Integer maxSeconds) throws IOException {
+        String normalized = normalizeAccountKey(accountKey);
+        int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
+        int updated = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
+                cooldown[0],
+                cooldown[1],
+                normalized
+        );
+        if (updated != 1) {
+            throw new IOException("Xiaohongshu account key not found: " + normalized);
+        }
+        return status(normalized);
+    }
+
     public String normalizeAccountKey(String accountKey) {
         String normalized = accountKey == null ? "" : accountKey.trim();
         if (normalized.isBlank()) {
@@ -217,11 +234,15 @@ public class XiaohongshuAccountService {
     }
 
     Browser launchBrowser() {
-        return PlaywrightHolder.playwright().chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
+        return browserFactory.launchBrowser(SocialBrowserPlatform.XIAOHONGSHU);
     }
 
     Browser.NewContextOptions storageContextOptions(String storageState) {
-        return new Browser.NewContextOptions().setStorageState(storageState);
+        return browserFactory.storageContextOptions(SocialBrowserPlatform.XIAOHONGSHU, storageState);
+    }
+
+    BrowserContext newContext(Browser browser, String storageState) {
+        return browserFactory.newContext(SocialBrowserPlatform.XIAOHONGSHU, browser, storageState);
     }
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
@@ -252,7 +273,33 @@ public class XiaohongshuAccountService {
     }
 
     private XiaohongshuAccountStatus emptyStatus(String accountKey) {
-        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+    }
+
+    private int[] cooldownConfig(String accountKey) {
+        List<int[]> rows = jdbcTemplate.query(
+                "SELECT upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> new int[] {
+                        rs.getObject("upload_cooldown_min_seconds") == null ? 3600 : rs.getInt("upload_cooldown_min_seconds"),
+                        rs.getObject("upload_cooldown_max_seconds") == null ? 7200 : rs.getInt("upload_cooldown_max_seconds")
+                },
+                accountKey
+        );
+        return rows.isEmpty() ? new int[] {3600, 7200} : rows.get(0);
+    }
+
+    private int[] normalizeCooldown(Integer minSeconds, Integer maxSeconds) {
+        int min = minSeconds == null ? 3600 : minSeconds;
+        int max = maxSeconds == null ? 7200 : maxSeconds;
+        if (min < 0 || max < 0 || min > max || max > 7 * 24 * 60 * 60) {
+            throw new IllegalArgumentException("Invalid cooldown seconds range: " + min + "-" + max);
+        }
+        return new int[] {min, max};
+    }
+
+    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
@@ -310,7 +357,7 @@ public class XiaohongshuAccountService {
 
     private boolean isStorageStateValid(String storageState) {
         try (Browser browser = launchBrowser()) {
-            BrowserContext context = browser.newContext(storageContextOptions(storageState));
+            BrowserContext context = newContext(browser, storageState);
             try {
                 Page page = context.newPage();
                 page.navigate(PUBLISH_VIDEO_URL);
@@ -421,6 +468,8 @@ public class XiaohongshuAccountService {
                 """
         );
         ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
+        ensureColumn("upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
     }
 
     private void ensureColumn(String column, String definition) {
@@ -446,16 +495,20 @@ public class XiaohongshuAccountService {
         if (session == null) {
             return;
         }
+        closeQuietly(session.context(), session.browser());
+    }
+
+    private void closeQuietly(BrowserContext context, Browser browser) {
         try {
-            session.context().close();
+            if (context != null) {
+                context.close();
+            }
         } catch (Exception ignored) {
         }
         try {
-            session.browser().close();
-        } catch (Exception ignored) {
-        }
-        try {
-            session.playwright().close();
+            if (browser != null) {
+                browser.close();
+            }
         } catch (Exception ignored) {
         }
     }
@@ -479,27 +532,11 @@ public class XiaohongshuAccountService {
         return value == null ? "" : value.trim();
     }
 
-    private record LoginSession(String accountKey, String authCode, Playwright playwright, Browser browser,
+    private record LoginSession(String accountKey, String authCode, Browser browser,
                                 BrowserContext context, Page page, Instant expiresAt) {
     }
 
     private record AccountProfile(String userId, String nickname) {
     }
 
-    private record BrowserTypeOptions(boolean headless, String channel) {
-        com.microsoft.playwright.BrowserType.LaunchOptions toLaunchOptions() {
-            return new com.microsoft.playwright.BrowserType.LaunchOptions()
-                    .setHeadless(headless)
-                    .setChannel(channel)
-                    .setArgs(List.of("--no-sandbox", "--disable-dev-shm-usage"));
-        }
-    }
-
-    private static class PlaywrightHolder {
-        private static final Playwright PLAYWRIGHT = Playwright.create();
-
-        static Playwright playwright() {
-            return PLAYWRIGHT;
-        }
-    }
 }

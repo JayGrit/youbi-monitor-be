@@ -77,4 +77,17 @@ public class BilibiliAccountController {
             return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
         }
     }
+
+    @PostMapping("/api/bilibili/account/{accountKey}/cooldown")
+    public ResponseEntity<?> setCooldown(@PathVariable String accountKey, @RequestBody AccountCooldownUpdateRequest request) {
+        try {
+            return ResponseEntity.ok(accountService.setCooldown(
+                    accountKey,
+                    request == null ? null : request.minSeconds(),
+                    request == null ? null : request.maxSeconds()
+            ));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
 }

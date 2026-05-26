@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -36,8 +35,7 @@ public class BilibiliPlaywrightAccountService {
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final HttpClient httpClient;
-    private final boolean headless;
-    private final String browserChannel;
+    private final SocialBrowserFactory browserFactory;
     private final String cdpUrl;
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
@@ -45,16 +43,14 @@ public class BilibiliPlaywrightAccountService {
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
-            @Value("${youbi.bilibili.playwright.headless:false}") boolean headless,
-            @Value("${youbi.bilibili.playwright.browser-channel:chrome}") String browserChannel,
+            SocialBrowserFactory browserFactory,
             @Value("${youbi.bilibili.playwright.cdp-url:}") String cdpUrl
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NORMAL).build();
-        this.headless = headless;
-        this.browserChannel = browserChannel == null ? "" : browserChannel.trim();
+        this.browserFactory = browserFactory;
         this.cdpUrl = text(cdpUrl);
         ensureSchema();
     }
@@ -63,17 +59,20 @@ public class BilibiliPlaywrightAccountService {
         String normalized = normalizeAccountKey(accountKey);
         String authCode = UUID.randomUUID().toString();
         closeSession(authCode);
+        Browser browser = null;
+        BrowserContext context = null;
         try {
-            Playwright playwright = Playwright.create();
-            Browser browser = playwright.chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
-            BrowserContext context = loadStorageState(normalized)
-                    .map(state -> browser.newContext(storageContextOptions(state)))
-                    .orElseGet(browser::newContext);
+            browser = launchBrowser();
+            Optional<String> storageState = loadStorageState(normalized);
+            context = storageState.isPresent()
+                    ? browserFactory.newContext(SocialBrowserPlatform.BILIBILI, browser, storageState.get())
+                    : browserFactory.newContext(SocialBrowserPlatform.BILIBILI, browser);
             Page page = context.newPage();
             page.navigate(PUBLISH_VIDEO_URL);
-            loginSessions.put(authCode, new LoginSession(normalized, authCode, playwright, browser, context, page, Instant.now().plusSeconds(900)));
+            loginSessions.put(authCode, new LoginSession(normalized, authCode, browser, context, page, Instant.now().plusSeconds(900)));
             return new BilibiliPlaywrightLoginOpenResult(normalized, authCode, page.url(), Instant.now().getEpochSecond() + 900);
         } catch (Exception exception) {
+            closeQuietly(context, browser);
             throw new IOException("Cannot open Bilibili login page: " + exception.getMessage(), exception);
         }
     }
@@ -180,18 +179,22 @@ public class BilibiliPlaywrightAccountService {
     }
 
     Browser launchBrowser() {
-        return PlaywrightHolder.playwright().chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
+        return browserFactory.launchBrowser(SocialBrowserPlatform.BILIBILI);
     }
 
     BrowserHandle openUploadBrowser() throws IOException {
         if (!cdpUrl.isBlank()) {
-            return new BrowserHandle(PlaywrightHolder.playwright().chromium().connectOverCDP(browserWsUrl(cdpUrl)), false);
+            return new BrowserHandle(browserFactory.connectOverCdp(browserWsUrl(cdpUrl)), false);
         }
         return new BrowserHandle(launchBrowser(), true);
     }
 
     Browser.NewContextOptions storageContextOptions(String storageState) {
-        return new Browser.NewContextOptions().setStorageState(storageState);
+        return browserFactory.storageContextOptions(SocialBrowserPlatform.BILIBILI, storageState);
+    }
+
+    BrowserContext newContext(Browser browser, String storageState) {
+        return browserFactory.newContext(SocialBrowserPlatform.BILIBILI, browser, storageState);
     }
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
@@ -403,16 +406,20 @@ public class BilibiliPlaywrightAccountService {
         if (session == null) {
             return;
         }
+        closeQuietly(session.context(), session.browser());
+    }
+
+    private void closeQuietly(BrowserContext context, Browser browser) {
         try {
-            session.context().close();
+            if (context != null) {
+                context.close();
+            }
         } catch (Exception ignored) {
         }
         try {
-            session.browser().close();
-        } catch (Exception ignored) {
-        }
-        try {
-            session.playwright().close();
+            if (browser != null) {
+                browser.close();
+            }
         } catch (Exception ignored) {
         }
     }
@@ -426,23 +433,11 @@ public class BilibiliPlaywrightAccountService {
         return value == null ? "" : value.trim();
     }
 
-    private record LoginSession(String accountKey, String authCode, Playwright playwright, Browser browser,
+    private record LoginSession(String accountKey, String authCode, Browser browser,
                                 BrowserContext context, Page page, Instant expiresAt) {
     }
 
     private record AccountProfile(Long mid, String uname) {
-    }
-
-    private record BrowserTypeOptions(boolean headless, String channel) {
-        com.microsoft.playwright.BrowserType.LaunchOptions toLaunchOptions() {
-            com.microsoft.playwright.BrowserType.LaunchOptions options = new com.microsoft.playwright.BrowserType.LaunchOptions()
-                    .setHeadless(headless)
-                    .setArgs(List.of("--no-sandbox", "--disable-dev-shm-usage"));
-            if (channel != null && !channel.isBlank()) {
-                options.setChannel(channel);
-            }
-            return options;
-        }
     }
 
     static class BrowserHandle implements AutoCloseable {
@@ -470,11 +465,4 @@ public class BilibiliPlaywrightAccountService {
         }
     }
 
-    private static class PlaywrightHolder {
-        private static final Playwright PLAYWRIGHT = Playwright.create();
-
-        static Playwright playwright() {
-            return PLAYWRIGHT;
-        }
-    }
 }

@@ -58,7 +58,7 @@ public class BilibiliAccountService {
 
     public List<BilibiliAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, mid, uname, login_info_json, updated_at, is_enabled FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, mid, uname, login_info_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("login_info_json");
@@ -77,6 +77,8 @@ public class BilibiliAccountService {
                             null,
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
                             rs.getBoolean("is_enabled"),
@@ -210,6 +212,21 @@ public class BilibiliAccountService {
         return status(normalized);
     }
 
+    public BilibiliAccountStatus setCooldown(String accountKey, Integer minSeconds, Integer maxSeconds) throws IOException {
+        String normalized = normalizeAccountKey(accountKey);
+        int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
+        int updated = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
+                cooldown[0],
+                cooldown[1],
+                normalized
+        );
+        if (updated != 1) {
+            throw new IOException("Bilibili account key not found: " + normalized);
+        }
+        return status(normalized);
+    }
+
     public String normalizeAccountKey(String accountKey) {
         String normalized = accountKey == null ? "" : accountKey.trim();
         if (normalized.isBlank()) {
@@ -234,7 +251,7 @@ public class BilibiliAccountService {
 
     private BilibiliAccountStatus emptyAutoStatus() {
         return new BilibiliAccountStatus("database", AUTO_ACCOUNT_KEY, false, 0, null,
-                null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+                null, null, null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private String automaticAccountKey(JsonNode loginInfo) {
@@ -269,9 +286,10 @@ public class BilibiliAccountService {
     private BilibiliAccountStatus status(String accountKey, Optional<JsonNode> knownLoginInfo) throws IOException {
         Optional<JsonNode> stored = knownLoginInfo.isPresent() ? knownLoginInfo : loadLoginInfo(accountKey);
         AccountSendAvailability sendAvailability = sendAvailability(accountKey);
+        int[] cooldown = cooldownConfig(accountKey);
         if (stored.isEmpty()) {
             return new BilibiliAccountStatus("database", accountKey, false, 0, null,
-                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), false, "未登录", Map.of());
+                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), false, "未登录", Map.of());
         }
 
         JsonNode loginInfo = stored.get();
@@ -297,6 +315,8 @@ public class BilibiliAccountService {
                     data.path("level").canConvertToInt() ? data.path("level").asInt() : null,
                     sendAvailability.lastUploadAt(),
                     sendAvailability.nextUploadAllowedAt(),
+                    cooldown[0],
+                    cooldown[1],
                     sendAvailability.todayUploadCount(),
                     sendAvailability.cooldownWaitingCount(),
                     accountEnabled(accountKey),
@@ -307,8 +327,34 @@ public class BilibiliAccountService {
         } catch (Exception exception) {
             return new BilibiliAccountStatus("database", accountKey, true,
                     json.getBytes(StandardCharsets.UTF_8).length, updatedAt,
-                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), null, exception.getMessage(), Map.of());
+                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), null, exception.getMessage(), Map.of());
         }
+    }
+
+    private int[] cooldownConfig(String accountKey) {
+        List<int[]> rows = jdbcTemplate.query(
+                "SELECT upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> new int[] {
+                        rs.getObject("upload_cooldown_min_seconds") == null ? 3600 : rs.getInt("upload_cooldown_min_seconds"),
+                        rs.getObject("upload_cooldown_max_seconds") == null ? 7200 : rs.getInt("upload_cooldown_max_seconds")
+                },
+                accountKey
+        );
+        return rows.isEmpty() ? new int[] {3600, 7200} : rows.get(0);
+    }
+
+    private int[] normalizeCooldown(Integer minSeconds, Integer maxSeconds) {
+        int min = minSeconds == null ? 3600 : minSeconds;
+        int max = maxSeconds == null ? 7200 : maxSeconds;
+        if (min < 0 || max < 0 || min > max || max > 7 * 24 * 60 * 60) {
+            throw new IllegalArgumentException("Invalid cooldown seconds range: " + min + "-" + max);
+        }
+        return new int[] {min, max};
+    }
+
+    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 
     private boolean accountEnabled(String accountKey) {
@@ -407,6 +453,8 @@ public class BilibiliAccountService {
                 """
         );
         ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
+        ensureColumn("upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
     }
 
     private void ensureColumn(String column, String definition) {

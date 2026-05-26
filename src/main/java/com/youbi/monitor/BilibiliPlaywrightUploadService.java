@@ -33,9 +33,11 @@ public class BilibiliPlaywrightUploadService {
     private final Path diagnosticsRoot;
     private final Path browserUploadWorkDir;
     private final UploadMaterialResolver materialResolver;
+    private final SocialHumanActions humanActions;
 
     public BilibiliPlaywrightUploadService(
             BilibiliPlaywrightAccountService accountService,
+            SocialHumanActions humanActions,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -44,6 +46,7 @@ public class BilibiliPlaywrightUploadService {
             @Value("${youbi.bilibili.playwright.browser-upload-work-dir:}") String browserUploadWorkDir
     ) {
         this.accountService = accountService;
+        this.humanActions = humanActions;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -75,7 +78,7 @@ public class BilibiliPlaywrightUploadService {
 
             String storageState = accountService.storageState(accountKey);
             try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
-                BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
+                BrowserContext context = accountService.newContext(browserHandle.browser(), storageState);
                 try {
                     Page page = context.newPage();
                     uploadVideoContent(
@@ -115,7 +118,7 @@ public class BilibiliPlaywrightUploadService {
         String taskId = "inspect-" + UUID.randomUUID();
         String storageState = accountService.storageState(normalized);
         try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
-            BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
+            BrowserContext context = accountService.newContext(browserHandle.browser(), storageState);
             try {
                 Page page = context.newPage();
                 page.navigate(PUBLISH_VIDEO_URL);
@@ -140,7 +143,7 @@ public class BilibiliPlaywrightUploadService {
         try {
             String storageState = accountService.storageState(accountKey);
             try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
-                BrowserContext context = browserHandle.browser().newContext(accountService.storageContextOptions(storageState));
+                BrowserContext context = accountService.newContext(browserHandle.browser(), storageState);
                 try {
                     Page page = context.newPage();
                     page.navigate(PUBLISH_VIDEO_URL);
@@ -249,7 +252,7 @@ public class BilibiliPlaywrightUploadService {
             try {
                 Locator locator = page.locator(selector).first();
                 if (locator.count() > 0 && locator.isVisible()) {
-                    locator.fill(title);
+                    humanActions.fill(page, locator, title);
                     log.info("Bilibili Playwright title filled taskId={} selector={}", taskId, selector);
                     return;
                 }
@@ -267,7 +270,7 @@ public class BilibiliPlaywrightUploadService {
             try {
                 Locator locator = page.locator(selector).first();
                 if (locator.count() > 0 && locator.isVisible()) {
-                    locator.fill(text(description));
+                    humanActions.fill(page, locator, text(description));
                     log.info("Bilibili Playwright description filled taskId={} selector={}", taskId, selector);
                     return;
                 }
@@ -289,11 +292,11 @@ public class BilibiliPlaywrightUploadService {
                 log.info("Bilibili Playwright creation statement already set taskId={} value={}", taskId, value);
                 return;
             }
-            input.click(new Locator.ClickOptions().setTimeout(5000));
+            humanActions.click(page, input);
             page.waitForTimeout(500);
             Locator option = page.locator(".bcc-select-list-wrap:visible .bcc-option:has-text('内容无需标注'), .bcc-option:has-text('内容无需标注'):visible").last();
             option.waitFor(new Locator.WaitForOptions().setTimeout(5000));
-            option.click(new Locator.ClickOptions().setTimeout(5000));
+            humanActions.click(page, option);
             log.info("Bilibili Playwright creation statement selected taskId={} value=内容无需标注", taskId);
         } catch (Exception exception) {
             log.warn("Bilibili Playwright creation statement skipped taskId={} message={}", taskId, exception.getMessage());
@@ -309,7 +312,7 @@ public class BilibiliPlaywrightUploadService {
                     log.warn("Bilibili Playwright tag input not found taskId={} tag={}", taskId, tag);
                     return;
                 }
-                input.fill(tag);
+                humanActions.fill(page, input, tag);
                 page.keyboard().press("Enter");
                 page.waitForTimeout(500);
                 log.info("Bilibili Playwright tag filled taskId={} tag={}", taskId, tag);
@@ -433,7 +436,7 @@ public class BilibiliPlaywrightUploadService {
             try {
                 Locator button = page.locator("button:has-text('" + text + "'):visible, span.submit-add:has-text('" + text + "'):visible, .submit-add:has-text('" + text + "'):visible").last();
                 if (button.count() > 0 && button.isEnabled()) {
-                    button.click(new Locator.ClickOptions().setTimeout(5000));
+                    humanActions.click(page, button);
                     log.info("Bilibili Playwright publish clicked taskId={} text={}", taskId, text);
                     return true;
                 }

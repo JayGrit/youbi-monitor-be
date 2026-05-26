@@ -6,17 +6,13 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.AriaRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -37,40 +33,28 @@ public class DouyinAccountService {
     static final String PUBLISH_VIDEO_URL = "https://creator.douyin.com/creator-micro/content/upload";
 
     private static final String TABLE = "yd_douyin_account";
-    private static final String STEALTH_INIT_SCRIPT = """
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh'] });
-            window.chrome = window.chrome || { runtime: {} };
-            """;
-
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
-    private final boolean headless;
-    private final String browserChannel;
-    private final String stealthInitScript;
+    private final SocialBrowserFactory browserFactory;
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public DouyinAccountService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
-            @Value("${youbi.douyin.headless:true}") boolean headless,
-            @Value("${youbi.douyin.browser-channel:chrome}") String browserChannel,
-            @Value("${youbi.douyin.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String stealthScriptPath
+            SocialBrowserFactory browserFactory
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
-        this.headless = headless;
-        this.browserChannel = browserChannel == null || browserChannel.isBlank() ? "chrome" : browserChannel.trim();
-        this.stealthInitScript = loadStealthInitScript(stealthScriptPath);
+        this.browserFactory = browserFactory;
         ensureSchema();
     }
 
     public List<DouyinAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -85,6 +69,8 @@ public class DouyinAccountService {
                             rs.getString("nickname"),
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
                             rs.getBoolean("is_enabled"),
@@ -99,7 +85,7 @@ public class DouyinAccountService {
     public List<DouyinCdpSession> cdpSessions() {
         return jdbcTemplate.query(
                 """
-                SELECT account_key, cdp_port, cdp_endpoint, note, is_enabled, updated_at
+                SELECT account_key, cdp_port, cdp_endpoint, note, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, updated_at
                 FROM yd_douyin_cdp_session
                 ORDER BY account_key
                 """,
@@ -113,6 +99,8 @@ public class DouyinAccountService {
                             rs.getString("note"),
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
                             rs.getBoolean("is_enabled"),
@@ -166,8 +154,9 @@ public class DouyinAccountService {
         String normalized = normalizeAccountKey(accountKey);
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
+        int[] cooldown = cooldownConfig(normalized);
         if (storageState.isEmpty()) {
-            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
+            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -182,6 +171,8 @@ public class DouyinAccountService {
                 profile.nickname(),
                 sendAvailability.lastUploadAt(),
                 sendAvailability.nextUploadAllowedAt(),
+                cooldown[0],
+                cooldown[1],
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
                 accountEnabled(normalized),
@@ -247,23 +238,21 @@ public class DouyinAccountService {
         String authCode = UUID.randomUUID().toString();
         closeSessionsForAccount(normalized);
 
-        Playwright playwright = null;
         Browser browser = null;
         BrowserContext context = null;
         try {
             log.info("Creating Douyin QR login session accountKey={} authCode={}", normalized, authCode);
-            playwright = Playwright.create();
-            browser = playwright.chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
-            context = prepareContext(browser.newContext());
+            browser = launchBrowser();
+            context = newContext(browser);
             Page page = context.newPage();
             page.navigate(LOGIN_URL);
             String originalUrl = page.url();
             String imageDataUrl = extractQrImage(page);
-            loginSessions.put(authCode, new LoginSession(normalized, authCode, playwright, browser, context, page, originalUrl, Instant.now().plusSeconds(180)));
+            loginSessions.put(authCode, new LoginSession(normalized, authCode, browser, context, page, originalUrl, Instant.now().plusSeconds(180)));
             log.info("Created Douyin QR login session accountKey={} authCode={} imageBytes={}", normalized, authCode, imageDataUrl.length());
             return new DouyinQrCode(normalized, authCode, imageDataUrl, Instant.now().getEpochSecond() + 180);
         } catch (Exception exception) {
-            closeQuietly(context, browser, playwright);
+            closeQuietly(context, browser);
             log.warn("Cannot create Douyin QR login session accountKey={} authCode={}: {}", normalized, authCode, exception.getMessage());
             throw new IOException("Cannot create Douyin qrcode: " + exception.getMessage(), exception);
         }
@@ -348,33 +337,27 @@ public class DouyinAccountService {
     }
 
     Browser launchBrowser() {
-        return PlaywrightHolder.playwright().chromium().launch(new BrowserTypeOptions(headless, browserChannel).toLaunchOptions());
+        return browserFactory.launchBrowser(SocialBrowserPlatform.DOUYIN);
     }
 
     Browser connectBrowserOverCdp(String cdpUrl) {
-        return PlaywrightHolder.playwright().chromium().connectOverCDP(cdpUrl);
+        return browserFactory.connectOverCdp(cdpUrl);
     }
 
     BrowserContext firstContext(Browser browser) {
-        List<BrowserContext> contexts = browser.contexts();
-        if (contexts.isEmpty()) {
-            return prepareContext(browser.newContext());
-        }
-        return contexts.get(0);
+        return browserFactory.firstOrNewContext(SocialBrowserPlatform.DOUYIN, browser);
     }
 
     BrowserContext newContext(Browser browser) {
-        return prepareContext(browser.newContext());
+        return browserFactory.newContext(SocialBrowserPlatform.DOUYIN, browser);
     }
 
     BrowserContext newContext(Browser browser, Browser.NewContextOptions options) {
-        return prepareContext(browser.newContext(options));
+        return browserFactory.prepareContext(SocialBrowserPlatform.DOUYIN, browser.newContext(options));
     }
 
     Browser.NewContextOptions storageContextOptions(String storageState) {
-        return new Browser.NewContextOptions()
-                .setStorageState(storageState)
-                .setPermissions(List.of("geolocation"));
+        return browserFactory.storageContextOptions(SocialBrowserPlatform.DOUYIN, storageState);
     }
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
@@ -412,6 +395,27 @@ public class DouyinAccountService {
         return status(normalized);
     }
 
+    public DouyinAccountStatus setCooldown(String accountKey, Integer minSeconds, Integer maxSeconds) throws IOException {
+        String normalized = normalizeAccountKey(accountKey);
+        int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
+        int updated = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
+                cooldown[0],
+                cooldown[1],
+                normalized
+        );
+        int cdpUpdated = jdbcTemplate.update(
+                "UPDATE yd_douyin_cdp_session SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
+                cooldown[0],
+                cooldown[1],
+                normalized
+        );
+        if (updated != 1 && cdpUpdated != 1) {
+            throw new IOException("Douyin account key not found: " + normalized);
+        }
+        return status(normalized);
+    }
+
     private String normalizeRequestedAccountKey(String accountKey) {
         String normalized = accountKey == null ? "" : accountKey.trim();
         if (normalized.isBlank()) {
@@ -424,7 +428,28 @@ public class DouyinAccountService {
     }
 
     private DouyinAccountStatus emptyStatus(String accountKey) {
-        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
+    }
+
+    private int[] cooldownConfig(String accountKey) {
+        List<int[]> rows = jdbcTemplate.query(
+                "SELECT upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> new int[] {
+                        rs.getObject("upload_cooldown_min_seconds") == null ? 3600 : rs.getInt("upload_cooldown_min_seconds"),
+                        rs.getObject("upload_cooldown_max_seconds") == null ? 7200 : rs.getInt("upload_cooldown_max_seconds")
+                },
+                accountKey
+        );
+        return rows.isEmpty() ? new int[] {3600, 7200} : rows.get(0);
+    }
+
+    private int[] normalizeCooldown(Integer minSeconds, Integer maxSeconds) {
+        int min = minSeconds == null ? 3600 : minSeconds;
+        int max = maxSeconds == null ? 7200 : maxSeconds;
+        if (min < 0 || max < 0 || min > max || max > 7 * 24 * 60 * 60) {
+            throw new IllegalArgumentException("Invalid cooldown seconds range: " + min + "-" + max);
+        }
+        return new int[] {min, max};
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
@@ -755,6 +780,8 @@ public class DouyinAccountService {
                 """
         );
         ensureColumn("yd_douyin_account", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("yd_douyin_account", "upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
+        ensureColumn("yd_douyin_account", "upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
         ensureColumn("yd_douyin_account", "cdp_port", "INT NULL");
         ensureColumn("yd_douyin_account", "cdp_endpoint", "VARCHAR(255) NULL");
         jdbcTemplate.execute(
@@ -771,6 +798,8 @@ public class DouyinAccountService {
                 """
         );
         ensureColumn("yd_douyin_cdp_session", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("yd_douyin_cdp_session", "upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
+        ensureColumn("yd_douyin_cdp_session", "upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
     }
 
     private void ensureColumn(String table, String column, String definition) {
@@ -796,7 +825,7 @@ public class DouyinAccountService {
         if (session == null) {
             return;
         }
-        closeQuietly(session.context(), session.browser(), session.playwright());
+        closeQuietly(session.context(), session.browser());
     }
 
     private void closeSessionsForAccount(String accountKey) {
@@ -807,7 +836,7 @@ public class DouyinAccountService {
                 .forEach(this::closeSession);
     }
 
-    private void closeQuietly(BrowserContext context, Browser browser, Playwright playwright) {
+    private void closeQuietly(BrowserContext context, Browser browser) {
         try {
             if (context != null) {
                 context.close();
@@ -820,35 +849,6 @@ public class DouyinAccountService {
             }
         } catch (Exception ignored) {
         }
-        try {
-            if (playwright != null) {
-                playwright.close();
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private BrowserContext prepareContext(BrowserContext context) {
-        context.addInitScript(stealthInitScript);
-        return context;
-    }
-
-    private String loadStealthInitScript(String stealthScriptPath) {
-        String path = text(stealthScriptPath);
-        if (!path.isBlank()) {
-            try {
-                Path script = Path.of(path);
-                if (Files.isRegularFile(script)) {
-                    String content = Files.readString(script, StandardCharsets.UTF_8);
-                    log.info("Loaded Douyin stealth init script path={} bytes={}", script, content.getBytes(StandardCharsets.UTF_8).length);
-                    return content;
-                }
-                log.warn("Douyin stealth init script not found path={}, using fallback", script);
-            } catch (Exception exception) {
-                log.warn("Cannot load Douyin stealth init script path={}, using fallback: {}", path, exception.getMessage());
-            }
-        }
-        return STEALTH_INIT_SCRIPT;
     }
 
     private String firstText(String... values) {
@@ -884,34 +884,11 @@ public class DouyinAccountService {
         return value == null ? "" : value.trim();
     }
 
-    private record LoginSession(String accountKey, String authCode, Playwright playwright, Browser browser,
+    private record LoginSession(String accountKey, String authCode, Browser browser,
                                 BrowserContext context, Page page, String originalUrl, Instant expiresAt) {
     }
 
     private record AccountProfile(String userId, String nickname) {
     }
 
-    private record BrowserTypeOptions(boolean headless, String channel) {
-        com.microsoft.playwright.BrowserType.LaunchOptions toLaunchOptions() {
-            return new com.microsoft.playwright.BrowserType.LaunchOptions()
-                    .setHeadless(headless)
-                    .setChannel(channel)
-                    .setArgs(List.of(
-                            "--no-sandbox",
-                            "--disable-dev-shm-usage",
-                            "--disable-blink-features=AutomationControlled",
-                            "--lang=zh-CN",
-                            "--disable-infobars",
-                            "--start-maximized"
-                    ));
-        }
-    }
-
-    private static class PlaywrightHolder {
-        private static final Playwright PLAYWRIGHT = Playwright.create();
-
-        static Playwright playwright() {
-            return PLAYWRIGHT;
-        }
-    }
 }

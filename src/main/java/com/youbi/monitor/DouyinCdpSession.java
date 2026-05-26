@@ -9,6 +9,8 @@ public record DouyinCdpSession(
         String note,
         LocalDateTime lastUploadAt,
         LocalDateTime nextUploadAllowedAt,
+        Integer uploadCooldownMinSeconds,
+        Integer uploadCooldownMaxSeconds,
         int todayUploadCount,
         int cooldownWaitingCount,
         boolean enabled,

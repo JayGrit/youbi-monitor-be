@@ -15,6 +15,8 @@ public record BilibiliAccountStatus(
         Integer level,
         LocalDateTime lastUploadAt,
         LocalDateTime nextUploadAllowedAt,
+        Integer uploadCooldownMinSeconds,
+        Integer uploadCooldownMaxSeconds,
         int todayUploadCount,
         int cooldownWaitingCount,
         boolean enabled,

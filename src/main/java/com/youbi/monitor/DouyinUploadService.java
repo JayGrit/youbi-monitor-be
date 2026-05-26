@@ -56,11 +56,13 @@ public class DouyinUploadService {
     private final String cdpUrl;
     private final Map<String, String> cdpEndpoints;
     private final Map<String, Object> cdpLocks = new ConcurrentHashMap<>();
+    private final SocialHumanActions humanActions;
 
     public DouyinUploadService(
             DouyinAccountService accountService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
+            SocialHumanActions humanActions,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -73,6 +75,7 @@ public class DouyinUploadService {
         this.accountService = accountService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.humanActions = humanActions;
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -312,7 +315,7 @@ public class DouyinUploadService {
                 dumpDiagnostics(page, taskId, "sms-login-phone-input-missing");
                 return false;
             }
-            phoneInput.fill(DOUYIN_LOGIN_PHONE);
+            humanActions.fill(page, phoneInput, DOUYIN_LOGIN_PHONE);
             page.waitForTimeout(500);
             clickAgreementIfPresent(page);
             clickSendSmsCode(page);
@@ -339,7 +342,7 @@ public class DouyinUploadService {
                 dumpDiagnostics(page, taskId, "sms-login-code-input-missing");
                 return false;
             }
-            codeInput.fill(smsCode.code());
+            humanActions.fill(page, codeInput, smsCode.code());
             clickLoginSubmit(page);
             markSmsCodeConsumed(smsCode.id());
             page.waitForTimeout(3000);
@@ -360,7 +363,7 @@ public class DouyinUploadService {
         )) {
             try {
                 if (tab.count() > 0 && tab.isVisible()) {
-                    tab.click(new Locator.ClickOptions().setTimeout(3000));
+                    humanActions.click(page, tab);
                     page.waitForTimeout(500);
                 }
             } catch (Exception ignored) {
@@ -376,7 +379,7 @@ public class DouyinUploadService {
         )) {
             try {
                 if (marker.count() > 0 && marker.isVisible()) {
-                    marker.click(new Locator.ClickOptions().setTimeout(2000));
+                    humanActions.click(page, marker);
                     page.waitForTimeout(300);
                     return;
                 }
@@ -394,7 +397,7 @@ public class DouyinUploadService {
         )) {
             try {
                 if (button.count() > 0 && button.isVisible()) {
-                    button.click(new Locator.ClickOptions().setTimeout(5000));
+                    humanActions.click(page, button);
                     page.waitForTimeout(1000);
                     return;
                 }
@@ -413,7 +416,7 @@ public class DouyinUploadService {
         )) {
             try {
                 if (button.count() > 0 && button.isVisible()) {
-                    button.click(new Locator.ClickOptions().setTimeout(5000));
+                    humanActions.click(page, button);
                     page.waitForTimeout(1000);
                     return;
                 }
@@ -559,16 +562,16 @@ public class DouyinUploadService {
                 .locator("xpath=following-sibling::div[1]");
         Locator titleInput = descriptionSection.locator("input[type='text']").first();
         titleInput.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        titleInput.fill(title);
+        humanActions.fill(page, titleInput, title);
 
         Locator descriptionEditor = descriptionSection.locator(".zone-container[contenteditable='true']").first();
         descriptionEditor.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        descriptionEditor.click();
+        humanActions.click(page, descriptionEditor);
         page.keyboard().press("Control+A");
         page.keyboard().press("Delete");
-        page.keyboard().type(text(description));
+        humanActions.type(page, text(description));
         for (String tag : parseTags(tags)) {
-            page.keyboard().type(" #" + tag);
+            humanActions.type(page, " #" + tag);
             page.keyboard().press("Space");
         }
     }
@@ -605,12 +608,12 @@ public class DouyinUploadService {
         }
         log.info("Douyin upload set cover taskId={} cover={} browserCover={} browserSide={}",
                 taskId, coverPaths.localPath(), coverPaths.browserPath(), browserSideFiles);
-        page.click("text=\"选择封面\"");
+        humanActions.click(page, page.locator("text=\"选择封面\"").first());
         Locator modal = page.locator("div[id*='creator-content-modal']").first();
         modal.waitFor(new Locator.WaitForOptions().setTimeout(30000));
         setInputFiles(page, "div[id*='creator-content-modal'] div[class^='semi-upload upload'] input.semi-upload-hidden-input", coverPaths, browserSideFiles, 120000, taskId, "cover");
         page.waitForTimeout(2000);
-        modal.locator("button:visible:has-text('完成')").first().click();
+        humanActions.click(page, modal.locator("button:visible:has-text('完成')").first());
         page.waitForSelector("div.extractFooter", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.DETACHED).setTimeout(30000));
     }
 
@@ -686,25 +689,25 @@ public class DouyinUploadService {
                 log.warn("Douyin upload product dropdown not found taskId={}", taskId);
                 return;
             }
-            dropdown.click();
+            humanActions.click(page, dropdown);
             page.waitForSelector("[role='listbox']", new Page.WaitForSelectorOptions().setTimeout(5000));
-            page.locator("[role='option']:has-text('购物车')").first().click();
+            humanActions.click(page, page.locator("[role='option']:has-text('购物车')").first());
 
             Locator input = page.locator("input[placeholder='粘贴商品链接']").first();
             input.waitFor(new Locator.WaitForOptions().setTimeout(5000));
-            input.fill(text(productLink));
+            humanActions.fill(page, input, text(productLink));
             Locator addButton = page.locator("span:has-text('添加链接')").first();
             String buttonClass = addButton.getAttribute("class");
             if (buttonClass != null && buttonClass.contains("disable")) {
                 log.warn("Douyin upload product add button disabled taskId={}", taskId);
                 return;
             }
-            addButton.click();
+            humanActions.click(page, addButton);
             page.waitForTimeout(2000);
 
             Locator invalidModal = page.locator("text=未搜索到对应商品").first();
             if (invalidModal.count() > 0 && invalidModal.isVisible()) {
-                page.locator("button:has-text('确定')").first().click();
+                humanActions.click(page, page.locator("button:has-text('确定')").first());
                 log.warn("Douyin upload product link invalid taskId={}", taskId);
                 return;
             }
@@ -718,21 +721,21 @@ public class DouyinUploadService {
         try {
             Locator shortTitleInput = page.locator("input[placeholder='请输入商品短标题']").first();
             shortTitleInput.waitFor(new Locator.WaitForOptions().setTimeout(10000));
-            shortTitleInput.fill(truncate(productTitle, 10));
+            humanActions.fill(page, shortTitleInput, truncate(productTitle, 10));
             page.waitForTimeout(1000);
             Locator finishButton = page.locator("button:has-text('完成编辑')").first();
             String buttonClass = finishButton.getAttribute("class");
             if (buttonClass == null || !buttonClass.contains("disabled")) {
-                finishButton.click();
+                humanActions.click(page, finishButton);
                 page.waitForSelector(".semi-modal-content", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN).setTimeout(5000));
                 log.info("Douyin upload product dialog completed taskId={}", taskId);
                 return;
             }
             Locator cancelButton = page.locator("button:has-text('取消')").first();
             if (cancelButton.count() > 0) {
-                cancelButton.click();
+                humanActions.click(page, cancelButton);
             } else {
-                page.locator(".semi-modal-close").first().click();
+                humanActions.click(page, page.locator(".semi-modal-close").first());
             }
             page.waitForSelector(".semi-modal-content", new Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN).setTimeout(5000));
         } catch (Exception exception) {
@@ -749,7 +752,7 @@ public class DouyinUploadService {
             }
             String className = String.valueOf(element.evaluate("node => node.className"));
             if (!className.contains("semi-switch-checked")) {
-                element.locator("input.semi-switch-native-control").click();
+                humanActions.click(page, element.locator("input.semi-switch-native-control"));
                 log.info("Douyin upload enabled third-party sync taskId={}", taskId);
             }
         } catch (Exception exception) {
@@ -762,11 +765,12 @@ public class DouyinUploadService {
             return;
         }
         log.info("Douyin upload set schedule taskId={} schedule={}", taskId, text(schedule));
-        page.locator("[class^='radio']:has-text('定时发布')").first().click();
+        humanActions.click(page, page.locator("[class^='radio']:has-text('定时发布')").first());
         page.waitForTimeout(1000);
-        page.locator(".semi-input[placeholder='日期和时间']").first().click();
+        Locator scheduleInput = page.locator(".semi-input[placeholder='日期和时间']").first();
+        humanActions.click(page, scheduleInput);
         page.keyboard().press("Control+A");
-        page.keyboard().type(text(schedule));
+        humanActions.type(page, text(schedule));
         page.keyboard().press("Enter");
         page.waitForTimeout(1000);
     }
@@ -782,7 +786,7 @@ public class DouyinUploadService {
                 Locator publishButton = page.getByRole(com.microsoft.playwright.options.AriaRole.BUTTON,
                         new Page.GetByRoleOptions().setName("发布").setExact(true));
                 if (publishButton.count() > 0) {
-                    publishButton.first().click(new Locator.ClickOptions().setTimeout(5000));
+                    humanActions.click(page, publishButton.first());
                 }
                 page.waitForURL(MANAGE_URL_PATTERN, new Page.WaitForURLOptions().setTimeout(5000));
                 log.info("Douyin upload publish success page reached taskId={} url={}", taskId, page.url());
@@ -818,7 +822,7 @@ public class DouyinUploadService {
                 return false;
             }
             String text = primary.innerText(new Locator.InnerTextOptions().setTimeout(1000));
-            clickWithFallback(primary);
+            clickWithFallback(page, primary);
             log.info("Douyin upload dismissed modal taskId={} button={}", taskId, truncate(text, 50));
             page.waitForTimeout(500);
             return true;
@@ -850,7 +854,7 @@ public class DouyinUploadService {
             if (button.count() == 0) {
                 return false;
             }
-            clickWithFallback(button);
+            clickWithFallback(page, button);
             log.info("Douyin upload dismissed modal taskId={} button={}", taskId, buttonText);
             page.waitForTimeout(800);
             return true;
@@ -860,9 +864,9 @@ public class DouyinUploadService {
         }
     }
 
-    private void clickWithFallback(Locator locator) {
+    private void clickWithFallback(Page page, Locator locator) {
         try {
-            locator.click(new Locator.ClickOptions().setTimeout(3000));
+            humanActions.click(page, locator);
         } catch (Exception exception) {
             locator.evaluate("element => element.click()");
         }
@@ -878,11 +882,11 @@ public class DouyinUploadService {
             if (recommendCover.count() == 0) {
                 return;
             }
-            recommendCover.click();
+            humanActions.click(page, recommendCover);
             page.waitForTimeout(1000);
             Locator confirm = page.getByText("是否确认应用此封面？").first();
             if (confirm.count() > 0 && confirm.isVisible()) {
-                page.getByRole(com.microsoft.playwright.options.AriaRole.BUTTON, new Page.GetByRoleOptions().setName("确定")).click();
+                humanActions.click(page, page.getByRole(com.microsoft.playwright.options.AriaRole.BUTTON, new Page.GetByRoleOptions().setName("确定")));
             }
             log.info("Douyin upload auto cover selected taskId={}", taskId);
         } catch (Exception exception) {

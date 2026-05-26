@@ -32,9 +32,11 @@ public class XiaohongshuUploadService {
     private final Path uploadWorkDir;
     private final Path diagnosticsRoot;
     private final UploadMaterialResolver materialResolver;
+    private final SocialHumanActions humanActions;
 
     public XiaohongshuUploadService(
             XiaohongshuAccountService accountService,
+            SocialHumanActions humanActions,
             ObjectMapper objectMapper,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
@@ -43,6 +45,7 @@ public class XiaohongshuUploadService {
             @Value("${youbi.minio.work-dir}") String uploadWorkDir
     ) {
         this.accountService = accountService;
+        this.humanActions = humanActions;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -77,7 +80,7 @@ public class XiaohongshuUploadService {
             log.info("XHS upload storage state loaded taskId={} accountKey={} bytes={}", taskId, accountKey, storageState.getBytes(StandardCharsets.UTF_8).length);
             try (Browser browser = accountService.launchBrowser()) {
                 log.info("XHS upload browser launched taskId={} accountKey={}", taskId, accountKey);
-                BrowserContext context = browser.newContext(accountService.storageContextOptions(storageState));
+                BrowserContext context = accountService.newContext(browser, storageState);
                 try {
                     Page page = context.newPage();
                     uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
@@ -117,7 +120,7 @@ public class XiaohongshuUploadService {
         Locator titleInput = page.locator("input[placeholder*='填写标题']").first();
         titleInput.waitFor(new Locator.WaitForOptions().setTimeout(30000));
         log.info("XHS upload fill metadata taskId={} title={} tags={}", taskId, title, text(request.tags()));
-        titleInput.fill(title);
+        humanActions.fill(page, titleInput, title);
         fillDescriptionAndTags(page, request.description(), request.tags(), taskId);
         setCoverIfPresent(page, coverPath, taskId);
         setSchedule(page, request.schedule(), taskId);
@@ -156,23 +159,23 @@ public class XiaohongshuUploadService {
 
     private void fillDescriptionAndTags(Page page, String description, String tags, String taskId) {
         Locator desc = page.locator("p[data-placeholder*='输入正文描述']").first();
-        desc.click();
+        humanActions.click(page, desc);
         if (hasText(description)) {
             log.info("XHS upload fill description taskId={} chars={}", taskId, text(description).length());
             page.keyboard().press("Meta+A");
             page.keyboard().press("Backspace");
-            page.keyboard().type(text(description));
+            humanActions.type(page, text(description));
             page.keyboard().press("Enter");
         }
         for (String tag : parseTags(tags)) {
             try {
                 log.info("XHS upload fill tag taskId={} tag={}", taskId, tag);
-                page.keyboard().type("#" + tag, new com.microsoft.playwright.Keyboard.TypeOptions().setDelay(30));
+                humanActions.type(page, "#" + tag);
                 Locator topic = page.locator("#creator-editor-topic-container").first();
                 topic.waitFor(new Locator.WaitForOptions().setTimeout(5000));
                 Locator first = page.locator("#creator-editor-topic-container .item").first();
                 first.waitFor(new Locator.WaitForOptions().setTimeout(3000));
-                first.click();
+                humanActions.click(page, first);
             } catch (Exception exception) {
                 log.warn("XHS upload tag skipped taskId={} tag={} message={}", taskId, tag, exception.getMessage());
                 page.keyboard().press("Enter");
@@ -199,12 +202,12 @@ public class XiaohongshuUploadService {
                 .locator("xpath=ancestor::div[contains(@class, 'cover-plugin-preview')]")
                 .locator("div.cover > div.default:visible");
         coverDialog.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        coverDialog.click(new Locator.ClickOptions().setForce(true));
+        humanActions.click(page, coverDialog);
         Locator modal = page.locator("div.d-modal.cover-modal").first();
         modal.waitFor(new Locator.WaitForOptions().setTimeout(30000));
         modal.locator("input[type='file'][accept*='image']").first().setInputFiles(coverPath);
         page.waitForTimeout(2000);
-        modal.locator("button.mojito-button").filter(new Locator.FilterOptions().setHasText("确定")).first().click();
+        humanActions.click(page, modal.locator("button.mojito-button").filter(new Locator.FilterOptions().setHasText("确定")).first());
         modal.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.HIDDEN).setTimeout(30000));
     }
 
@@ -212,7 +215,7 @@ public class XiaohongshuUploadService {
         try {
             Locator cancel = page.locator("button").filter(new Locator.FilterOptions().setHasText("取消")).last();
             if (cancel.count() > 0 && cancel.isVisible()) {
-                cancel.click(new Locator.ClickOptions().setTimeout(3000));
+                humanActions.click(page, cancel);
                 page.waitForTimeout(1000);
                 log.info("XHS upload cover dialog dismissed taskId={} method=cancel", taskId);
                 return;
@@ -234,10 +237,10 @@ public class XiaohongshuUploadService {
             return;
         }
         log.info("XHS upload set schedule taskId={} schedule={}", taskId, text(schedule));
-        page.locator(".custom-switch-card").filter(new Locator.FilterOptions().setHasText("定时发布"))
-                .locator(".d-switch").first().click();
+        humanActions.click(page, page.locator(".custom-switch-card").filter(new Locator.FilterOptions().setHasText("定时发布"))
+                .locator(".d-switch").first());
         page.waitForTimeout(1000);
-        page.locator(".d-datepicker-input-filter input.d-text").first().fill(text(schedule));
+        humanActions.fill(page, page.locator(".d-datepicker-input-filter input.d-text").first(), text(schedule));
         page.waitForTimeout(1000);
     }
 
@@ -279,7 +282,7 @@ public class XiaohongshuUploadService {
     private void clickPublishButton(Page page, String buttonText, String taskId) {
         Locator nativeButton = page.locator("button:has-text('" + buttonText + "'):visible");
         if (nativeButton.count() > 0) {
-            nativeButton.last().click(new Locator.ClickOptions().setTimeout(5000));
+            humanActions.click(page, nativeButton.last());
             log.info("XHS upload publish click taskId={} method=native-button", taskId);
             return;
         }
@@ -340,7 +343,7 @@ public class XiaohongshuUploadService {
             return;
         }
         Locator textButton = page.locator("text=\"" + buttonText + "\"").last();
-        textButton.click(new Locator.ClickOptions().setTimeout(5000));
+        humanActions.click(page, textButton);
         log.info("XHS upload publish click taskId={} method=playwright-text", taskId);
     }
 
