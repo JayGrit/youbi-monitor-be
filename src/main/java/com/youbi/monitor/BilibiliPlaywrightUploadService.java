@@ -413,9 +413,15 @@ public class BilibiliPlaywrightUploadService {
 
     private boolean clickCoverConfirmIfPresent(Page page, String taskId) {
         for (String selector : List.of(
+                ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer .bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer .bcc-button:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer button.bcc-button--primary:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer button:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer .bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .modal-footer .bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .modal-footer .bcc-button:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .bcc-button:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible button.bcc-button--primary:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible button:has-text('完成')"
         )) {
