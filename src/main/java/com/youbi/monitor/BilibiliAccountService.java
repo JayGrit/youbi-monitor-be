@@ -58,7 +58,7 @@ public class BilibiliAccountService {
 
     public List<BilibiliAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, mid, uname, login_info_json, updated_at FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, mid, uname, login_info_json, updated_at, is_enabled FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("login_info_json");
@@ -79,6 +79,7 @@ public class BilibiliAccountService {
                             sendAvailability.nextUploadAllowedAt(),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
                             Map.of()
@@ -196,6 +197,19 @@ public class BilibiliAccountService {
         return status(newKey);
     }
 
+    public BilibiliAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
+        String normalized = normalizeAccountKey(accountKey);
+        int updated = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?",
+                enabled,
+                normalized
+        );
+        if (updated != 1) {
+            throw new IOException("Bilibili account key not found: " + normalized);
+        }
+        return status(normalized);
+    }
+
     public String normalizeAccountKey(String accountKey) {
         String normalized = accountKey == null ? "" : accountKey.trim();
         if (normalized.isBlank()) {
@@ -220,7 +234,7 @@ public class BilibiliAccountService {
 
     private BilibiliAccountStatus emptyAutoStatus() {
         return new BilibiliAccountStatus("database", AUTO_ACCOUNT_KEY, false, 0, null,
-                null, null, null, null, null, null, 0, 0, false, "等待扫码", Map.of());
+                null, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private String automaticAccountKey(JsonNode loginInfo) {
@@ -257,7 +271,7 @@ public class BilibiliAccountService {
         AccountSendAvailability sendAvailability = sendAvailability(accountKey);
         if (stored.isEmpty()) {
             return new BilibiliAccountStatus("database", accountKey, false, 0, null,
-                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), false, "未登录", Map.of());
+                    null, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), false, "未登录", Map.of());
         }
 
         JsonNode loginInfo = stored.get();
@@ -285,6 +299,7 @@ public class BilibiliAccountService {
                     sendAvailability.nextUploadAllowedAt(),
                     sendAvailability.todayUploadCount(),
                     sendAvailability.cooldownWaitingCount(),
+                    accountEnabled(accountKey),
                     code == 0,
                     code == 0 ? "已登录" : myInfo.path("message").asText("账号状态异常"),
                     raw
@@ -292,8 +307,17 @@ public class BilibiliAccountService {
         } catch (Exception exception) {
             return new BilibiliAccountStatus("database", accountKey, true,
                     json.getBytes(StandardCharsets.UTF_8).length, updatedAt,
-                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), null, exception.getMessage(), Map.of());
+                    mid, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(accountKey), null, exception.getMessage(), Map.of());
         }
+    }
+
+    private boolean accountEnabled(String accountKey) {
+        List<Boolean> values = jdbcTemplate.query(
+                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> rs.getBoolean("is_enabled"),
+                accountKey
+        );
+        return values.isEmpty() || values.get(0);
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
@@ -376,11 +400,31 @@ public class BilibiliAccountService {
                     mid BIGINT NULL,
                     uname VARCHAR(128) NULL,
                     login_info_json MEDIUMTEXT NOT NULL,
+                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
+        ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+    }
+
+    private void ensureColumn(String column, String definition) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                TABLE,
+                column
+        );
+        if (count == null || count == 0) {
+            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+        }
     }
 
     private Map<String, String> signedParams(Map<String, String> params, String appKey, String appSecret) throws IOException {

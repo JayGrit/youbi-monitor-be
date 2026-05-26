@@ -11,6 +11,7 @@ public record DouyinCdpSession(
         LocalDateTime nextUploadAllowedAt,
         int todayUploadCount,
         int cooldownWaitingCount,
+        boolean enabled,
         LocalDateTime updatedAt
 ) {
 }

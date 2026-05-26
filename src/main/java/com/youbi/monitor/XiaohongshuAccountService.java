@@ -60,7 +60,7 @@ public class XiaohongshuAccountService {
 
     public List<XiaohongshuAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -77,6 +77,7 @@ public class XiaohongshuAccountService {
                             sendAvailability.nextUploadAllowedAt(),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
                             Map.of()
@@ -90,7 +91,7 @@ public class XiaohongshuAccountService {
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         if (storageState.isEmpty()) {
-            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), false, "未登录", Map.of());
+            return new XiaohongshuAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -107,6 +108,7 @@ public class XiaohongshuAccountService {
                 sendAvailability.nextUploadAllowedAt(),
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
+                accountEnabled(normalized),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -190,6 +192,19 @@ public class XiaohongshuAccountService {
         return status(newKey);
     }
 
+    public XiaohongshuAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
+        String normalized = normalizeAccountKey(accountKey);
+        int updated = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?",
+                enabled,
+                normalized
+        );
+        if (updated != 1) {
+            throw new IOException("Xiaohongshu account key not found: " + normalized);
+        }
+        return status(normalized);
+    }
+
     public String normalizeAccountKey(String accountKey) {
         String normalized = accountKey == null ? "" : accountKey.trim();
         if (normalized.isBlank()) {
@@ -237,11 +252,20 @@ public class XiaohongshuAccountService {
     }
 
     private XiaohongshuAccountStatus emptyStatus(String accountKey) {
-        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, false, "等待扫码", Map.of());
+        return new XiaohongshuAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("xiaohongshu", accountKey, TABLE);
+    }
+
+    private boolean accountEnabled(String accountKey) {
+        List<Boolean> values = jdbcTemplate.query(
+                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> rs.getBoolean("is_enabled"),
+                accountKey
+        );
+        return values.isEmpty() || values.get(0);
     }
 
     private String extractQrImage(Page page) {
@@ -390,11 +414,31 @@ public class XiaohongshuAccountService {
                     user_id VARCHAR(128) NULL,
                     nickname VARCHAR(128) NULL,
                     storage_state_json MEDIUMTEXT NOT NULL,
+                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
+        ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+    }
+
+    private void ensureColumn(String column, String definition) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                TABLE,
+                column
+        );
+        if (count == null || count == 0) {
+            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+        }
     }
 
     private void closeSession(String authCode) {

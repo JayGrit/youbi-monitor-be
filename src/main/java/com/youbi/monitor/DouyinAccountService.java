@@ -70,7 +70,7 @@ public class DouyinAccountService {
 
     public List<DouyinAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -87,6 +87,7 @@ public class DouyinAccountService {
                             sendAvailability.nextUploadAllowedAt(),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
                             Map.of()
@@ -98,7 +99,7 @@ public class DouyinAccountService {
     public List<DouyinCdpSession> cdpSessions() {
         return jdbcTemplate.query(
                 """
-                SELECT account_key, cdp_port, cdp_endpoint, note, updated_at
+                SELECT account_key, cdp_port, cdp_endpoint, note, is_enabled, updated_at
                 FROM yd_douyin_cdp_session
                 ORDER BY account_key
                 """,
@@ -114,6 +115,7 @@ public class DouyinAccountService {
                             sendAvailability.nextUploadAllowedAt(),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            rs.getBoolean("is_enabled"),
                             rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime()
                     );
                 }
@@ -165,7 +167,7 @@ public class DouyinAccountService {
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         if (storageState.isEmpty()) {
-            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), false, "未登录", Map.of());
+            return new DouyinAccountStatus("database", normalized, false, 0, null, null, null, sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -182,6 +184,7 @@ public class DouyinAccountService {
                 sendAvailability.nextUploadAllowedAt(),
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
+                accountEnabled(normalized),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -379,15 +382,34 @@ public class DouyinAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         jdbcTemplate.update(
                 """
-                INSERT INTO yd_douyin_account (account_key, user_id, nickname, storage_state_json, updated_at)
-                VALUES (?, ?, ?, ?, NOW())
+                INSERT INTO yd_douyin_account (account_key, user_id, nickname, storage_state_json, is_enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
                 normalized,
                 truncate(profile.userId(), 128),
                 truncate(profile.nickname(), 128),
-                storageState
+                storageState,
+                accountEnabled(normalized)
         );
+    }
+
+    public DouyinAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
+        String normalized = normalizeAccountKey(accountKey);
+        int updated = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?",
+                enabled,
+                normalized
+        );
+        int cdpUpdated = jdbcTemplate.update(
+                "UPDATE yd_douyin_cdp_session SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?",
+                enabled,
+                normalized
+        );
+        if (updated != 1 && cdpUpdated != 1) {
+            throw new IOException("Douyin account key not found: " + normalized);
+        }
+        return status(normalized);
     }
 
     private String normalizeRequestedAccountKey(String accountKey) {
@@ -402,11 +424,27 @@ public class DouyinAccountService {
     }
 
     private DouyinAccountStatus emptyStatus(String accountKey) {
-        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, false, "等待扫码", Map.of());
+        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("douyin", accountKey, TABLE);
+    }
+
+    private boolean accountEnabled(String accountKey) {
+        List<Boolean> values = jdbcTemplate.query(
+                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> rs.getBoolean("is_enabled"),
+                accountKey
+        );
+        if (values.isEmpty()) {
+            values = jdbcTemplate.query(
+                    "SELECT is_enabled FROM yd_douyin_cdp_session WHERE account_key = ?",
+                    (rs, rowNum) -> rs.getBoolean("is_enabled"),
+                    accountKey
+            );
+        }
+        return values.isEmpty() || values.get(0);
     }
 
     private String extractQrImage(Page page) {
@@ -710,11 +748,13 @@ public class DouyinAccountService {
                     user_id VARCHAR(128) NULL,
                     nickname VARCHAR(128) NULL,
                     storage_state_json MEDIUMTEXT NOT NULL,
+                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
+        ensureColumn("yd_douyin_account", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
         ensureColumn("yd_douyin_account", "cdp_port", "INT NULL");
         ensureColumn("yd_douyin_account", "cdp_endpoint", "VARCHAR(255) NULL");
         jdbcTemplate.execute(
@@ -724,11 +764,13 @@ public class DouyinAccountService {
                     cdp_port INT NULL,
                     cdp_endpoint VARCHAR(255) NULL,
                     note VARCHAR(255) NULL,
+                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
+        ensureColumn("yd_douyin_cdp_session", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private void ensureColumn(String table, String column, String definition) {

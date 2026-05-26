@@ -105,7 +105,7 @@ public class BilibiliPlaywrightAccountService {
     public List<BilibiliPlaywrightAccountStatus> accounts() {
         return jdbcTemplate.query(
                 """
-                SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at
+                SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at, is_enabled
                 FROM yd_bilibili_account
                 ORDER BY account_key
                 """,
@@ -125,6 +125,7 @@ public class BilibiliPlaywrightAccountService {
                             sendAvailability.nextUploadAllowedAt(),
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
+                            rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
                             Map.of()
@@ -154,6 +155,7 @@ public class BilibiliPlaywrightAccountService {
                 sendAvailability.nextUploadAllowedAt(),
                 sendAvailability.todayUploadCount(),
                 sendAvailability.cooldownWaitingCount(),
+                accountEnabled(normalized),
                 valid,
                 valid ? "已登录" : "cookie 已失效",
                 Map.of()
@@ -354,11 +356,20 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private BilibiliPlaywrightAccountStatus emptyStatus(String accountKey, String message) {
-        return new BilibiliPlaywrightAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, false, message, Map.of());
+        return new BilibiliPlaywrightAccountStatus("database", accountKey, false, 0, null, null, null, null, null, 0, 0, true, false, message, Map.of());
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("bilibili", accountKey, "yd_bilibili_account");
+    }
+
+    private boolean accountEnabled(String accountKey) {
+        List<Boolean> values = jdbcTemplate.query(
+                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
+                (rs, rowNum) -> rs.getBoolean("is_enabled"),
+                accountKey
+        );
+        return values.isEmpty() || values.get(0);
     }
 
     private void ensureSchema() {
@@ -366,6 +377,7 @@ public class BilibiliPlaywrightAccountService {
         ensureColumn("playwright_uname", "VARCHAR(128) NULL");
         ensureColumn("playwright_storage_state_json", "MEDIUMTEXT NULL");
         ensureColumn("playwright_updated_at", "DATETIME NULL");
+        ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private void ensureColumn(String column, String definition) {

@@ -58,4 +58,14 @@ public class XiaohongshuAccountController {
             return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
         }
     }
+
+    @PostMapping("/api/xiaohongshu/account/{accountKey}/enabled")
+    public ResponseEntity<?> setEnabled(@PathVariable String accountKey, @RequestBody Map<String, Object> request) {
+        try {
+            boolean enabled = Boolean.TRUE.equals(request == null ? null : request.get("enabled"));
+            return ResponseEntity.ok(accountService.setEnabled(accountKey, enabled));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
 }

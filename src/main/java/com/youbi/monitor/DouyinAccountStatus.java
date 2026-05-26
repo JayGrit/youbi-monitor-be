@@ -15,6 +15,7 @@ public record DouyinAccountStatus(
         LocalDateTime nextUploadAllowedAt,
         int todayUploadCount,
         int cooldownWaitingCount,
+        boolean enabled,
         Boolean valid,
         String message,
         Map<String, Object> raw
