@@ -354,8 +354,9 @@ public class BilibiliPlaywrightUploadService {
             if (!setCoverInputIfPresent(page, coverPaths, browserSideFiles, taskId, "cover-dialog")) {
                 throw new RuntimeException("Bilibili cover file input not found after opening cover dialog");
             }
-            clickCoverConfirmIfPresent(page, taskId);
-            page.waitForTimeout(1500);
+            if (!clickCoverConfirmIfPresent(page, taskId)) {
+                throw new RuntimeException("Bilibili cover confirm button not found");
+            }
             dumpDiagnostics(page, taskId, "cover-filled");
         } catch (Exception exception) {
             dumpDiagnostics(page, taskId, "cover-skipped");
@@ -410,18 +411,59 @@ public class BilibiliPlaywrightUploadService {
         return false;
     }
 
-    private void clickCoverConfirmIfPresent(Page page, String taskId) {
-        for (String text : List.of("完成", "确认", "确定", "保存", "应用")) {
+    private boolean clickCoverConfirmIfPresent(Page page, String taskId) {
+        for (String selector : List.of(
+                ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer button.bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer button:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer .bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible button.bcc-button--primary:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible button:has-text('完成')"
+        )) {
             try {
-                Locator button = page.locator("button:has-text('" + text + "'):visible, .bcc-button:has-text('" + text + "'):visible, span:has-text('" + text + "'):visible").last();
+                Locator button = page.locator(selector).last();
                 if (button.count() > 0 && button.isEnabled()) {
                     humanActions.click(page, button);
-                    log.info("Bilibili Playwright cover confirm clicked taskId={} text={}", taskId, text);
-                    return;
+                    log.info("Bilibili Playwright cover confirm clicked taskId={} selector={}", taskId, selector);
+                    if (waitForCoverDialogClosed(page, taskId)) {
+                        return true;
+                    }
+                    log.warn("Bilibili Playwright cover dialog still visible after confirm taskId={} selector={}", taskId, selector);
                 }
             } catch (Exception ignored) {
             }
         }
+        return false;
+    }
+
+    private boolean waitForCoverDialogClosed(Page page, String taskId) {
+        long deadline = System.currentTimeMillis() + Duration.ofSeconds(10).toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (!isCoverDialogVisible(page)) {
+                log.info("Bilibili Playwright cover dialog closed taskId={}", taskId);
+                return true;
+            }
+            page.waitForTimeout(500);
+        }
+        dumpDiagnostics(page, taskId, "cover-dialog-still-open");
+        return false;
+    }
+
+    private boolean isCoverDialogVisible(Page page) {
+        for (String selector : List.of(
+                ".bcc-dialog__wrap-mask:visible:has-text('封面制作')",
+                ".bcc-dialog__wrap-mask:visible:has-text('首页推荐封面')",
+                ".bcc-dialog:visible:has-text('封面制作')",
+                ".bcc-dialog:visible:has-text('首页推荐封面')"
+        )) {
+            try {
+                Locator dialog = page.locator(selector).first();
+                if (dialog.count() > 0 && dialog.isVisible()) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
     }
 
     private void setInputFiles(Page page, String selector, UploadPaths paths, boolean browserSideFiles, double timeoutMs, String taskId, String label) throws IOException {
