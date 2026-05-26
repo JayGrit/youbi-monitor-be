@@ -7,6 +7,7 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.options.BoundingBox;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -435,6 +436,40 @@ public class BilibiliPlaywrightUploadService {
                     }
                     log.warn("Bilibili Playwright cover dialog still visible after confirm taskId={} selector={}", taskId, selector);
                 }
+            } catch (Exception ignored) {
+            }
+        }
+        if (clickCoverConfirmByDialogPosition(page, taskId)) {
+            return true;
+        }
+        return false;
+    }
+
+    private boolean clickCoverConfirmByDialogPosition(Page page, String taskId) {
+        for (String selector : List.of(
+                ".bcc-dialog:visible:has-text('封面制作')",
+                ".bcc-dialog:visible:has-text('首页推荐封面')",
+                ".bcc-dialog__wrap-mask:visible:has-text('封面制作')",
+                ".bcc-dialog__wrap-mask:visible:has-text('首页推荐封面')"
+        )) {
+            try {
+                Locator dialog = page.locator(selector).last();
+                if (dialog.count() == 0 || !dialog.isVisible()) {
+                    continue;
+                }
+                BoundingBox box = dialog.boundingBox();
+                if (box == null || box.width <= 0 || box.height <= 0) {
+                    continue;
+                }
+                double x = box.x + box.width - 70;
+                double y = box.y + box.height - 35;
+                page.mouse().click(x, y);
+                log.info("Bilibili Playwright cover confirm clicked taskId={} method=dialog-position selector={} point={},{}",
+                        taskId, selector, Math.round(x), Math.round(y));
+                if (waitForCoverDialogClosed(page, taskId)) {
+                    return true;
+                }
+                log.warn("Bilibili Playwright cover dialog still visible after position click taskId={} selector={}", taskId, selector);
             } catch (Exception ignored) {
             }
         }
