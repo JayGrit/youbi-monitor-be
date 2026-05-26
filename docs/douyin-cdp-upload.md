@@ -168,22 +168,28 @@ DISPLAY=:99 nohup google-chrome \
   > /hoshuuch/YouBi/logs/douyin-knowledge-chrome.log 2>&1 &
 ```
 
-CDP 端口维护在 `yd_douyin_cdp_session`，不依赖账号是否已经有登录态：
+CDP 端口维护在 `yd_douyin_account`：
 
 ```sql
-CREATE TABLE IF NOT EXISTS yd_douyin_cdp_session (
+CREATE TABLE IF NOT EXISTS yd_douyin_account (
   account_key VARCHAR(64) NOT NULL PRIMARY KEY,
+  user_id VARCHAR(128) NULL,
+  nickname VARCHAR(128) NULL,
+  storage_state_json MEDIUMTEXT NOT NULL,
   cdp_port INT NULL,
   cdp_endpoint VARCHAR(255) NULL,
   note VARCHAR(255) NULL,
+  is_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  upload_cooldown_min_seconds INT NOT NULL DEFAULT 3600,
+  upload_cooldown_max_seconds INT NOT NULL DEFAULT 7200,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-INSERT INTO yd_douyin_cdp_session (account_key, cdp_port, cdp_endpoint, note)
+INSERT INTO yd_douyin_account (account_key, storage_state_json, cdp_port, cdp_endpoint, note)
 VALUES
-  ('animal', 9333, NULL, 'animal chrome profile on DISPLAY=:99'),
-  ('knowledge', 9334, NULL, 'knowledge chrome profile on DISPLAY=:99')
+  ('animal', '', 9333, NULL, 'animal chrome profile on DISPLAY=:99'),
+  ('knowledge', '', 9334, NULL, 'knowledge chrome profile on DISPLAY=:99')
 ON DUPLICATE KEY UPDATE
   cdp_port = VALUES(cdp_port),
   cdp_endpoint = VALUES(cdp_endpoint),
@@ -195,8 +201,7 @@ ON DUPLICATE KEY UPDATE
 
 兼容规则：
 
-- `yd_douyin_cdp_session` 命中 `accountKey` 的 `cdp_endpoint` 或 `cdp_port` 时优先使用对应会话。
-- `yd_douyin_account` 上的 `cdp_endpoint` / `cdp_port` 字段保留为兼容 fallback。
+- `yd_douyin_account` 命中 `accountKey` 的 `cdp_endpoint` 或 `cdp_port` 时优先使用对应会话。
 - `YDBI_DOUYIN_CDP_ENDPOINTS` 仍保留为环境变量兜底，格式为 `animal=http://127.0.0.1:9333;knowledge=http://127.0.0.1:9334`。
 - 可配置 `default=http://127.0.0.1:9333` 作为映射默认值。
 - 没有命中映射时，仍会回退到旧的 `YDBI_DOUYIN_CDP_URL`。
