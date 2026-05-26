@@ -11,6 +11,8 @@ import java.util.concurrent.ThreadLocalRandom;
 @Component
 public class SocialHumanActions {
     void click(Page page, Locator locator) {
+        locator.scrollIntoViewIfNeeded();
+        pause(page, 120, 360);
         BoundingBox box = locator.boundingBox();
         if (box == null || box.width <= 0 || box.height <= 0) {
             locator.click();

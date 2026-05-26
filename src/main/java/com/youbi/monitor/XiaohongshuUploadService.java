@@ -309,6 +309,8 @@ public class XiaohongshuUploadService {
         }
         Locator publishComponent = page.locator("xhs-publish-btn[submit-disabled='false']").last();
         if (publishComponent.count() > 0) {
+            publishComponent.scrollIntoViewIfNeeded();
+            page.waitForTimeout(200);
             BoundingBox box = publishComponent.boundingBox();
             if (box != null) {
                 double x = box.x + box.width - 220;
