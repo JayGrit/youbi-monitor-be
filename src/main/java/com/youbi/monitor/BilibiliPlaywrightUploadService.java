@@ -443,7 +443,9 @@ public class BilibiliPlaywrightUploadService {
                 ".bcc-dialog__wrap-mask:visible .bcc-button--primary:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible .bcc-button:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible button.bcc-button--primary:has-text('完成')",
-                ".bcc-dialog__wrap-mask:visible button:has-text('完成')"
+                ".bcc-dialog__wrap-mask:visible button:has-text('完成')",
+                ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') button:has-text('确认同步')"
         )) {
             try {
                 Locator button = page.locator(selector).last();
@@ -498,6 +500,7 @@ public class BilibiliPlaywrightUploadService {
     private boolean waitForCoverDialogClosed(Page page, String taskId) {
         long deadline = System.currentTimeMillis() + Duration.ofSeconds(10).toMillis();
         while (System.currentTimeMillis() < deadline) {
+            clickCoverSyncConfirmIfPresent(page, taskId);
             if (!isCoverDialogVisible(page)) {
                 log.info("Bilibili Playwright cover dialog closed taskId={}", taskId);
                 return true;
@@ -508,12 +511,39 @@ public class BilibiliPlaywrightUploadService {
         return false;
     }
 
+    private boolean clickCoverSyncConfirmIfPresent(Page page, String taskId) {
+        for (String selector : List.of(
+                ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .bcc-dialog__footer .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .modal-footer .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog__wrap-mask:visible:has-text('个人空间封面') button:has-text('确认同步')",
+                ".bcc-dialog:visible:has-text('检测到个人空间封面') .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog:visible:has-text('个人空间封面') button:has-text('确认同步')"
+        )) {
+            try {
+                Locator button = page.locator(selector).last();
+                if (button.count() > 0 && button.isEnabled()) {
+                    humanActions.click(page, button);
+                    log.info("Bilibili Playwright cover sync confirm clicked taskId={} selector={}", taskId, selector);
+                    page.waitForTimeout(500);
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
+    }
+
     private boolean isCoverDialogVisible(Page page) {
         for (String selector : List.of(
                 ".bcc-dialog__wrap-mask:visible:has-text('封面制作')",
                 ".bcc-dialog__wrap-mask:visible:has-text('首页推荐封面')",
+                ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面')",
+                ".bcc-dialog__wrap-mask:visible:has-text('个人空间封面')",
                 ".bcc-dialog:visible:has-text('封面制作')",
-                ".bcc-dialog:visible:has-text('首页推荐封面')"
+                ".bcc-dialog:visible:has-text('首页推荐封面')",
+                ".bcc-dialog:visible:has-text('检测到个人空间封面')",
+                ".bcc-dialog:visible:has-text('个人空间封面')"
         )) {
             try {
                 Locator dialog = page.locator(selector).first();
