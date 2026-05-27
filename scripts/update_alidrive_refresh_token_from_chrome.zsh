@@ -52,7 +52,7 @@ mysql \
   -u "${MYSQL_USER}" \
   "-p${MYSQL_PASSWORD}" \
   "${MYSQL_DATABASE}" <<SQL
-CREATE TABLE IF NOT EXISTS yd_alidrive_account (
+CREATE TABLE IF NOT EXISTS uploader_account_alidrive (
   account_key VARCHAR(64) NOT NULL PRIMARY KEY,
   refresh_token TEXT NOT NULL,
   user_id VARCHAR(128) NULL,
@@ -63,11 +63,11 @@ CREATE TABLE IF NOT EXISTS yd_alidrive_account (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO yd_alidrive_account (account_key, refresh_token)
+INSERT INTO uploader_account_alidrive (account_key, refresh_token)
 VALUES ('${ACCOUNT_KEY_SQL}', '${TOKEN_SQL}')
 ON DUPLICATE KEY UPDATE
   refresh_token = VALUES(refresh_token),
   updated_at = CURRENT_TIMESTAMP;
 SQL
 
-echo "Updated AliDrive refresh token in yd_alidrive_account.account_key=${ACCOUNT_KEY}"
+echo "Updated AliDrive refresh token in uploader_account_alidrive.account_key=${ACCOUNT_KEY}"

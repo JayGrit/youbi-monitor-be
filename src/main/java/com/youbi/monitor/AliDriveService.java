@@ -45,6 +45,8 @@ public class AliDriveService {
     private static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
     private static final String APP_ID = "5dde4e1bdf9e4966b387ba58f4b3fdc3";
     private static final int CHUNK_SIZE = 10 * 1024 * 1024;
+    private static final String ACCOUNT_TABLE = "uploader_account_alidrive";
+    private static final String LEGACY_ACCOUNT_TABLE = "yd_alidrive_account";
 
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
@@ -335,7 +337,7 @@ public class AliDriveService {
             refreshToken = storedRefreshToken;
         }
         if (text(refreshToken).isBlank()) {
-            throw new IOException("Missing AliDrive refresh token in yd_alidrive_account. Run scripts/update_alidrive_refresh_token_from_chrome.zsh first.");
+            throw new IOException("Missing AliDrive refresh token in uploader_account_alidrive. Run scripts/update_alidrive_refresh_token_from_chrome.zsh first.");
         }
         HttpRequest request = HttpRequest.newBuilder(URI.create(API + "token/refresh"))
                 .timeout(Duration.ofSeconds(30))
@@ -509,7 +511,7 @@ public class AliDriveService {
             return;
         }
         jdbcTemplate.update("""
-                INSERT INTO yd_alidrive_account (
+                INSERT INTO uploader_account_alidrive (
                     account_key, refresh_token, user_id, user_name, nick_name, default_drive_id
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
@@ -524,7 +526,7 @@ public class AliDriveService {
 
     private String loadRefreshTokenFromDb() {
         List<String> tokens = jdbcTemplate.query(
-                "SELECT refresh_token FROM yd_alidrive_account WHERE account_key = ? LIMIT 1",
+                "SELECT refresh_token FROM uploader_account_alidrive WHERE account_key = ? LIMIT 1",
                 (rs, rowNum) -> rs.getString("refresh_token"),
                 accountKey
         );
@@ -532,8 +534,11 @@ public class AliDriveService {
     }
 
     private void ensureSchema() {
+        if (!tableExists(ACCOUNT_TABLE) && tableExists(LEGACY_ACCOUNT_TABLE)) {
+            jdbcTemplate.execute("RENAME TABLE yd_alidrive_account TO uploader_account_alidrive");
+        }
         jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS yd_alidrive_account (
+                CREATE TABLE IF NOT EXISTS uploader_account_alidrive (
                     account_key VARCHAR(64) NOT NULL PRIMARY KEY,
                     refresh_token TEXT NOT NULL,
                     user_id VARCHAR(128) NULL,
@@ -544,6 +549,20 @@ public class AliDriveService {
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                 """);
+    }
+
+    private boolean tableExists(String tableName) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                        SELECT COUNT(*)
+                        FROM information_schema.tables
+                        WHERE table_schema = DATABASE()
+                            AND table_name = ?
+                        """,
+                Integer.class,
+                tableName
+        );
+        return count != null && count > 0;
     }
 
     private static String normalizeRemotePath(String path) {
