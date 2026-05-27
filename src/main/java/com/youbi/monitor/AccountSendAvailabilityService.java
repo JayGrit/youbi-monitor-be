@@ -12,9 +12,9 @@ import java.util.Optional;
 @Service
 public class AccountSendAvailabilityService {
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
-            "bilibili", "uploader_bilibili_task",
-            "douyin", "uploader_douyin_task",
-            "xiaohongshu", "uploader_xiaohongshu_task"
+            "bilibili", "uploader_task_bilibili",
+            "douyin", "uploader_task_douyin",
+            "xiaohongshu", "uploader_task_xiaohongshu"
     );
 
     private final JdbcTemplate jdbcTemplate;

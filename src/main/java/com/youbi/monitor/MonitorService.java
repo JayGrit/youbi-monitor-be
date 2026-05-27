@@ -63,9 +63,9 @@ public class MonitorService {
             "yd_asr_result"
     );
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
-            "bilibili", "uploader_bilibili_task",
-            "douyin", "uploader_douyin_task",
-            "xiaohongshu", "uploader_xiaohongshu_task"
+            "bilibili", "uploader_task_bilibili",
+            "douyin", "uploader_task_douyin",
+            "xiaohongshu", "uploader_task_xiaohongshu"
     );
     private static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
             "bilibili", "uploader_account_bilibili",
@@ -249,11 +249,11 @@ public class MonitorService {
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) upload_failed_count,
                 COUNT(*) upload_total_count
               FROM (
-                SELECT task_id, status FROM uploader_bilibili_task
+                SELECT task_id, status FROM uploader_task_bilibili
                 UNION ALL
-                SELECT task_id, status FROM uploader_douyin_task
+                SELECT task_id, status FROM uploader_task_douyin
                 UNION ALL
-                SELECT task_id, status FROM uploader_xiaohongshu_task
+                SELECT task_id, status FROM uploader_task_xiaohongshu
               ) upload_task
               GROUP BY task_id
             ) us ON us.task_id = t.id
@@ -266,11 +266,11 @@ public class MonitorService {
                   SEPARATOR 0x0A
                 ) child_error_message
               FROM (
-                SELECT task_id, account_key, status, error_message, 'bilibili' platform FROM uploader_bilibili_task
+                SELECT task_id, account_key, status, error_message, 'bilibili' platform FROM uploader_task_bilibili
                 UNION ALL
-                SELECT task_id, account_key, status, error_message, 'douyin' platform FROM uploader_douyin_task
+                SELECT task_id, account_key, status, error_message, 'douyin' platform FROM uploader_task_douyin
                 UNION ALL
-                SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_xiaohongshu_task
+                SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_task_xiaohongshu
               ) upload_task
               WHERE status = 'failed'
               GROUP BY task_id
