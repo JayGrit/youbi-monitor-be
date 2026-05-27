@@ -488,7 +488,7 @@ public class MonitorService {
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 SELECT type, need_dubbing
-                FROM yd_submitter_author_type
+                FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
@@ -502,7 +502,7 @@ public class MonitorService {
     public List<SubmitterAuthorType> authorTypes() {
         return jdbcTemplate.query("""
                 SELECT author, type, need_dubbing
-                FROM yd_submitter_author_type
+                FROM submitter_author
                 ORDER BY author
                 """, (rs, rowNum) -> new SubmitterAuthorType(
                 text(rs.getString("author")),
@@ -521,7 +521,7 @@ public class MonitorService {
             throw new IllegalArgumentException("type is required");
         }
         jdbcTemplate.update("""
-                INSERT INTO yd_submitter_author_type (author, type, need_dubbing)
+                INSERT INTO submitter_author (author, type, need_dubbing)
                 VALUES (?, ?, ?)
                 ON DUPLICATE KEY UPDATE type = VALUES(type), need_dubbing = VALUES(need_dubbing), updated_at = NOW()
                 """, normalizedAuthor, normalizedType, Boolean.FALSE.equals(needDubbing) ? 0 : 1);
@@ -1247,10 +1247,10 @@ public class MonitorService {
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE()
                   AND COLUMN_NAME = 'task_id'
-                  AND TABLE_NAME LIKE 'yd\\_%'
+                  AND (TABLE_NAME LIKE 'yd\\_%' OR TABLE_NAME = 'downloader_submission')
                 ORDER BY CASE
                     WHEN TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment', 'yd_asr_result') THEN 0
-                    WHEN TABLE_NAME = 'yd_downloader_submission' THEN 2
+                    WHEN TABLE_NAME = 'downloader_submission' THEN 2
                     ELSE 1
                   END,
                   TABLE_NAME
@@ -1440,7 +1440,7 @@ public class MonitorService {
 
     private void ensureSubmitterAuthorTypeSchema() {
         jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS yd_submitter_author_type (
+                CREATE TABLE IF NOT EXISTS submitter_author (
                     author VARCHAR(255) NOT NULL PRIMARY KEY,
                     type VARCHAR(128) NOT NULL,
                     need_dubbing TINYINT(1) NOT NULL DEFAULT 1,
@@ -1450,7 +1450,7 @@ public class MonitorService {
                     KEY idx_submitter_author_type_type (type)
                 )
                 """);
-        ensureColumn("yd_submitter_author_type", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("submitter_author", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private boolean tableExists(String table) {
