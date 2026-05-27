@@ -695,6 +695,10 @@ public class BilibiliPlaywrightUploadService {
                 log.info("Bilibili Playwright publish finished taskId={} attempts={} url={}", taskId, attempts, url);
                 return;
             }
+            if (handleCreationStatementPublishDialog(page, body, taskId)) {
+                page.waitForTimeout(1000);
+                continue;
+            }
             if (hasSubmitValidationError(body)) {
                 dumpDiagnostics(page, taskId, "publish-validation-error");
                 throw new RuntimeException("Bilibili publish validation failed: " + submitValidationSummary(body));
@@ -715,6 +719,44 @@ public class BilibiliPlaywrightUploadService {
             throw new RuntimeException("Bilibili publish did not finish: still on editable upload form after clicking publish");
         }
         throw new RuntimeException("Timed out waiting for Bilibili publish finished page");
+    }
+
+    private boolean handleCreationStatementPublishDialog(Page page, String body, String taskId) {
+        if (!containsAny(body, "发布前请添加创作声明")) {
+            return false;
+        }
+        dumpDiagnostics(page, taskId, "creation-statement-publish-dialog");
+        if (clickCreationStatementDialogButton(page, taskId, "内容无需标注")) {
+            return true;
+        }
+        if (clickCreationStatementDialogButton(page, taskId, "去声明")) {
+            page.waitForTimeout(1000);
+            setCreationStatement(page, taskId);
+            clickPublishButton(page, taskId);
+            return true;
+        }
+        throw new RuntimeException("Bilibili creation statement publish dialog found but no action button is clickable");
+    }
+
+    private boolean clickCreationStatementDialogButton(Page page, String taskId, String buttonText) {
+        for (String selector : List.of(
+                ".videoup-confirm-modal:visible button:has-text('" + buttonText + "')",
+                ".bcc-dialog__wrap-mask:visible:has-text('发布前请添加创作声明') button:has-text('" + buttonText + "')",
+                ".bcc-dialog:visible:has-text('发布前请添加创作声明') button:has-text('" + buttonText + "')",
+                "button:has-text('" + buttonText + "'):visible"
+        )) {
+            try {
+                Locator button = page.locator(selector).last();
+                if (button.count() > 0 && button.isVisible() && button.isEnabled()) {
+                    humanActions.click(page, button);
+                    log.info("Bilibili Playwright creation statement publish dialog clicked taskId={} text={} selector={}",
+                            taskId, buttonText, selector);
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
     }
 
     private boolean isPublishSuccessPage(String url, String body) {
