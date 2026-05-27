@@ -5,7 +5,6 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -13,7 +12,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -28,8 +26,8 @@ public class SocialPlaywrightInspectService {
     private final BilibiliPlaywrightAccountService bilibiliAccountService;
     private final SocialBrowserFactory browserFactory;
     private final SocialRiskDetector riskDetector;
+    private final DiagnosticArtifactService diagnosticArtifactService;
     private final HttpClient httpClient;
-    private final Path diagnosticsRoot;
 
     public SocialPlaywrightInspectService(
             DouyinAccountService douyinAccountService,
@@ -37,15 +35,15 @@ public class SocialPlaywrightInspectService {
             BilibiliPlaywrightAccountService bilibiliAccountService,
             SocialBrowserFactory browserFactory,
             SocialRiskDetector riskDetector,
-            @Value("${youbi.minio.work-dir}") String uploadWorkDir
+            DiagnosticArtifactService diagnosticArtifactService
     ) {
         this.douyinAccountService = douyinAccountService;
         this.xiaohongshuAccountService = xiaohongshuAccountService;
         this.bilibiliAccountService = bilibiliAccountService;
         this.browserFactory = browserFactory;
         this.riskDetector = riskDetector;
+        this.diagnosticArtifactService = diagnosticArtifactService;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
-        this.diagnosticsRoot = Path.of(uploadWorkDir).toAbsolutePath().normalize().resolve("diagnostics").resolve("inspect");
     }
 
     public Map<String, Object> fingerprint(String platformValue) {
@@ -121,8 +119,16 @@ public class SocialPlaywrightInspectService {
                 Page page = context.newPage();
                 page.navigate(uploadUrl(platform));
                 page.waitForTimeout(5000);
-                PlaywrightDiagnostics.DiagnosticSnapshot snapshot = PlaywrightDiagnostics.dump(
-                        page, diagnosticsRoot.resolve(platform.configKey()), taskId, "upload-page", log, "Social inspect " + platform.configKey(), true);
+                DiagnosticArtifactRecord snapshot = diagnosticArtifactService.archive(new DiagnosticArtifactRequest(
+                        page,
+                        taskId,
+                        taskId,
+                        platform.configKey(),
+                        "social-playwright-inspect",
+                        normalized,
+                        1,
+                        "upload-page"
+                ));
                 SocialRiskState risk = riskDetector.detect(platform, page);
                 Map<String, Object> result = new LinkedHashMap<>();
                 result.put("platform", platform.configKey());
@@ -130,8 +136,10 @@ public class SocialPlaywrightInspectService {
                 result.put("url", page.url());
                 result.put("risk", risk);
                 result.put("ready", ready(platform, page, risk));
-                result.put("screenshot", snapshot.screenshot() == null ? null : snapshot.screenshot().toString());
-                result.put("html", snapshot.html() == null ? null : snapshot.html().toString());
+                result.put("screenshotUrl", snapshot.screenshotUrl());
+                result.put("htmlUrl", snapshot.htmlUrl());
+                result.put("archiveStatus", snapshot.status());
+                result.put("archiveError", snapshot.errorMessage());
                 result.put("fingerprint", fingerprintOnPage(page));
                 return result;
             } finally {

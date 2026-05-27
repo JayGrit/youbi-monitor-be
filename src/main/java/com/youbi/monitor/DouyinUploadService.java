@@ -40,6 +40,8 @@ public class DouyinUploadService {
     private static final String PUBLISH_VIDEO_URL = DouyinAccountService.PUBLISH_VIDEO_URL;
     private static final String POST_VIDEO_URL_PATTERN = "**/creator-micro/content/post/video?**";
     private static final String MANAGE_URL_PATTERN = "**/creator-micro/content/manage**";
+    private static final String DIAGNOSTIC_PLATFORM = "douyin";
+    private static final String DIAGNOSTIC_SOURCE = "douyin-upload";
 
     private final DouyinAccountService accountService;
     private final MinioClient minioClient;
@@ -53,12 +55,15 @@ public class DouyinUploadService {
     private final Map<String, Object> cdpLocks = new ConcurrentHashMap<>();
     private final SocialHumanActions humanActions;
     private final SocialRiskDetector riskDetector;
+    private final DiagnosticArtifactService diagnosticArtifactService;
+    private final ThreadLocal<DiagnosticRunContext> diagnosticContext = new ThreadLocal<>();
 
     public DouyinUploadService(
             DouyinAccountService accountService,
             ObjectMapper objectMapper,
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
+            DiagnosticArtifactService diagnosticArtifactService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -72,6 +77,7 @@ public class DouyinUploadService {
         this.objectMapper = objectMapper;
         this.humanActions = humanActions;
         this.riskDetector = riskDetector;
+        this.diagnosticArtifactService = diagnosticArtifactService;
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -92,6 +98,8 @@ public class DouyinUploadService {
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
         ResolvedFile resolvedVideo = resolveVideo(request);
         ResolvedFile resolvedCover = resolveCover(request);
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
+        diagnosticContext.set(diagnostics);
         try {
             Path videoPath = resolvedVideo.path();
             if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
@@ -164,6 +172,7 @@ public class DouyinUploadService {
             }
             throw new IOException("Douyin upload failed", exception);
         } finally {
+            diagnosticContext.remove();
             cleanup(resolvedVideo);
             cleanup(resolvedCover);
         }
@@ -683,17 +692,20 @@ public class DouyinUploadService {
     }
 
     private void dumpDiagnostics(Page page, String taskId, String label) {
-        try {
-            Path dir = uploadWorkDir.resolve("diagnostics").resolve(safeSegment(taskId));
-            Files.createDirectories(dir);
-            Path screenshot = dir.resolve("douyin-" + label + ".png");
-            Path html = dir.resolve("douyin-" + label + ".html");
-            page.screenshot(new Page.ScreenshotOptions().setPath(screenshot).setFullPage(true).setTimeout(10000));
-            Files.writeString(html, page.content(), StandardCharsets.UTF_8);
-            log.info("Douyin upload diagnostics dumped taskId={} label={} screenshot={} html={}", taskId, label, screenshot, html);
-        } catch (Exception exception) {
-            log.warn("Douyin upload diagnostics dump failed taskId={} label={} message={}", taskId, label, exception.getMessage());
+        DiagnosticRunContext context = diagnosticContext.get();
+        if (context == null) {
+            context = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, "");
         }
+        diagnosticArtifactService.archive(new DiagnosticArtifactRequest(
+                page,
+                context.taskId(),
+                context.runId(),
+                context.platform(),
+                context.source(),
+                context.accountKey(),
+                context.nextStepIndex(),
+                label
+        ));
     }
 
     private ResolvedFile resolveVideo(DouyinUploadRequest request) throws IOException {

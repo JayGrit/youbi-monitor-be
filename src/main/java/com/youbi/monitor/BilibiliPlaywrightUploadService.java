@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -28,19 +29,23 @@ import java.util.UUID;
 public class BilibiliPlaywrightUploadService {
     private static final Logger log = LoggerFactory.getLogger(BilibiliPlaywrightUploadService.class);
     private static final String PUBLISH_VIDEO_URL = BilibiliPlaywrightAccountService.PUBLISH_VIDEO_URL;
+    private static final String DIAGNOSTIC_PLATFORM = "bilibili";
+    private static final String DIAGNOSTIC_SOURCE = "bilibili-playwright-upload";
 
     private final BilibiliPlaywrightAccountService accountService;
     private final Path uploadWorkDir;
-    private final Path diagnosticsRoot;
     private final Path browserUploadWorkDir;
     private final UploadMaterialResolver materialResolver;
     private final SocialHumanActions humanActions;
     private final SocialRiskDetector riskDetector;
+    private final DiagnosticArtifactService diagnosticArtifactService;
+    private final ThreadLocal<DiagnosticRunContext> diagnosticContext = new ThreadLocal<>();
 
     public BilibiliPlaywrightUploadService(
             BilibiliPlaywrightAccountService accountService,
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
+            DiagnosticArtifactService diagnosticArtifactService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -51,13 +56,13 @@ public class BilibiliPlaywrightUploadService {
         this.accountService = accountService;
         this.humanActions = humanActions;
         this.riskDetector = riskDetector;
+        this.diagnosticArtifactService = diagnosticArtifactService;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
         String bucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
-        this.diagnosticsRoot = this.uploadWorkDir.resolve("diagnostics").resolve("bilibili-playwright");
         this.browserUploadWorkDir = text(browserUploadWorkDir).isBlank() ? null : Path.of(browserUploadWorkDir).toAbsolutePath().normalize();
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
         this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, log, "Bilibili Playwright", false);
@@ -71,6 +76,8 @@ public class BilibiliPlaywrightUploadService {
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
         UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
         UploadMaterialResolver.ResolvedFile resolvedCover = resolveCover(request);
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
+        diagnosticContext.set(diagnostics);
         try {
             Path videoPath = resolvedVideo.path();
             if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
@@ -112,6 +119,7 @@ public class BilibiliPlaywrightUploadService {
             }
             throw new IOException("Bilibili Playwright upload failed", exception);
         } finally {
+            diagnosticContext.remove();
             cleanup(resolvedVideo);
             cleanup(resolvedCover);
         }
@@ -120,6 +128,8 @@ public class BilibiliPlaywrightUploadService {
     public Map<String, Object> inspectUploadPage(String accountKey) throws IOException {
         String normalized = accountService.normalizeAccountKey(accountKey);
         String taskId = "inspect-" + UUID.randomUUID();
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, normalized);
+        diagnosticContext.set(diagnostics);
         String storageState = accountService.storageState(normalized);
         try (BilibiliPlaywrightAccountService.BrowserHandle browserHandle = accountService.openUploadBrowser()) {
             BrowserContext context = accountService.newContext(browserHandle.browser(), storageState);
@@ -127,25 +137,31 @@ public class BilibiliPlaywrightUploadService {
                 Page page = context.newPage();
                 page.navigate(PUBLISH_VIDEO_URL);
                 page.waitForTimeout(5000);
-                PlaywrightDiagnostics.DiagnosticSnapshot snapshot = dumpDiagnostics(page, taskId, "upload-page");
+                DiagnosticArtifactRecord snapshot = dumpDiagnostics(page, taskId, "upload-page");
                 SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.BILIBILI, page);
-                return Map.of(
-                        "accountKey", normalized,
-                        "url", page.url(),
-                        "risk", risk,
-                        "ready", !risk.blocking() && containsAny(safeBodyText(page), "上传视频", "稿件", "发布"),
-                        "screenshot", snapshot.screenshot().toString(),
-                        "html", snapshot.html().toString()
-                );
+                Map<String, Object> result = new LinkedHashMap<>();
+                result.put("accountKey", normalized);
+                result.put("url", page.url());
+                result.put("risk", risk);
+                result.put("ready", !risk.blocking() && containsAny(safeBodyText(page), "上传视频", "稿件", "发布"));
+                result.put("screenshotUrl", snapshot.screenshotUrl());
+                result.put("htmlUrl", snapshot.htmlUrl());
+                result.put("archiveStatus", snapshot.status());
+                result.put("archiveError", snapshot.errorMessage());
+                return result;
             } finally {
                 context.close();
             }
+        } finally {
+            diagnosticContext.remove();
         }
     }
 
     public Map<String, Object> inspectUploadSelection(BilibiliUploadRequest request) throws IOException {
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         String taskId = "inspect-select-" + UUID.randomUUID();
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
+        diagnosticContext.set(diagnostics);
         UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
         try {
             String storageState = accountService.storageState(accountKey);
@@ -155,37 +171,40 @@ public class BilibiliPlaywrightUploadService {
                     Page page = context.newPage();
                     page.navigate(PUBLISH_VIDEO_URL);
                     page.waitForTimeout(3000);
-                    PlaywrightDiagnostics.DiagnosticSnapshot before = dumpDiagnostics(page, taskId, "01-before-select");
+                    DiagnosticArtifactRecord before = dumpDiagnostics(page, taskId, "01-before-select");
                     Locator fileInput = page.locator("input[type='file']").first();
                     fileInput.waitFor(new Locator.WaitForOptions()
                             .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
                             .setTimeout(30000));
                     setInputFiles(page, "input[type='file']", new UploadPaths(resolvedVideo.path(), browserPath(resolvedVideo.path())), browserHandle.browserSideFiles(), 30000, taskId, "inspect-video");
                     page.waitForTimeout(5000);
-                    PlaywrightDiagnostics.DiagnosticSnapshot selected = dumpDiagnostics(page, taskId, "02-after-select");
+                    DiagnosticArtifactRecord selected = dumpDiagnostics(page, taskId, "02-after-select");
                     waitForMetadataForm(page, taskId);
-                    PlaywrightDiagnostics.DiagnosticSnapshot form = dumpDiagnostics(page, taskId, "03-form-ready");
+                    DiagnosticArtifactRecord form = dumpDiagnostics(page, taskId, "03-form-ready");
                     fillTitle(page, truncate(required(request.title(), "title"), 80), taskId);
                     fillDescription(page, request.description(), taskId);
                     fillTags(page, request.tags(), taskId);
                     page.waitForTimeout(1000);
-                    PlaywrightDiagnostics.DiagnosticSnapshot filled = dumpDiagnostics(page, taskId, "04-metadata-filled");
-                    return Map.of(
-                            "accountKey", accountKey,
-                            "url", page.url(),
-                            "video", resolvedVideo.path().toString(),
-                            "beforeScreenshot", before.screenshot().toString(),
-                            "selectedScreenshot", selected.screenshot().toString(),
-                            "formScreenshot", form.screenshot().toString(),
-                            "filledScreenshot", filled.screenshot().toString(),
-                            "filledHtml", filled.html().toString(),
-                            "formHtml", form.html().toString()
-                    );
+                    DiagnosticArtifactRecord filled = dumpDiagnostics(page, taskId, "04-metadata-filled");
+                    Map<String, Object> result = new LinkedHashMap<>();
+                    result.put("accountKey", accountKey);
+                    result.put("url", page.url());
+                    result.put("video", resolvedVideo.path().toString());
+                    result.put("beforeScreenshotUrl", before.screenshotUrl());
+                    result.put("beforeHtmlUrl", before.htmlUrl());
+                    result.put("selectedScreenshotUrl", selected.screenshotUrl());
+                    result.put("selectedHtmlUrl", selected.htmlUrl());
+                    result.put("formScreenshotUrl", form.screenshotUrl());
+                    result.put("formHtmlUrl", form.htmlUrl());
+                    result.put("filledScreenshotUrl", filled.screenshotUrl());
+                    result.put("filledHtmlUrl", filled.htmlUrl());
+                    return result;
                 } finally {
                     context.close();
                 }
             }
         } finally {
+            diagnosticContext.remove();
             cleanup(resolvedVideo);
         }
     }
@@ -722,8 +741,21 @@ public class BilibiliPlaywrightUploadService {
         return false;
     }
 
-    private PlaywrightDiagnostics.DiagnosticSnapshot dumpDiagnostics(Page page, String taskId, String label) {
-        return PlaywrightDiagnostics.dump(page, diagnosticsRoot, taskId, label, log, "Bilibili Playwright", true);
+    private DiagnosticArtifactRecord dumpDiagnostics(Page page, String taskId, String label) {
+        DiagnosticRunContext context = diagnosticContext.get();
+        if (context == null) {
+            context = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, "");
+        }
+        return diagnosticArtifactService.archive(new DiagnosticArtifactRequest(
+                page,
+                context.taskId(),
+                context.runId(),
+                context.platform(),
+                context.source(),
+                context.accountKey(),
+                context.nextStepIndex(),
+                label
+        ));
     }
 
     private String safeBodyText(Page page) {

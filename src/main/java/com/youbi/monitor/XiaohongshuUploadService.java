@@ -27,18 +27,22 @@ public class XiaohongshuUploadService {
     private static final Logger log = LoggerFactory.getLogger(XiaohongshuUploadService.class);
     private static final String PUBLISH_VIDEO_URL = XiaohongshuAccountService.PUBLISH_VIDEO_URL;
     private static final String SUCCESS_URL_PATTERN = "**/publish/success?**";
+    private static final String DIAGNOSTIC_PLATFORM = "xiaohongshu";
+    private static final String DIAGNOSTIC_SOURCE = "xiaohongshu-upload";
 
     private final XiaohongshuAccountService accountService;
     private final Path uploadWorkDir;
-    private final Path diagnosticsRoot;
     private final UploadMaterialResolver materialResolver;
     private final SocialHumanActions humanActions;
     private final SocialRiskDetector riskDetector;
+    private final DiagnosticArtifactService diagnosticArtifactService;
+    private final ThreadLocal<DiagnosticRunContext> diagnosticContext = new ThreadLocal<>();
 
     public XiaohongshuUploadService(
             XiaohongshuAccountService accountService,
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
+            DiagnosticArtifactService diagnosticArtifactService,
             ObjectMapper objectMapper,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
@@ -49,13 +53,13 @@ public class XiaohongshuUploadService {
         this.accountService = accountService;
         this.humanActions = humanActions;
         this.riskDetector = riskDetector;
+        this.diagnosticArtifactService = diagnosticArtifactService;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
         String bucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
-        this.diagnosticsRoot = this.uploadWorkDir.resolve("diagnostics");
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
         this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, log, "XHS upload", true);
     }
@@ -68,6 +72,8 @@ public class XiaohongshuUploadService {
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
         UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
         UploadMaterialResolver.ResolvedFile resolvedCover = resolveCover(request);
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
+        diagnosticContext.set(diagnostics);
         try {
             Path videoPath = resolvedVideo.path();
             if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
@@ -106,6 +112,7 @@ public class XiaohongshuUploadService {
             }
             throw new IOException("Xiaohongshu upload failed", exception);
         } finally {
+            diagnosticContext.remove();
             cleanup(resolvedVideo);
             cleanup(resolvedCover);
         }
@@ -371,7 +378,20 @@ public class XiaohongshuUploadService {
     }
 
     private void dumpDiagnostics(Page page, String taskId, String label) {
-        PlaywrightDiagnostics.dump(page, diagnosticsRoot, taskId, label, log, "XHS upload", false);
+        DiagnosticRunContext context = diagnosticContext.get();
+        if (context == null) {
+            context = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, "");
+        }
+        diagnosticArtifactService.archive(new DiagnosticArtifactRequest(
+                page,
+                context.taskId(),
+                context.runId(),
+                context.platform(),
+                context.source(),
+                context.accountKey(),
+                context.nextStepIndex(),
+                label
+        ));
     }
 
     private PageState pageState(Page page, String buttonText) {
