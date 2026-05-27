@@ -29,7 +29,7 @@ public class BilibiliPlaywrightAccountService {
     static final String DEFAULT_ACCOUNT_KEY = "knowledge";
     static final String PUBLISH_VIDEO_URL = "https://member.bilibili.com/platform/upload/video/frame?page_from=creative_home_top_upload";
 
-    private static final String TABLE = "yd_bilibili_account";
+    private static final String TABLE = "uploader_account_bilibili";
 
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
@@ -105,7 +105,7 @@ public class BilibiliPlaywrightAccountService {
         return jdbcTemplate.query(
                 """
                 SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at, is_enabled
-                FROM yd_bilibili_account
+                FROM uploader_account_bilibili
                 ORDER BY account_key
                 """,
                 (rs, rowNum) -> {
@@ -206,7 +206,7 @@ public class BilibiliPlaywrightAccountService {
     private void saveStorageState(String accountKey, String storageState, AccountProfile profile) {
         int updated = jdbcTemplate.update(
                 """
-                UPDATE yd_bilibili_account
+                UPDATE uploader_account_bilibili
                 SET playwright_mid = ?, playwright_uname = ?, playwright_storage_state_json = ?, playwright_updated_at = NOW()
                 WHERE account_key = ?
                 """,
@@ -365,7 +365,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
-        return sendAvailabilityService.availability("bilibili", accountKey, "yd_bilibili_account");
+        return sendAvailabilityService.availability("bilibili", accountKey, "uploader_account_bilibili");
     }
 
     private boolean accountEnabled(String accountKey) {

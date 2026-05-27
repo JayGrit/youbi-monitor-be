@@ -32,7 +32,7 @@ public class DouyinAccountService {
     static final String HOME_URL_PREFIX = "https://creator.douyin.com/creator-micro/home";
     static final String PUBLISH_VIDEO_URL = "https://creator.douyin.com/creator-micro/content/upload";
 
-    private static final String TABLE = "yd_douyin_account";
+    private static final String TABLE = "uploader_account_douyin";
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
@@ -90,7 +90,7 @@ public class DouyinAccountService {
         return jdbcTemplate.query(
                 """
                 SELECT account_key, cdp_port, cdp_endpoint, note, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, updated_at
-                FROM yd_douyin_account
+                FROM uploader_account_douyin
                 ORDER BY account_key
                 """,
                 (rs, rowNum) -> {
@@ -142,7 +142,7 @@ public class DouyinAccountService {
         }
         jdbcTemplate.update(
                 """
-                INSERT INTO yd_douyin_account (account_key, storage_state_json, cdp_port, cdp_endpoint, note, is_enabled, updated_at)
+                INSERT INTO uploader_account_douyin (account_key, storage_state_json, cdp_port, cdp_endpoint, note, is_enabled, updated_at)
                 VALUES (?, '', ?, NULL, NULL, 1, NOW())
                 ON DUPLICATE KEY UPDATE cdp_port = VALUES(cdp_port), cdp_endpoint = NULL, updated_at = NOW()
                 """,
@@ -203,7 +203,7 @@ public class DouyinAccountService {
         List<String> endpoints = jdbcTemplate.query(
                 """
                 SELECT cdp_endpoint, cdp_port
-                FROM yd_douyin_account
+                FROM uploader_account_douyin
                 WHERE account_key = ?
                 LIMIT 1
                 """,
@@ -361,7 +361,7 @@ public class DouyinAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         jdbcTemplate.update(
                 """
-                INSERT INTO yd_douyin_account (account_key, user_id, nickname, storage_state_json, is_enabled, updated_at)
+                INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, is_enabled, updated_at)
                 VALUES (?, ?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
@@ -755,7 +755,7 @@ public class DouyinAccountService {
     private void ensureSchema() {
         jdbcTemplate.execute(
                 """
-                CREATE TABLE IF NOT EXISTS yd_douyin_account (
+                CREATE TABLE IF NOT EXISTS uploader_account_douyin (
                     account_key VARCHAR(64) NOT NULL PRIMARY KEY,
                     user_id VARCHAR(128) NULL,
                     nickname VARCHAR(128) NULL,
@@ -766,14 +766,14 @@ public class DouyinAccountService {
                 )
                 """
         );
-        ensureColumn("yd_douyin_account", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("yd_douyin_account", "upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
-        ensureColumn("yd_douyin_account", "upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
-        ensureColumn("yd_douyin_account", "last_upload_at", "DATETIME NULL");
-        ensureColumn("yd_douyin_account", "next_upload_allowed_at", "DATETIME NULL");
-        ensureColumn("yd_douyin_account", "cdp_port", "INT NULL");
-        ensureColumn("yd_douyin_account", "cdp_endpoint", "VARCHAR(255) NULL");
-        ensureColumn("yd_douyin_account", "note", "VARCHAR(255) NULL");
+        ensureColumn("uploader_account_douyin", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("uploader_account_douyin", "upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
+        ensureColumn("uploader_account_douyin", "upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
+        ensureColumn("uploader_account_douyin", "last_upload_at", "DATETIME NULL");
+        ensureColumn("uploader_account_douyin", "next_upload_allowed_at", "DATETIME NULL");
+        ensureColumn("uploader_account_douyin", "cdp_port", "INT NULL");
+        ensureColumn("uploader_account_douyin", "cdp_endpoint", "VARCHAR(255) NULL");
+        ensureColumn("uploader_account_douyin", "note", "VARCHAR(255) NULL");
     }
 
     private void ensureColumn(String table, String column, String definition) {

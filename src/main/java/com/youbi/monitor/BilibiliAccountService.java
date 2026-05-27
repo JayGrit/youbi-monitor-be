@@ -31,7 +31,7 @@ public class BilibiliAccountService {
     static final String APP_KEY_BILI_TV = "4409e2ce8ffd12b8";
     static final String APP_SECRET_BILI_TV = "59b43e04ad6965f34319062b478f83dd";
 
-    private static final String TABLE = "yd_bilibili_account";
+    private static final String TABLE = "uploader_account_bilibili";
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -429,7 +429,7 @@ public class BilibiliAccountService {
         }
         jdbcTemplate.update(
                 """
-                INSERT INTO yd_bilibili_account (account_key, mid, uname, login_info_json, updated_at)
+                INSERT INTO uploader_account_bilibili (account_key, mid, uname, login_info_json, updated_at)
                 VALUES (?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE mid = VALUES(mid), uname = VALUES(uname), login_info_json = VALUES(login_info_json), updated_at = NOW()
                 """,
@@ -443,7 +443,7 @@ public class BilibiliAccountService {
     private void ensureSchema() {
         jdbcTemplate.execute(
                 """
-                CREATE TABLE IF NOT EXISTS yd_bilibili_account (
+                CREATE TABLE IF NOT EXISTS uploader_account_bilibili (
                     account_key VARCHAR(64) NOT NULL PRIMARY KEY,
                     mid BIGINT NULL,
                     uname VARCHAR(128) NULL,

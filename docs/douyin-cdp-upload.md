@@ -6,7 +6,7 @@
 
 抖音创作者中心登录态不能稳定依赖单纯导出 cookie/storage state：
 
-- 从普通 Chrome 导出 `storage_state` 写入 `yd_douyin_account` 后，后端新 Playwright 浏览器仍可能被判定未登录。
+- 从普通 Chrome 导出 `storage_state` 写入 `uploader_account_douyin` 后，后端新 Playwright 浏览器仍可能被判定未登录。
 - 普通 Chrome 即使页面已登录，也不一定能通过现有 `9222` CDP 端口暴露当前页面 target，表现为 `/json/list` 为空。
 - 成功路径是启动一个独立、干净、带 remote debugging 的 Chrome Profile，在该窗口内手动登录，再让后端通过同一个 CDP browser websocket 操作。
 
@@ -168,10 +168,10 @@ DISPLAY=:99 nohup google-chrome \
   > /hoshuuch/YouBi/logs/douyin-knowledge-chrome.log 2>&1 &
 ```
 
-CDP 端口维护在 `yd_douyin_account`：
+CDP 端口维护在 `uploader_account_douyin`：
 
 ```sql
-CREATE TABLE IF NOT EXISTS yd_douyin_account (
+CREATE TABLE IF NOT EXISTS uploader_account_douyin (
   account_key VARCHAR(64) NOT NULL PRIMARY KEY,
   user_id VARCHAR(128) NULL,
   nickname VARCHAR(128) NULL,
@@ -186,7 +186,7 @@ CREATE TABLE IF NOT EXISTS yd_douyin_account (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
-INSERT INTO yd_douyin_account (account_key, storage_state_json, cdp_port, cdp_endpoint, note)
+INSERT INTO uploader_account_douyin (account_key, storage_state_json, cdp_port, cdp_endpoint, note)
 VALUES
   ('animal', '', 9333, NULL, 'animal chrome profile on DISPLAY=:99'),
   ('knowledge', '', 9334, NULL, 'knowledge chrome profile on DISPLAY=:99')
@@ -201,7 +201,7 @@ ON DUPLICATE KEY UPDATE
 
 兼容规则：
 
-- `yd_douyin_account` 命中 `accountKey` 的 `cdp_endpoint` 或 `cdp_port` 时优先使用对应会话。
+- `uploader_account_douyin` 命中 `accountKey` 的 `cdp_endpoint` 或 `cdp_port` 时优先使用对应会话。
 - `YDBI_DOUYIN_CDP_ENDPOINTS` 仍保留为环境变量兜底，格式为 `animal=http://127.0.0.1:9333;knowledge=http://127.0.0.1:9334`。
 - 可配置 `default=http://127.0.0.1:9333` 作为映射默认值。
 - 没有命中映射时，仍会回退到旧的 `YDBI_DOUYIN_CDP_URL`。
@@ -290,7 +290,7 @@ p.stop()'
 Data truncation: Data too long for column 'user_id'
 ```
 
-原因是发布成功后保存 CDP context 的 `storageState`，解析出的 `user_id` 超过 `yd_douyin_account.user_id VARCHAR(128)`。
+原因是发布成功后保存 CDP context 的 `storageState`，解析出的 `user_id` 超过 `uploader_account_douyin.user_id VARCHAR(128)`。
 
 已修复：
 

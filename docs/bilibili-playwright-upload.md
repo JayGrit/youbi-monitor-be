@@ -10,13 +10,13 @@ Monitor 后端原有 B 站上传路径保留为主路径，继续通过 `Bilibil
 
 ### 账号存储
 
-Playwright 登录态复用现有 B 站账号表 `yd_bilibili_account`，不单独维护新账号表。新增字段：
+Playwright 登录态复用现有 B 站账号表 `uploader_account_bilibili`，不单独维护新账号表。新增字段：
 
 ```sql
-ALTER TABLE yd_bilibili_account ADD COLUMN playwright_mid BIGINT NULL;
-ALTER TABLE yd_bilibili_account ADD COLUMN playwright_uname VARCHAR(128) NULL;
-ALTER TABLE yd_bilibili_account ADD COLUMN playwright_storage_state_json MEDIUMTEXT NULL;
-ALTER TABLE yd_bilibili_account ADD COLUMN playwright_updated_at DATETIME NULL;
+ALTER TABLE uploader_account_bilibili ADD COLUMN playwright_mid BIGINT NULL;
+ALTER TABLE uploader_account_bilibili ADD COLUMN playwright_uname VARCHAR(128) NULL;
+ALTER TABLE uploader_account_bilibili ADD COLUMN playwright_storage_state_json MEDIUMTEXT NULL;
+ALTER TABLE uploader_account_bilibili ADD COLUMN playwright_updated_at DATETIME NULL;
 ```
 
 这些字段只保存 Playwright 浏览器方案需要的状态，不覆盖原有 `mid`、`uname`、`login_info_json`。这样原 Bilibili API 上传路径和账号续期逻辑不受影响。
@@ -32,9 +32,9 @@ ALTER TABLE yd_bilibili_account ADD COLUMN playwright_updated_at DATETIME NULL;
 
 新增 `BilibiliPlaywrightAccountService`：
 
-- 从 `yd_bilibili_account.playwright_storage_state_json` 读取 Playwright storage state。
+- 从 `uploader_account_bilibili.playwright_storage_state_json` 读取 Playwright storage state。
 - 打开手动登录窗口并轮询登录结果。
-- 登录成功后将 `BrowserContext.storageState()` 写回 `yd_bilibili_account`。
+- 登录成功后将 `BrowserContext.storageState()` 写回 `uploader_account_bilibili`。
 - 调用 `https://api.bilibili.com/x/space/myinfo` 校验 cookie 是否仍有效。
 - 启动时自动补齐 `playwright_*` 字段。
 
@@ -84,7 +84,7 @@ B 站 Playwright storage state 更接近小红书：把 cookie/storage state 存
 
 1. 本地手动登录 B 站创作中心。
 2. 调用登录轮询接口保存 storage state。
-3. 将 storage state 写入 `yd_bilibili_account.account_key = 'knowledge'`。
+3. 将 storage state 写入 `uploader_account_bilibili.account_key = 'knowledge'`。
 4. 重启后端并调用 `inspect-upload-page`。
 5. Playwright 使用数据库中的 storage state 成功打开上传页。
 
@@ -102,7 +102,7 @@ B 站 Playwright storage state 更接近小红书：把 cookie/storage state 存
 
 ### 账号表选择错误
 
-早期实现曾临时创建 `yd_bilibili_playwright_account` 存 Playwright 登录态。后来确认 B 站已有统一账号表 `yd_bilibili_account`，并且已有 `animal`、`game`、`knowledge` 三个账号，所以最终改为在现有表上增加 `playwright_*` 字段。
+早期实现曾临时创建 `yd_bilibili_playwright_account` 存 Playwright 登录态。后来确认 B 站已有统一账号表 `uploader_account_bilibili`，并且已有 `animal`、`game`、`knowledge` 三个账号，所以最终改为在现有表上增加 `playwright_*` 字段。
 
 旧临时表不再被代码读取。后续可以在确认无其他依赖后手动清理。
 

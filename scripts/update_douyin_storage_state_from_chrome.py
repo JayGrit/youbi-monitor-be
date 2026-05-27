@@ -33,7 +33,7 @@ DOUYIN_DOMAINS = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export Douyin login state from a local Chrome CDP session into yd_douyin_account."
+        description="Export Douyin login state from a local Chrome CDP session into uploader_account_douyin."
     )
     parser.add_argument("--account-key", default=os.getenv("YDBI_DOUYIN_ACCOUNT_KEY", "douyin_main"))
     parser.add_argument("--cdp-url", default=os.getenv("YDBI_CHROME_CDP_URL", DEFAULT_CDP_URL))
@@ -175,7 +175,7 @@ def profile_from_storage_state(state: dict[str, Any]) -> tuple[str | None, str |
 def ensure_schema(cursor) -> None:
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS yd_douyin_account (
+        CREATE TABLE IF NOT EXISTS uploader_account_douyin (
           account_key VARCHAR(64) NOT NULL PRIMARY KEY,
           user_id VARCHAR(128) NULL,
           nickname VARCHAR(128) NULL,
@@ -201,7 +201,7 @@ def save_storage_state(args: argparse.Namespace, account_key: str, storage_state
         ensure_schema(cursor)
         cursor.execute(
             """
-            INSERT INTO yd_douyin_account (account_key, user_id, nickname, storage_state_json, updated_at)
+            INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, updated_at)
             VALUES (%s, %s, %s, %s, NOW())
             ON DUPLICATE KEY UPDATE
               user_id = VALUES(user_id),
@@ -237,7 +237,7 @@ def main() -> int:
         account_key = account_key_for_index(args.account_key, output_index)
         save_storage_state(args, account_key, storage_state_json, user_id, nickname)
         print(
-            "Updated yd_douyin_account "
+            "Updated uploader_account_douyin "
             f"account_key={account_key} context={context_index} cookies={cookie_count} origins={origin_count} "
             f"bytes={len(storage_state_json.encode('utf-8'))}"
         )

@@ -30,7 +30,7 @@ public class XiaohongshuAccountService {
     static final String PUBLISH_VIDEO_URL = "https://creator.xiaohongshu.com/publish/publish?from=homepage&target=video";
     static final String LOGIN_BOX_SELECTOR = "div[class*='login-box']";
 
-    private static final String TABLE = "yd_xiaohongshu_account";
+    private static final String TABLE = "uploader_account_xiaohongshu";
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -252,7 +252,7 @@ public class XiaohongshuAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         jdbcTemplate.update(
                 """
-                INSERT INTO yd_xiaohongshu_account (account_key, user_id, nickname, storage_state_json, updated_at)
+                INSERT INTO uploader_account_xiaohongshu (account_key, user_id, nickname, storage_state_json, updated_at)
                 VALUES (?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
@@ -458,7 +458,7 @@ public class XiaohongshuAccountService {
     private void ensureSchema() {
         jdbcTemplate.execute(
                 """
-                CREATE TABLE IF NOT EXISTS yd_xiaohongshu_account (
+                CREATE TABLE IF NOT EXISTS uploader_account_xiaohongshu (
                     account_key VARCHAR(64) NOT NULL PRIMARY KEY,
                     user_id VARCHAR(128) NULL,
                     nickname VARCHAR(128) NULL,

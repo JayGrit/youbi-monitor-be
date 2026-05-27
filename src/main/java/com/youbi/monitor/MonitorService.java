@@ -68,9 +68,9 @@ public class MonitorService {
             "xiaohongshu", "uploader_xiaohongshu_task"
     );
     private static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
-            "bilibili", "yd_bilibili_account",
-            "douyin", "yd_douyin_account",
-            "xiaohongshu", "yd_xiaohongshu_account"
+            "bilibili", "uploader_account_bilibili",
+            "douyin", "uploader_account_douyin",
+            "xiaohongshu", "uploader_account_xiaohongshu"
     );
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",

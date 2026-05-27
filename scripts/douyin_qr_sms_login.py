@@ -25,7 +25,7 @@ DEFAULT_MYSQL_PASSWORD = "490229"
 DOUYIN_PUBLISH_URL = "https://creator.douyin.com/creator-micro/content/upload"
 DEFAULT_PHONE = "15548242598"
 SMS_TABLE = "yd_douyin_sms_code"
-ACCOUNT_TABLE = "yd_douyin_account"
+ACCOUNT_TABLE = "uploader_account_douyin"
 
 
 def parse_args() -> argparse.Namespace:
