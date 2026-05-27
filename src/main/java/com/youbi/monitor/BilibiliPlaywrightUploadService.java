@@ -432,6 +432,12 @@ public class BilibiliPlaywrightUploadService {
     }
 
     private boolean clickCoverConfirmIfPresent(Page page, String taskId) {
+        if (clickCoverSyncConfirmIfPresent(page, taskId)) {
+            if (waitForCoverDialogClosed(page, taskId)) {
+                return true;
+            }
+            log.warn("Bilibili Playwright cover dialog still visible after sync confirm taskId={}", taskId);
+        }
         for (String selector : List.of(
                 ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer .bcc-button--primary:has-text('完成')",
                 ".bcc-dialog__wrap-mask:visible .bcc-dialog__footer .bcc-button:has-text('完成')",
@@ -512,7 +518,22 @@ public class BilibiliPlaywrightUploadService {
     }
 
     private boolean clickCoverSyncConfirmIfPresent(Page page, String taskId) {
+        try {
+            Locator button = page.getByText("确认同步", new Page.GetByTextOptions().setExact(true)).last();
+            if (button.count() > 0 && button.isVisible() && button.isEnabled()) {
+                humanActions.click(page, button);
+                log.info("Bilibili Playwright cover sync confirm clicked taskId={} method=text-exact", taskId);
+                page.waitForTimeout(500);
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
         for (String selector : List.of(
+                "text=\"确认同步\"",
+                ".bcc-dialog__wrap-mask:visible .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog__wrap-mask:visible button:has-text('确认同步')",
+                ".bcc-dialog:visible .bcc-button--primary:has-text('确认同步')",
+                ".bcc-dialog:visible button:has-text('确认同步')",
                 ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .bcc-dialog__footer .bcc-button--primary:has-text('确认同步')",
                 ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .modal-footer .bcc-button--primary:has-text('确认同步')",
                 ".bcc-dialog__wrap-mask:visible:has-text('检测到个人空间封面') .bcc-button--primary:has-text('确认同步')",
