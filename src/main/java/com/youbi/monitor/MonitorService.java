@@ -65,12 +65,14 @@ public class MonitorService {
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
             "bilibili", "uploader_task_bilibili",
             "douyin", "uploader_task_douyin",
-            "xiaohongshu", "uploader_task_xiaohongshu"
+            "xiaohongshu", "uploader_task_xiaohongshu",
+            "shipinhao", "uploader_task_shipinhao"
     );
     private static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
             "bilibili", "uploader_account_bilibili",
             "douyin", "uploader_account_douyin",
-            "xiaohongshu", "uploader_account_xiaohongshu"
+            "xiaohongshu", "uploader_account_xiaohongshu",
+            "shipinhao", "uploader_account_shipinhao"
     );
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
@@ -116,7 +118,7 @@ public class MonitorService {
             "translator", List.of("translation_json_path", "target_language"),
             "speaker", List.of("tts_segments_dir"),
             "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
-            "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name")
+            "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name", "shipinhao_upload_account_key", "shipinhao_upload_account_name", "shipinhao_upload_result_json")
     );
 
     private static final String MONITOR_SQL = """
@@ -254,6 +256,8 @@ public class MonitorService {
                 SELECT task_id, status FROM uploader_task_douyin
                 UNION ALL
                 SELECT task_id, status FROM uploader_task_xiaohongshu
+                UNION ALL
+                SELECT task_id, status FROM uploader_task_shipinhao
               ) upload_task
               GROUP BY task_id
             ) us ON us.task_id = t.id
@@ -271,6 +275,8 @@ public class MonitorService {
                 SELECT task_id, account_key, status, error_message, 'douyin' platform FROM uploader_task_douyin
                 UNION ALL
                 SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_task_xiaohongshu
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'shipinhao' platform FROM uploader_task_shipinhao
               ) upload_task
               WHERE status = 'failed'
               GROUP BY task_id
@@ -1332,6 +1338,8 @@ public class MonitorService {
             normalized = "xiaohongshu";
         } else if ("dy".equals(normalized)) {
             normalized = "douyin";
+        } else if ("sph".equals(normalized) || "channels".equals(normalized) || "wx_channels".equals(normalized) || "wechat_channels".equals(normalized) || "weixin-channels".equals(normalized) || "视频号".equals(normalized)) {
+            normalized = "shipinhao";
         }
         if (!UPLOADER_TASK_TABLES.containsKey(normalized)) {
             throw new IllegalArgumentException("Unsupported upload platform: " + platform);
@@ -1392,6 +1400,9 @@ public class MonitorService {
     private void ensureUploaderMonitorColumns() {
         ensureColumn("yd_uploader", "bilibili_upload_uid", "VARCHAR(64) NULL");
         ensureColumn("yd_uploader", "bilibili_upload_account_name", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "shipinhao_upload_account_key", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "shipinhao_upload_account_name", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "shipinhao_upload_result_json", "MEDIUMTEXT NULL");
         ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
     }
 

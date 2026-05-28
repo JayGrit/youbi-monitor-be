@@ -14,7 +14,8 @@ public class AccountSendAvailabilityService {
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
             "bilibili", "uploader_task_bilibili",
             "douyin", "uploader_task_douyin",
-            "xiaohongshu", "uploader_task_xiaohongshu"
+            "xiaohongshu", "uploader_task_xiaohongshu",
+            "shipinhao", "uploader_task_shipinhao"
     );
 
     private final JdbcTemplate jdbcTemplate;
