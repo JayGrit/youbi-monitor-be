@@ -3,7 +3,8 @@ package com.youbi.monitor;
 enum SocialBrowserPlatform {
     DOUYIN("douyin"),
     XIAOHONGSHU("xiaohongshu"),
-    BILIBILI("bilibili");
+    BILIBILI("bilibili"),
+    SHIPINHAO("shipinhao");
 
     private final String configKey;
 

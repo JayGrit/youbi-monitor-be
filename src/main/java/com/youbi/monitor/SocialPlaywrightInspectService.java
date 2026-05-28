@@ -24,6 +24,7 @@ public class SocialPlaywrightInspectService {
     private final DouyinAccountService douyinAccountService;
     private final XiaohongshuAccountService xiaohongshuAccountService;
     private final BilibiliPlaywrightAccountService bilibiliAccountService;
+    private final ShipinhaoAccountService shipinhaoAccountService;
     private final SocialBrowserFactory browserFactory;
     private final SocialRiskDetector riskDetector;
     private final DiagnosticArtifactService diagnosticArtifactService;
@@ -33,6 +34,7 @@ public class SocialPlaywrightInspectService {
             DouyinAccountService douyinAccountService,
             XiaohongshuAccountService xiaohongshuAccountService,
             BilibiliPlaywrightAccountService bilibiliAccountService,
+            ShipinhaoAccountService shipinhaoAccountService,
             SocialBrowserFactory browserFactory,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService
@@ -40,6 +42,7 @@ public class SocialPlaywrightInspectService {
         this.douyinAccountService = douyinAccountService;
         this.xiaohongshuAccountService = xiaohongshuAccountService;
         this.bilibiliAccountService = bilibiliAccountService;
+        this.shipinhaoAccountService = shipinhaoAccountService;
         this.browserFactory = browserFactory;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
@@ -159,6 +162,7 @@ public class SocialPlaywrightInspectService {
             case DOUYIN -> containsAny(body, "上传视频", "发布视频", "点击上传", "拖拽到此处");
             case XIAOHONGSHU -> containsAny(body, "上传视频", "发布笔记", "请选择视频", "添加视频");
             case BILIBILI -> containsAny(body, "上传视频", "稿件", "发布", "点击上传");
+            case SHIPINHAO -> containsAny(body, "发表动态", "视频描述", "发表", "保存草稿");
         };
     }
 
@@ -237,6 +241,7 @@ public class SocialPlaywrightInspectService {
             case DOUYIN -> douyinAccountService.newContext(browser, douyinAccountService.storageContextOptions(storageState));
             case XIAOHONGSHU -> xiaohongshuAccountService.newContext(browser, storageState);
             case BILIBILI -> bilibiliAccountService.newContext(browser, storageState);
+            case SHIPINHAO -> shipinhaoAccountService.newContext(browser, storageState);
         };
     }
 
@@ -245,6 +250,7 @@ public class SocialPlaywrightInspectService {
             case DOUYIN -> douyinAccountService.normalizeAccountKey(accountKey);
             case XIAOHONGSHU -> xiaohongshuAccountService.normalizeAccountKey(accountKey);
             case BILIBILI -> bilibiliAccountService.normalizeAccountKey(accountKey);
+            case SHIPINHAO -> shipinhaoAccountService.normalizeAccountKey(accountKey);
         };
     }
 
@@ -253,6 +259,7 @@ public class SocialPlaywrightInspectService {
             case DOUYIN -> douyinAccountService.storageState(accountKey);
             case XIAOHONGSHU -> xiaohongshuAccountService.storageState(accountKey);
             case BILIBILI -> bilibiliAccountService.storageState(accountKey);
+            case SHIPINHAO -> shipinhaoAccountService.storageState(accountKey);
         };
     }
 
@@ -261,6 +268,7 @@ public class SocialPlaywrightInspectService {
             case DOUYIN -> DouyinAccountService.PUBLISH_VIDEO_URL;
             case XIAOHONGSHU -> XiaohongshuAccountService.PUBLISH_VIDEO_URL;
             case BILIBILI -> BilibiliPlaywrightAccountService.PUBLISH_VIDEO_URL;
+            case SHIPINHAO -> ShipinhaoAccountService.PUBLISH_VIDEO_URL;
         };
     }
 
@@ -281,6 +289,7 @@ public class SocialPlaywrightInspectService {
             case "douyin", "dy" -> SocialBrowserPlatform.DOUYIN;
             case "xiaohongshu", "xhs" -> SocialBrowserPlatform.XIAOHONGSHU;
             case "bilibili", "bili" -> SocialBrowserPlatform.BILIBILI;
+            case "shipinhao", "sph", "channels", "weixin-channels" -> SocialBrowserPlatform.SHIPINHAO;
             default -> throw new IllegalArgumentException("Unsupported platform: " + value);
         };
     }

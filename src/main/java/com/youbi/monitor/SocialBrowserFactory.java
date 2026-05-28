@@ -33,6 +33,7 @@ public class SocialBrowserFactory {
     private final BrowserProfile douyinProfile;
     private final BrowserProfile xiaohongshuProfile;
     private final BrowserProfile bilibiliProfile;
+    private final BrowserProfile shipinhaoProfile;
     private final String defaultLocale;
     private final String defaultTimezone;
     private final int defaultViewportWidth;
@@ -55,7 +56,10 @@ public class SocialBrowserFactory {
             @Value("${youbi.xiaohongshu.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String xiaohongshuStealthScriptPath,
             @Value("${youbi.bilibili.playwright.headless:false}") boolean bilibiliHeadless,
             @Value("${youbi.bilibili.playwright.browser-channel:chrome}") String bilibiliBrowserChannel,
-            @Value("${youbi.bilibili.playwright.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String bilibiliStealthScriptPath
+            @Value("${youbi.bilibili.playwright.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String bilibiliStealthScriptPath,
+            @Value("${youbi.shipinhao.headless:false}") boolean shipinhaoHeadless,
+            @Value("${youbi.shipinhao.browser-channel:chrome}") String shipinhaoBrowserChannel,
+            @Value("${youbi.shipinhao.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String shipinhaoStealthScriptPath
     ) {
         this.playwright = Playwright.create();
         this.defaultLocale = text(defaultLocale).isBlank() ? "zh-CN" : text(defaultLocale);
@@ -67,6 +71,7 @@ public class SocialBrowserFactory {
         this.douyinProfile = new BrowserProfile(douyinHeadless, channel(douyinBrowserChannel), loadStealthScript(SocialBrowserPlatform.DOUYIN, douyinStealthScriptPath));
         this.xiaohongshuProfile = new BrowserProfile(xiaohongshuHeadless, channel(xiaohongshuBrowserChannel), loadStealthScript(SocialBrowserPlatform.XIAOHONGSHU, xiaohongshuStealthScriptPath));
         this.bilibiliProfile = new BrowserProfile(bilibiliHeadless, channel(bilibiliBrowserChannel), loadStealthScript(SocialBrowserPlatform.BILIBILI, bilibiliStealthScriptPath));
+        this.shipinhaoProfile = new BrowserProfile(shipinhaoHeadless, channel(shipinhaoBrowserChannel), loadStealthScript(SocialBrowserPlatform.SHIPINHAO, shipinhaoStealthScriptPath));
     }
 
     Browser launchBrowser(SocialBrowserPlatform platform) {
@@ -161,6 +166,7 @@ public class SocialBrowserFactory {
             case DOUYIN -> douyinProfile;
             case XIAOHONGSHU -> xiaohongshuProfile;
             case BILIBILI -> bilibiliProfile;
+            case SHIPINHAO -> shipinhaoProfile;
         };
     }
 
