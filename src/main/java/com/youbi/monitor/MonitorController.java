@@ -77,8 +77,19 @@ public class MonitorController {
             return monitorService.saveAuthorType(
                     request == null ? null : request.author(),
                     request == null ? null : request.type(),
-                    request == null ? null : request.needDubbing()
+                    request == null ? null : request.needDubbing(),
+                    request == null ? null : request.sourceLanguage(),
+                    request == null ? null : request.targetLanguage()
             );
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        }
+    }
+
+    @DeleteMapping("/api/submitter-author-types")
+    public MonitorService.SubmitterAuthorDeleteResult deleteSubmitterAuthorType(@RequestParam String author) {
+        try {
+            return monitorService.deleteAuthorType(author);
         } catch (IllegalArgumentException exc) {
             throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
         }

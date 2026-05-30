@@ -490,36 +490,52 @@ public class MonitorService {
     public SubmitterAuthorType authorType(String author) {
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new SubmitterAuthorType("", "", true);
+            return new SubmitterAuthorType("", "", true, "英文", "中文");
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT type, need_dubbing
+                SELECT type, need_dubbing, source_language, target_language
                 FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new SubmitterAuthorType(normalized, "", true);
+            return new SubmitterAuthorType(normalized, "", true, "英文", "中文");
         }
         Map<String, Object> row = rows.get(0);
-        return new SubmitterAuthorType(normalized, stringValue(row.get("type")), boolValue(row.get("need_dubbing"), true));
+        return new SubmitterAuthorType(
+                normalized,
+                stringValue(row.get("type")),
+                boolValue(row.get("need_dubbing"), true),
+                defaultLanguage(row.get("source_language"), "英文"),
+                defaultLanguage(row.get("target_language"), "中文")
+        );
     }
 
     public List<SubmitterAuthorType> authorTypes() {
         return jdbcTemplate.query("""
-                SELECT author, type, need_dubbing
+                SELECT author, type, need_dubbing, source_language, target_language
                 FROM submitter_author
                 ORDER BY author
                 """, (rs, rowNum) -> new SubmitterAuthorType(
                 text(rs.getString("author")),
                 text(rs.getString("type")),
-                boolValue(rs.getObject("need_dubbing"), true)
+                boolValue(rs.getObject("need_dubbing"), true),
+                defaultLanguage(rs.getString("source_language"), "英文"),
+                defaultLanguage(rs.getString("target_language"), "中文")
         ));
     }
 
-    public SubmitterAuthorType saveAuthorType(String author, String type, Boolean needDubbing) {
+    public SubmitterAuthorType saveAuthorType(
+            String author,
+            String type,
+            Boolean needDubbing,
+            String sourceLanguage,
+            String targetLanguage
+    ) {
         String normalizedAuthor = text(author);
         String normalizedType = text(type);
+        String normalizedSourceLanguage = defaultLanguage(sourceLanguage, "英文");
+        String normalizedTargetLanguage = defaultLanguage(targetLanguage, "中文");
         if (normalizedAuthor.isBlank()) {
             throw new IllegalArgumentException("author is required");
         }
@@ -527,11 +543,44 @@ public class MonitorService {
             throw new IllegalArgumentException("type is required");
         }
         jdbcTemplate.update("""
-                INSERT INTO submitter_author (author, type, need_dubbing)
-                VALUES (?, ?, ?)
-                ON DUPLICATE KEY UPDATE type = VALUES(type), need_dubbing = VALUES(need_dubbing), updated_at = NOW()
-                """, normalizedAuthor, normalizedType, Boolean.FALSE.equals(needDubbing) ? 0 : 1);
-        return new SubmitterAuthorType(normalizedAuthor, normalizedType, !Boolean.FALSE.equals(needDubbing));
+                INSERT INTO submitter_author (author, type, need_dubbing, source_language, target_language)
+                VALUES (?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    type = VALUES(type),
+                    need_dubbing = VALUES(need_dubbing),
+                    source_language = VALUES(source_language),
+                    target_language = VALUES(target_language),
+                    updated_at = NOW()
+                """,
+                normalizedAuthor,
+                normalizedType,
+                Boolean.FALSE.equals(needDubbing) ? 0 : 1,
+                normalizedSourceLanguage,
+                normalizedTargetLanguage
+        );
+        return new SubmitterAuthorType(
+                normalizedAuthor,
+                normalizedType,
+                !Boolean.FALSE.equals(needDubbing),
+                normalizedSourceLanguage,
+                normalizedTargetLanguage
+        );
+    }
+
+    public SubmitterAuthorDeleteResult deleteAuthorType(String author) {
+        String normalizedAuthor = text(author);
+        if (normalizedAuthor.isBlank()) {
+            throw new IllegalArgumentException("author is required");
+        }
+        int deletedAuthorRows = jdbcTemplate.update("DELETE FROM submitter_author WHERE author = ?", normalizedAuthor);
+        int deletedVideoRows = 0;
+        if (tableExists("submitter_video")) {
+            deletedVideoRows = jdbcTemplate.update("""
+                    DELETE FROM submitter_video
+                    WHERE uploader = ? OR import_author = ? OR channel_id = ?
+                    """, normalizedAuthor, normalizedAuthor, normalizedAuthor);
+        }
+        return new SubmitterAuthorDeleteResult("deleted", normalizedAuthor, deletedAuthorRows, deletedVideoRows);
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
@@ -1455,6 +1504,8 @@ public class MonitorService {
                     author VARCHAR(255) NOT NULL PRIMARY KEY,
                     type VARCHAR(128) NOT NULL,
                     need_dubbing TINYINT(1) NOT NULL DEFAULT 1,
+                    source_language VARCHAR(64) NOT NULL DEFAULT '英文',
+                    target_language VARCHAR(64) NOT NULL DEFAULT '中文',
                     note VARCHAR(255) NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1462,6 +1513,8 @@ public class MonitorService {
                 )
                 """);
         ensureColumn("submitter_author", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("submitter_author", "source_language", "VARCHAR(64) NOT NULL DEFAULT '英文'");
+        ensureColumn("submitter_author", "target_language", "VARCHAR(64) NOT NULL DEFAULT '中文'");
     }
 
     private boolean tableExists(String table) {
@@ -1569,10 +1622,25 @@ public class MonitorService {
     public record UploadSubmissionRetryResult(String platform, int retriedCount, int uploaderTaskCount, int taskCount) {
     }
 
-    public record SubmitterAuthorType(String author, String type, boolean needDubbing) {
+    public record SubmitterAuthorType(
+            String author,
+            String type,
+            boolean needDubbing,
+            String sourceLanguage,
+            String targetLanguage
+    ) {
     }
 
-    public record SubmitterAuthorTypeUpdateRequest(String author, String type, Boolean needDubbing) {
+    public record SubmitterAuthorTypeUpdateRequest(
+            String author,
+            String type,
+            Boolean needDubbing,
+            String sourceLanguage,
+            String targetLanguage
+    ) {
+    }
+
+    public record SubmitterAuthorDeleteResult(String status, String author, int deletedAuthorRows, int deletedVideoRows) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
@@ -1590,6 +1658,11 @@ public class MonitorService {
 
     private static String text(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static String defaultLanguage(Object value, String fallback) {
+        String normalized = text(value == null ? null : String.valueOf(value));
+        return normalized.isBlank() ? fallback : normalized;
     }
 
     private static class TaskRowMapper implements RowMapper<TaskMonitorItem> {
