@@ -28,8 +28,8 @@ public class MonitorController {
     }
 
     @GetMapping("/api/video-tasks/monitor")
-    public MonitorResponse monitor(@RequestParam(defaultValue = "100") int limit) {
-        int boundedLimit = Math.max(1, Math.min(limit, 500));
+    public MonitorResponse monitor(@RequestParam(defaultValue = "0") int limit) {
+        int boundedLimit = limit <= 0 ? Integer.MAX_VALUE : Math.max(1, limit);
         return monitorService.listTasks(boundedLimit);
     }
 

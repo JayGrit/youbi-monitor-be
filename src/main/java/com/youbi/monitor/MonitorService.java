@@ -124,7 +124,7 @@ public class MonitorService {
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
+              COALESCE(NULLIF(u.upload_title, ''), NULLIF(ut.upload_title, ''), NULLIF(t.title, '')) title,
               t.source_url,
               vi.source_webpage_url,
               vi.source_thumbnail_url,
@@ -194,6 +194,19 @@ public class MonitorService {
             LEFT JOIN yd_combiner m ON m.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
             LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, MIN(title) upload_title
+              FROM (
+                SELECT task_id, title FROM uploader_task_bilibili WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_douyin WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_xiaohongshu WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_shipinhao WHERE title IS NOT NULL AND title <> ''
+              ) upload_titles
+              GROUP BY task_id
+            ) ut ON ut.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
               FROM yd_asr_segment
