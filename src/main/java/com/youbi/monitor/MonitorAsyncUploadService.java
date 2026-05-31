@@ -9,6 +9,7 @@ import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,31 +18,39 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 @Service
-public class BilibiliAsyncUploadService {
-    private static final Logger log = LoggerFactory.getLogger(BilibiliAsyncUploadService.class);
+public class MonitorAsyncUploadService {
+    private static final Logger log = LoggerFactory.getLogger(MonitorAsyncUploadService.class);
     private static final String TABLE = "monitor_upload_task";
-    private static final String PLATFORM = "bilibili";
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final BilibiliUploadService uploadService;
-    private final BilibiliPlaywrightUploadService playwrightUploadService;
+    private final BilibiliUploadService bilibiliUploadService;
+    private final BilibiliPlaywrightUploadService bilibiliPlaywrightUploadService;
+    private final XiaohongshuUploadService xiaohongshuUploadService;
+    private final DouyinUploadService douyinUploadService;
+    private final ShipinhaoUploadService shipinhaoUploadService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
-        Thread thread = new Thread(runnable, "monitor-bilibili-upload");
+        Thread thread = new Thread(runnable, "monitor-upload-task");
         thread.setDaemon(true);
         return thread;
     });
 
-    public BilibiliAsyncUploadService(
-            BilibiliUploadService uploadService,
-            BilibiliPlaywrightUploadService playwrightUploadService,
+    public MonitorAsyncUploadService(
+            BilibiliUploadService bilibiliUploadService,
+            BilibiliPlaywrightUploadService bilibiliPlaywrightUploadService,
+            XiaohongshuUploadService xiaohongshuUploadService,
+            DouyinUploadService douyinUploadService,
+            ShipinhaoUploadService shipinhaoUploadService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper
     ) {
-        this.uploadService = uploadService;
-        this.playwrightUploadService = playwrightUploadService;
+        this.bilibiliUploadService = bilibiliUploadService;
+        this.bilibiliPlaywrightUploadService = bilibiliPlaywrightUploadService;
+        this.xiaohongshuUploadService = xiaohongshuUploadService;
+        this.douyinUploadService = douyinUploadService;
+        this.shipinhaoUploadService = shipinhaoUploadService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
     }
@@ -66,42 +75,24 @@ public class BilibiliAsyncUploadService {
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uniq_monitor_upload_task (upload_task_id),
-                    KEY idx_monitor_upload_running (platform, status),
-                    KEY idx_monitor_upload_upstream (platform, upstream_task_id, account_key)
+                    KEY idx_monitor_upload_running (status),
+                    KEY idx_monitor_upload_platform (platform, upstream_task_id, account_key)
                 )
                 """);
     }
 
-    public synchronized MonitorUploadTaskResponse submit(BilibiliUploadRequest request) {
+    public synchronized MonitorUploadTaskResponse submit(String platform, Object request) {
         ensureSchema();
         failStaleRunningTasks();
         long running = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE platform = ? AND status IN ('accepted', 'running')",
-                Long.class,
-                PLATFORM
+                "SELECT COUNT(*) FROM " + TABLE + " WHERE status IN ('accepted', 'running')",
+                Long.class
         );
+        String normalizedPlatform = text(platform).toLowerCase();
         if (running > 0) {
-            return new MonitorUploadTaskResponse(
-                    false,
-                    null,
-                    PLATFORM,
-                    text(request.taskId()),
-                    text(request.accountKey()),
-                    "rejected",
-                    false,
-                    "已有 Bilibili 上传任务正在执行",
-                    "UPLOAD_RUNNING",
-                    "已有 Bilibili 上传任务正在执行",
-                    null,
-                    requestVideoUrl(request),
-                    null,
-                    null,
-                    null,
-                    null,
-                    Map.of(),
-                    null,
-                    null
-            );
+            return new MonitorUploadTaskResponse(false, null, normalizedPlatform, taskId(request), accountKey(request),
+                    "rejected", false, "已有上传任务正在执行", "UPLOAD_RUNNING", "已有上传任务正在执行",
+                    null, requestVideoUrl(request), null, null, null, null, Map.of(), null, null);
         }
 
         String uploadTaskId = UUID.randomUUID().toString();
@@ -114,31 +105,14 @@ public class BilibiliAsyncUploadService {
                 VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', ?, ?, NOW())
                 """,
                 uploadTaskId,
-                PLATFORM,
-                text(request.taskId()),
-                text(request.accountKey()).isBlank() ? "default" : text(request.accountKey()),
+                normalizedPlatform,
+                taskId(request),
+                defaultText(accountKey(request), "default"),
                 toJson(request),
                 requestVideoUrl(request)
         );
-        executor.submit(() -> execute(uploadTaskId, request));
+        executor.submit(() -> execute(uploadTaskId, normalizedPlatform, request));
         return status(uploadTaskId);
-    }
-
-    private void failStaleRunningTasks() {
-        jdbcTemplate.update(
-                """
-                UPDATE monitor_upload_task
-                SET status = 'failed',
-                    error_code = 'MONITOR_UPLOAD_TIMEOUT',
-                    error_message = 'monitor upload task timed out before completion',
-                    completed_at = NOW()
-                WHERE platform = ?
-                  AND status IN ('accepted', 'running')
-                  AND started_at IS NOT NULL
-                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) > 7200
-                """,
-                PLATFORM
-        );
     }
 
     public MonitorUploadTaskResponse status(String uploadTaskId) {
@@ -148,11 +122,9 @@ public class BilibiliAsyncUploadService {
                     "SELECT * FROM " + TABLE + " WHERE upload_task_id = ?",
                     (rs, rowNum) -> {
                         Map<String, Object> result = parseJsonMap(rs.getString("result_json"));
-                        BilibiliUploadResult upload = parseUploadResult(result);
+                        Map<String, Object> upload = uploadResult(result);
                         String status = rs.getString("status");
                         boolean success = "success".equals(status);
-                        String message = firstText(rs.getString("error_message"), upload == null ? "" : upload.message(), status);
-                        String videoUrl = rs.getString("video_url");
                         LocalDateTime startedAt = rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toLocalDateTime();
                         LocalDateTime completedAt = rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toLocalDateTime();
                         return new MonitorUploadTaskResponse(
@@ -165,14 +137,14 @@ public class BilibiliAsyncUploadService {
                                 success,
                                 null,
                                 rs.getString("error_code"),
-                                message,
+                                firstText(rs.getString("error_message"), stringValue(upload.get("message")), status),
                                 durationMs(result, startedAt, completedAt),
-                                videoUrl,
-                                upload == null ? null : upload.bvid(),
-                                upload == null ? null : upload.aid(),
-                                upload == null ? null : upload.accountUid(),
-                                upload == null ? null : upload.accountName(),
-                                upload == null || upload.raw() == null ? result : upload.raw(),
+                                rs.getString("video_url"),
+                                stringValue(upload.get("bvid")),
+                                longValue(upload.get("aid")),
+                                longValue(upload.get("accountUid")),
+                                firstText(stringValue(upload.get("accountName")), stringValue(upload.get("accountKey"))),
+                                rawResult(upload, result),
                                 startedAt,
                                 completedAt
                         );
@@ -180,33 +152,35 @@ public class BilibiliAsyncUploadService {
                     uploadTaskId
             );
         } catch (EmptyResultDataAccessException exception) {
-            return new MonitorUploadTaskResponse(false, uploadTaskId, PLATFORM, null, null, "missing", false,
+            return new MonitorUploadTaskResponse(false, uploadTaskId, null, null, null, "missing", false,
                     "上传任务不存在", "TASK_NOT_FOUND", "上传任务不存在", null, null, null, null, null, null, Map.of(), null, null);
         }
     }
 
-    private void execute(String uploadTaskId, BilibiliUploadRequest request) {
+    private void execute(String uploadTaskId, String platform, Object request) {
         long startedAt = System.currentTimeMillis();
         jdbcTemplate.update(
                 "UPDATE " + TABLE + " SET status = 'running', started_at = COALESCE(started_at, NOW()), error_message = NULL WHERE upload_task_id = ?",
                 uploadTaskId
         );
         try {
-            BilibiliUploadResult result = uploadSynchronously(request);
-            long durationMs = System.currentTimeMillis() - startedAt;
+            Object result = upload(platform, request);
+            Map<String, Object> resultMap = objectMapper.convertValue(result, MAP_TYPE);
+            if (!Boolean.TRUE.equals(resultMap.get("success"))) {
+                throw new IllegalStateException(stringValue(resultMap.get("message")));
+            }
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("durationMs", durationMs);
-            payload.put("result", result);
+            payload.put("durationMs", System.currentTimeMillis() - startedAt);
+            payload.put("result", resultMap);
             jdbcTemplate.update(
                     "UPDATE " + TABLE + " SET status = 'success', result_json = ?, error_code = NULL, error_message = NULL, completed_at = NOW() WHERE upload_task_id = ?",
                     toJson(payload),
                     uploadTaskId
             );
         } catch (Exception exception) {
-            long durationMs = System.currentTimeMillis() - startedAt;
             String message = firstText(exception.getMessage(), exception.getClass().getSimpleName());
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("durationMs", durationMs);
+            payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("error", message);
             jdbcTemplate.update(
                     "UPDATE " + TABLE + " SET status = 'failed', result_json = ?, error_code = ?, error_message = ?, completed_at = NOW() WHERE upload_task_id = ?",
@@ -215,14 +189,24 @@ public class BilibiliAsyncUploadService {
                     message,
                     uploadTaskId
             );
-            log.warn("Bilibili async upload failed uploadTaskId={} taskId={} accountKey={} message={}",
-                    uploadTaskId, request.taskId(), request.accountKey(), message, exception);
+            log.warn("Async upload failed uploadTaskId={} platform={} taskId={} accountKey={} message={}",
+                    uploadTaskId, platform, taskId(request), accountKey(request), message, exception);
         }
     }
 
-    private BilibiliUploadResult uploadSynchronously(BilibiliUploadRequest request) throws Exception {
+    private Object upload(String platform, Object request) throws Exception {
+        return switch (platform) {
+            case "bilibili" -> uploadBilibili((BilibiliUploadRequest) request);
+            case "xiaohongshu" -> xiaohongshuUploadService.upload((XiaohongshuUploadRequest) request);
+            case "douyin" -> douyinUploadService.upload((DouyinUploadRequest) request);
+            case "shipinhao" -> shipinhaoUploadService.upload((ShipinhaoUploadRequest) request);
+            default -> throw new IllegalArgumentException("Unsupported upload platform: " + platform);
+        };
+    }
+
+    private BilibiliUploadResult uploadBilibili(BilibiliUploadRequest request) throws Exception {
         try {
-            BilibiliUploadResult result = uploadService.upload(request);
+            BilibiliUploadResult result = bilibiliUploadService.upload(request);
             if (result.success()) {
                 return result;
             }
@@ -241,7 +225,7 @@ public class BilibiliAsyncUploadService {
     private BilibiliUploadResult playwrightFallbackResult(BilibiliUploadRequest request, String reason) throws Exception {
         log.warn("Bilibili API upload hit frequent/rate-limit error, falling back to Playwright: {}", reason);
         try {
-            BilibiliUploadResult fallback = playwrightUploadService.upload(request);
+            BilibiliUploadResult fallback = bilibiliPlaywrightUploadService.upload(request);
             Map<String, Object> raw = new LinkedHashMap<>();
             if (fallback.raw() != null) {
                 raw.putAll(fallback.raw());
@@ -275,9 +259,22 @@ public class BilibiliAsyncUploadService {
                 || text.contains("too frequent");
     }
 
+    private void failStaleRunningTasks() {
+        jdbcTemplate.update("""
+                UPDATE monitor_upload_task
+                SET status = 'failed',
+                    error_code = 'MONITOR_UPLOAD_TIMEOUT',
+                    error_message = 'monitor upload task timed out before completion',
+                    completed_at = NOW()
+                WHERE status IN ('accepted', 'running')
+                  AND started_at IS NOT NULL
+                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) > 7200
+                """);
+    }
+
     private String classifyErrorCode(String message) {
         String text = message == null ? "" : message.toLowerCase();
-        if (text.contains("not logged in") || text.contains("login") || text.contains("登录")) {
+        if (text.contains("not logged in") || text.contains("login") || text.contains("登录") || text.contains("未登录")) {
             return "LOGIN_REQUIRED";
         }
         if (text.contains("playwright") && (text.contains("launch") || text.contains("browser") || text.contains("启动"))) {
@@ -289,23 +286,32 @@ public class BilibiliAsyncUploadService {
         return "UPLOAD_FAILED";
     }
 
-    private BilibiliUploadResult parseUploadResult(Map<String, Object> result) {
+    private Map<String, Object> uploadResult(Map<String, Object> result) {
         Object nested = result.get("result");
-        if (nested == null) {
-            return null;
+        if (nested instanceof Map<?, ?> map) {
+            Map<String, Object> typed = new LinkedHashMap<>();
+            map.forEach((key, value) -> typed.put(String.valueOf(key), value));
+            return typed;
         }
-        return objectMapper.convertValue(nested, BilibiliUploadResult.class);
+        return Map.of();
+    }
+
+    private Map<String, Object> rawResult(Map<String, Object> upload, Map<String, Object> result) {
+        Object raw = upload.get("raw");
+        if (raw instanceof Map<?, ?> map) {
+            Map<String, Object> typed = new LinkedHashMap<>();
+            map.forEach((key, value) -> typed.put(String.valueOf(key), value));
+            return typed;
+        }
+        return result;
     }
 
     private Long durationMs(Map<String, Object> result, LocalDateTime startedAt, LocalDateTime completedAt) {
-        Object value = result.get("durationMs");
-        if (value instanceof Number number) {
-            return number.longValue();
+        Long value = longValue(result.get("durationMs"));
+        if (value != null) {
+            return value;
         }
-        if (startedAt != null && completedAt != null) {
-            return java.time.Duration.between(startedAt, completedAt).toMillis();
-        }
-        return null;
+        return startedAt == null || completedAt == null ? null : Duration.between(startedAt, completedAt).toMillis();
     }
 
     private Map<String, Object> parseJsonMap(String json) {
@@ -319,16 +325,78 @@ public class BilibiliAsyncUploadService {
         }
     }
 
+    private String requestVideoUrl(Object request) {
+        if (request instanceof BilibiliUploadRequest item) {
+            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+        }
+        if (request instanceof XiaohongshuUploadRequest item) {
+            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+        }
+        if (request instanceof DouyinUploadRequest item) {
+            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+        }
+        if (request instanceof ShipinhaoUploadRequest item) {
+            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+        }
+        return "";
+    }
+
+    private String taskId(Object request) {
+        if (request instanceof BilibiliUploadRequest item) {
+            return text(item.taskId());
+        }
+        if (request instanceof XiaohongshuUploadRequest item) {
+            return text(item.taskId());
+        }
+        if (request instanceof DouyinUploadRequest item) {
+            return text(item.taskId());
+        }
+        if (request instanceof ShipinhaoUploadRequest item) {
+            return text(item.taskId());
+        }
+        return "";
+    }
+
+    private String accountKey(Object request) {
+        if (request instanceof BilibiliUploadRequest item) {
+            return text(item.accountKey());
+        }
+        if (request instanceof XiaohongshuUploadRequest item) {
+            return text(item.accountKey());
+        }
+        if (request instanceof DouyinUploadRequest item) {
+            return text(item.accountKey());
+        }
+        if (request instanceof ShipinhaoUploadRequest item) {
+            return text(item.accountKey());
+        }
+        return "";
+    }
+
+    private Long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value == null || String.valueOf(value).isBlank()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException exception) {
+            return null;
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
     private String toJson(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (Exception exception) {
             return "{}";
         }
-    }
-
-    private String requestVideoUrl(BilibiliUploadRequest request) {
-        return firstText(request.videoUrl(), request.minioUrl(), request.videoPath());
     }
 
     private String firstText(String... values) {
@@ -339,6 +407,11 @@ public class BilibiliAsyncUploadService {
             }
         }
         return "";
+    }
+
+    private String defaultText(String value, String fallback) {
+        String text = text(value);
+        return text.isBlank() ? fallback : text;
     }
 
     private String text(String value) {

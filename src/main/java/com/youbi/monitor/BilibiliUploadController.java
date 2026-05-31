@@ -12,16 +12,16 @@ import java.util.Map;
 
 @RestController
 public class BilibiliUploadController {
-    private final BilibiliAsyncUploadService asyncUploadService;
+    private final MonitorAsyncUploadService asyncUploadService;
 
-    public BilibiliUploadController(BilibiliAsyncUploadService asyncUploadService) {
+    public BilibiliUploadController(MonitorAsyncUploadService asyncUploadService) {
         this.asyncUploadService = asyncUploadService;
     }
 
     @PostMapping("/api/bilibili/upload")
     public ResponseEntity<?> upload(@RequestBody BilibiliUploadRequest request) {
         try {
-            MonitorUploadTaskResponse response = asyncUploadService.submit(request);
+            MonitorUploadTaskResponse response = asyncUploadService.submit("bilibili", request);
             return response.accepted()
                     ? ResponseEntity.accepted().body(response)
                     : ResponseEntity.status(HttpStatus.CONFLICT).body(response);
