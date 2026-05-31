@@ -1,13 +1,8 @@
 package com.youbi.monitor;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
-import com.microsoft.playwright.CDPSession;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonObject;
 import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
@@ -28,7 +23,6 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -47,12 +41,9 @@ public class DouyinUploadService {
     private final MinioClient minioClient;
     private final String minioBucket;
     private final Path uploadWorkDir;
-    private final Path browserUploadWorkDir;
+    private final Path profileRootDir;
     private final HttpClient httpClient;
-    private final ObjectMapper objectMapper;
-    private final String cdpUrl;
-    private final Map<String, String> cdpEndpoints;
-    private final Map<String, Object> cdpLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Object> accountLocks = new ConcurrentHashMap<>();
     private final SocialHumanActions humanActions;
     private final SocialRiskDetector riskDetector;
     private final DiagnosticArtifactService diagnosticArtifactService;
@@ -60,7 +51,6 @@ public class DouyinUploadService {
 
     public DouyinUploadService(
             DouyinAccountService accountService,
-            ObjectMapper objectMapper,
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
@@ -69,12 +59,9 @@ public class DouyinUploadService {
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket,
             @Value("${youbi.minio.work-dir}") String uploadWorkDir,
-            @Value("${youbi.douyin.browser-upload-work-dir:}") String browserUploadWorkDir,
-            @Value("${youbi.douyin.cdp-url:}") String cdpUrl,
-            @Value("${youbi.douyin.cdp-endpoints:}") String cdpEndpoints
+            @Value("${youbi.douyin.profile-root-dir:/work/douyin-chrome-profiles}") String profileRootDir
     ) {
         this.accountService = accountService;
-        this.objectMapper = objectMapper;
         this.humanActions = humanActions;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
@@ -84,10 +71,8 @@ public class DouyinUploadService {
                 .build();
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
-        this.browserUploadWorkDir = text(browserUploadWorkDir).isBlank() ? null : Path.of(browserUploadWorkDir).toAbsolutePath().normalize();
+        this.profileRootDir = Path.of(text(profileRootDir).isBlank() ? "/work/douyin-chrome-profiles" : text(profileRootDir)).toAbsolutePath().normalize();
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
-        this.cdpUrl = text(cdpUrl);
-        this.cdpEndpoints = parseCdpEndpoints(cdpEndpoints);
     }
 
     public DouyinUploadResult upload(DouyinUploadRequest request) throws IOException {
@@ -111,39 +96,14 @@ public class DouyinUploadService {
             log.info("Douyin upload material ready taskId={} video={} videoSizeBytes={} temporaryVideo={} cover={}",
                     taskId, videoPath, Files.size(videoPath), resolvedVideo.temporary(), resolvedCover == null ? "" : resolvedCover.path());
 
-            CdpTarget cdpTarget = resolveCdpTarget(accountKey);
-            if (cdpTarget != null) {
-                Object lock = cdpLocks.computeIfAbsent(cdpTarget.lockKey(), ignored -> new Object());
-                synchronized (lock) {
-                    String browserWsUrl = browserWsUrl(cdpTarget.endpoint());
-                    Browser browser = accountService.connectBrowserOverCdp(browserWsUrl);
-                    log.info("Douyin upload connected existing Chrome over CDP taskId={} accountKey={} cdpKey={} endpoint={} browserWs={}",
-                            taskId, accountKey, cdpTarget.key(), cdpTarget.endpoint(), browserWsUrl);
-                    BrowserContext context = accountService.firstContext(browser);
+            Object lock = accountLocks.computeIfAbsent(accountKey, ignored -> new Object());
+            synchronized (lock) {
+                Path profileDir = profileDir(accountKey);
+                Files.createDirectories(profileDir);
+                log.info("Douyin upload launch persistent Chrome taskId={} accountKey={} profileDir={}", taskId, accountKey, profileDir);
+                try (BrowserContext context = accountService.launchPersistentContext(profileDir)) {
                     Page page = context.newPage();
                     try {
-                        uploadVideoContent(
-                                page,
-                                request,
-                                new UploadPaths(videoPath, browserPath(videoPath)),
-                                resolvedCover == null ? null : new UploadPaths(resolvedCover.path(), browserPath(resolvedCover.path())),
-                                true,
-                                taskId
-                        );
-                        accountService.saveStorageState(accountKey, context.storageState());
-                        log.info("Douyin upload CDP storage state saved taskId={} accountKey={} cdpKey={}", taskId, accountKey, cdpTarget.key());
-                    } finally {
-                        page.close();
-                    }
-                }
-            } else {
-                String storageState = accountService.storageState(accountKey);
-                log.info("Douyin upload storage state loaded taskId={} accountKey={} bytes={}", taskId, accountKey, storageState.getBytes(StandardCharsets.UTF_8).length);
-                try (Browser browser = accountService.launchBrowser()) {
-                    log.info("Douyin upload browser launched taskId={} accountKey={}", taskId, accountKey);
-                    BrowserContext context = accountService.newContext(browser, accountService.storageContextOptions(storageState));
-                    try {
-                        Page page = context.newPage();
                         uploadVideoContent(
                                 page,
                                 request,
@@ -153,9 +113,9 @@ public class DouyinUploadService {
                                 taskId
                         );
                         accountService.saveStorageState(accountKey, context.storageState());
-                        log.info("Douyin upload storage state saved taskId={} accountKey={}", taskId, accountKey);
+                        log.info("Douyin upload persistent storage state saved taskId={} accountKey={}", taskId, accountKey);
                     } finally {
-                        context.close();
+                        page.close();
                     }
                 }
             }
@@ -176,80 +136,6 @@ public class DouyinUploadService {
             cleanup(resolvedVideo);
             cleanup(resolvedCover);
         }
-    }
-
-    private CdpTarget resolveCdpTarget(String accountKey) {
-        String key = accountService.normalizeAccountKey(accountKey);
-        String endpoint = accountService.cdpEndpoint(key).orElse("");
-        if (hasText(endpoint)) {
-            return new CdpTarget(key, endpoint);
-        }
-        endpoint = cdpEndpoints.get(key);
-        if (hasText(endpoint)) {
-            return new CdpTarget(key, endpoint);
-        }
-        endpoint = cdpEndpoints.get(DouyinAccountService.DEFAULT_ACCOUNT_KEY);
-        if (hasText(endpoint)) {
-            return new CdpTarget(DouyinAccountService.DEFAULT_ACCOUNT_KEY, endpoint);
-        }
-        if (hasText(cdpUrl)) {
-            return new CdpTarget("legacy", cdpUrl);
-        }
-        return null;
-    }
-
-    private String browserWsUrl(String endpoint) throws IOException {
-        String value = text(endpoint);
-        if (value.startsWith("ws://") || value.startsWith("wss://")) {
-            return value;
-        }
-        URI base;
-        try {
-            base = URI.create(value);
-        } catch (IllegalArgumentException exception) {
-            throw new IOException("Invalid Douyin CDP endpoint: " + endpoint, exception);
-        }
-        if (!"http".equals(base.getScheme()) && !"https".equals(base.getScheme())) {
-            throw new IOException("Unsupported Douyin CDP endpoint: " + endpoint);
-        }
-        URI versionUri = base.getPath() == null || base.getPath().isBlank() || "/".equals(base.getPath())
-                ? base.resolve("/json/version")
-                : base;
-        HttpRequest request = HttpRequest.newBuilder(versionUri)
-                .timeout(Duration.ofSeconds(10))
-                .GET()
-                .build();
-        try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() / 100 != 2) {
-                throw new IOException("Cannot read Douyin CDP version: HTTP " + response.statusCode() + " " + versionUri);
-            }
-            String browserWsUrl = objectMapper.readTree(response.body()).path("webSocketDebuggerUrl").asText("");
-            if (browserWsUrl.isBlank()) {
-                throw new IOException("Douyin CDP version returned no webSocketDebuggerUrl: " + versionUri);
-            }
-            return browserWsUrl;
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted reading Douyin CDP version", exception);
-        }
-    }
-
-    private Map<String, String> parseCdpEndpoints(String raw) {
-        Map<String, String> endpoints = new HashMap<>();
-        for (String entry : text(raw).split("[;\\n,]+")) {
-            String value = text(entry);
-            if (value.isBlank()) {
-                continue;
-            }
-            String[] parts = value.split("=", 2);
-            if (parts.length != 2 || text(parts[0]).isBlank() || text(parts[1]).isBlank()) {
-                log.warn("Ignoring invalid Douyin CDP endpoint entry: {}", value);
-                continue;
-            }
-            endpoints.put(accountService.normalizeAccountKey(parts[0]), text(parts[1]));
-        }
-        return Map.copyOf(endpoints);
     }
 
     private void uploadVideoContent(Page page, DouyinUploadRequest request, UploadPaths videoPaths, UploadPaths coverPaths, boolean browserSideFiles, String taskId) throws IOException {
@@ -415,54 +301,14 @@ public class DouyinUploadService {
         input.waitFor(new Locator.WaitForOptions()
                 .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
                 .setTimeout(timeoutMs));
-        if (!browserSideFiles) {
-            input.setInputFiles(paths.localPath(), new Locator.SetInputFilesOptions().setTimeout(timeoutMs));
-            return;
+        if (browserSideFiles) {
+            throw new IOException("Douyin CDP browser-side file upload has been removed");
         }
-        setInputFilesOverCdp(page, selector, paths.browserPath(), taskId, label);
+        input.setInputFiles(paths.localPath(), new Locator.SetInputFilesOptions().setTimeout(timeoutMs));
     }
 
-    private void setInputFilesOverCdp(Page page, String selector, Path browserPath, String taskId, String label) throws IOException {
-        CDPSession session = page.context().newCDPSession(page);
-        try {
-            JsonObject documentParams = new JsonObject();
-            documentParams.addProperty("pierce", true);
-            JsonObject document = session.send("DOM.getDocument", documentParams);
-            int rootNodeId = document.getAsJsonObject("root").get("nodeId").getAsInt();
-
-            JsonObject queryParams = new JsonObject();
-            queryParams.addProperty("nodeId", rootNodeId);
-            queryParams.addProperty("selector", selector);
-            JsonObject queryResult = session.send("DOM.querySelector", queryParams);
-            int nodeId = queryResult.get("nodeId").getAsInt();
-            if (nodeId == 0) {
-                throw new IOException("Cannot find Douyin file input over CDP: " + selector);
-            }
-
-            JsonArray files = new JsonArray();
-            files.add(browserPath.toString());
-            JsonObject setParams = new JsonObject();
-            setParams.addProperty("nodeId", nodeId);
-            setParams.add("files", files);
-            session.send("DOM.setFileInputFiles", setParams);
-            log.info("Douyin upload set input over CDP taskId={} label={} browserFile={}", taskId, label, browserPath);
-        } catch (RuntimeException exception) {
-            throw new IOException("Cannot set Douyin " + label + " file input over CDP with browser-visible path "
-                    + browserPath + ": " + exception.getMessage(), exception);
-        } finally {
-            try {
-                session.detach();
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private Path browserPath(Path localPath) {
-        Path normalized = localPath.toAbsolutePath().normalize();
-        if (browserUploadWorkDir == null || !normalized.startsWith(uploadWorkDir)) {
-            return normalized;
-        }
-        return browserUploadWorkDir.resolve(uploadWorkDir.relativize(normalized)).toAbsolutePath().normalize();
+    private Path profileDir(String accountKey) {
+        return profileRootDir.resolve(safeSegment(accountKey)).toAbsolutePath().normalize();
     }
 
     private void setProductLink(Page page, String productLink, String productTitle, String taskId) {
@@ -897,11 +743,5 @@ public class DouyinUploadService {
     }
 
     private record UploadPaths(Path localPath, Path browserPath) {
-    }
-
-    private record CdpTarget(String key, String endpoint) {
-        String lockKey() {
-            return endpoint;
-        }
     }
 }

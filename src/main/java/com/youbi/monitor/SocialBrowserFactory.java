@@ -82,6 +82,27 @@ public class SocialBrowserFactory {
         return playwright.chromium().connectOverCDP(browserWsUrl);
     }
 
+    BrowserContext launchPersistentContext(SocialBrowserPlatform platform, Path userDataDir) {
+        BrowserProfile profile = profile(platform);
+        BrowserType.LaunchPersistentContextOptions options = new BrowserType.LaunchPersistentContextOptions()
+                .setHeadless(profile.headless())
+                .setArgs(launchArgs(platform))
+                .setLocale(defaultLocale)
+                .setTimezoneId(defaultTimezone)
+                .setViewportSize(defaultViewportWidth, defaultViewportHeight)
+                .setExtraHTTPHeaders(Map.of("Accept-Language", acceptLanguage));
+        if (!profile.channel().isBlank()) {
+            options.setChannel(profile.channel());
+        }
+        if (!defaultUserAgent.isBlank()) {
+            options.setUserAgent(defaultUserAgent);
+        }
+        if (platform == SocialBrowserPlatform.DOUYIN) {
+            options.setPermissions(List.of("geolocation"));
+        }
+        return prepareContext(platform, playwright.chromium().launchPersistentContext(userDataDir, options));
+    }
+
     BrowserContext newContext(SocialBrowserPlatform platform, Browser browser) {
         return prepareContext(platform, browser.newContext(defaultContextOptions(platform, null)));
     }

@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -54,7 +55,7 @@ public class DouyinAccountService {
 
     public List<DouyinAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, cdp_port, cdp_endpoint, note, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -67,9 +68,6 @@ public class DouyinAccountService {
                             rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime(),
                             rs.getString("user_id"),
                             rs.getString("nickname"),
-                            nullableInt(rs, "cdp_port"),
-                            rs.getString("cdp_endpoint"),
-                            rs.getString("note"),
                             sendAvailability.lastUploadAt(),
                             sendAvailability.nextUploadAllowedAt(),
                             nullableInt(rs, "upload_cooldown_min_seconds"),
@@ -88,84 +86,14 @@ public class DouyinAccountService {
         );
     }
 
-    public List<DouyinCdpSession> cdpSessions() {
-        return jdbcTemplate.query(
-                """
-                SELECT account_key, cdp_port, cdp_endpoint, note, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, updated_at
-                FROM uploader_account_douyin
-                ORDER BY account_key
-                """,
-                (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
-                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
-                    return new DouyinCdpSession(
-                            accountKey,
-                            nullableInt(rs, "cdp_port"),
-                            rs.getString("cdp_endpoint"),
-                            rs.getString("note"),
-                            sendAvailability.lastUploadAt(),
-                            sendAvailability.nextUploadAllowedAt(),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            sendAvailability.todayUploadCount(),
-                            sendAvailability.cooldownWaitingCount(),
-                            sendAvailability.uploadRunningCount(),
-                            rs.getBoolean("is_enabled"),
-                            rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime()
-                    );
-                }
-        );
-    }
-
-    public DouyinCdpSession saveCdpSession(DouyinCdpSessionUpdateRequest request) throws IOException {
-        String originalKey = request == null ? "" : text(request.originalAccountKey());
-        String accountKey = normalizeAccountKey(request == null ? "" : request.accountKey());
-        Integer cdpPort = request == null ? null : request.cdpPort();
-        if (cdpPort == null || cdpPort < 1 || cdpPort > 65535) {
-            throw new IOException("Invalid Douyin CDP port: " + cdpPort);
-        }
-        if (!originalKey.isBlank()) {
-            String normalizedOriginal = normalizeAccountKey(originalKey);
-            if (!normalizedOriginal.equals(accountKey)) {
-                Integer targetExists = jdbcTemplate.queryForObject(
-                        "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                        Integer.class,
-                        accountKey
-                );
-                if (targetExists != null && targetExists > 0) {
-                    throw new IOException("Douyin CDP account key already exists: " + accountKey);
-                }
-                jdbcTemplate.update(
-                        "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
-                        accountKey,
-                        normalizedOriginal
-                );
-            }
-        }
-        jdbcTemplate.update(
-                """
-                INSERT INTO uploader_account_douyin (account_key, storage_state_json, cdp_port, cdp_endpoint, note, is_enabled, updated_at)
-                VALUES (?, '', ?, NULL, NULL, 1, NOW())
-                ON DUPLICATE KEY UPDATE cdp_port = VALUES(cdp_port), cdp_endpoint = NULL, updated_at = NOW()
-                """,
-                accountKey,
-                cdpPort
-        );
-        return cdpSessions().stream()
-                .filter(session -> session.accountKey().equals(accountKey))
-                .findFirst()
-                .orElseThrow(() -> new IOException("Cannot load Douyin CDP session: " + accountKey));
-    }
-
     public DouyinAccountStatus status(String accountKey) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         int[] cooldown = cooldownConfig(normalized);
         AccountProfile profile = loadProfile(normalized);
-        AccountCdpConfig cdpConfig = loadCdpConfig(normalized);
         if (storageState.isEmpty()) {
-            return new DouyinAccountStatus("database", normalized, false, 0, null, profile.userId(), profile.nickname(), cdpConfig.cdpPort(), cdpConfig.cdpEndpoint(), cdpConfig.note(), sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(normalized), false, "未登录", Map.of());
+            return new DouyinAccountStatus("database", normalized, false, 0, null, profile.userId(), profile.nickname(), sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
@@ -177,9 +105,6 @@ public class DouyinAccountService {
                 updatedAt,
                 profile.userId(),
                 profile.nickname(),
-                cdpConfig.cdpPort(),
-                cdpConfig.cdpEndpoint(),
-                cdpConfig.note(),
                 sendAvailability.lastUploadAt(),
                 sendAvailability.nextUploadAllowedAt(),
                 cooldown[0],
@@ -198,32 +123,6 @@ public class DouyinAccountService {
         String normalized = normalizeAccountKey(accountKey);
         return loadStorageState(normalized)
                 .orElseThrow(() -> new IOException("Douyin account is not logged in: " + normalized));
-    }
-
-    public Optional<String> cdpEndpoint(String accountKey) {
-        String normalized = normalizeAccountKey(accountKey);
-        List<String> endpoints = jdbcTemplate.query(
-                """
-                SELECT cdp_endpoint, cdp_port
-                FROM uploader_account_douyin
-                WHERE account_key = ?
-                LIMIT 1
-                """,
-                (rs, rowNum) -> cdpEndpointFromRow(rs.getString("cdp_endpoint"), rs.getInt("cdp_port"), rs.wasNull()),
-                normalized
-        );
-        return endpoints.stream().map(this::text).filter(value -> !value.isBlank()).findFirst();
-    }
-
-    private String cdpEndpointFromRow(String rawEndpoint, int port, boolean portWasNull) {
-        String endpoint = text(rawEndpoint);
-        if (!endpoint.isBlank()) {
-            return endpoint;
-        }
-        if (!portWasNull && port > 0) {
-            return "http://127.0.0.1:" + port;
-        }
-        return "";
     }
 
     private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
@@ -338,8 +237,8 @@ public class DouyinAccountService {
         return browserFactory.launchBrowser(SocialBrowserPlatform.DOUYIN);
     }
 
-    Browser connectBrowserOverCdp(String cdpUrl) {
-        return browserFactory.connectOverCdp(cdpUrl);
+    BrowserContext launchPersistentContext(Path userDataDir) {
+        return browserFactory.launchPersistentContext(SocialBrowserPlatform.DOUYIN, userDataDir);
     }
 
     BrowserContext firstContext(Browser browser) {
@@ -415,7 +314,7 @@ public class DouyinAccountService {
     }
 
     private DouyinAccountStatus emptyStatus(String accountKey) {
-        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, null, null, null, 0, 0, 0, true, false, "等待扫码", Map.of());
+        return new DouyinAccountStatus("database", accountKey, false, 0, null, null, null, null, null, null, null, 0, 0, 0, true, false, "等待扫码", Map.of());
     }
 
     private int[] cooldownConfig(String accountKey) {
@@ -686,15 +585,6 @@ public class DouyinAccountService {
         return values.stream().findFirst().orElse(new AccountProfile(null, null));
     }
 
-    private AccountCdpConfig loadCdpConfig(String accountKey) {
-        List<AccountCdpConfig> values = jdbcTemplate.query(
-                "SELECT cdp_port, cdp_endpoint, note FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new AccountCdpConfig(nullableInt(rs, "cdp_port"), rs.getString("cdp_endpoint"), rs.getString("note")),
-                accountKey
-        );
-        return values.stream().findFirst().orElse(new AccountCdpConfig(null, null, null));
-    }
-
     private String automaticAccountKey(String storageState) throws IOException {
         AccountProfile profile = profileFromStorageState(storageState);
         String userId = text(profile.userId());
@@ -773,9 +663,6 @@ public class DouyinAccountService {
         ensureColumn("uploader_account_douyin", "upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
         ensureColumn("uploader_account_douyin", "last_upload_at", "DATETIME NULL");
         ensureColumn("uploader_account_douyin", "next_upload_allowed_at", "DATETIME NULL");
-        ensureColumn("uploader_account_douyin", "cdp_port", "INT NULL");
-        ensureColumn("uploader_account_douyin", "cdp_endpoint", "VARCHAR(255) NULL");
-        ensureColumn("uploader_account_douyin", "note", "VARCHAR(255) NULL");
         ensureColumn("uploader_account_douyin", "display_name", "VARCHAR(128) NULL");
         ensureColumn("uploader_account_douyin", "avatar_url", "VARCHAR(1024) NULL");
     }
@@ -867,9 +754,6 @@ public class DouyinAccountService {
     }
 
     private record AccountProfile(String userId, String nickname) {
-    }
-
-    private record AccountCdpConfig(Integer cdpPort, String cdpEndpoint, String note) {
     }
 
 }

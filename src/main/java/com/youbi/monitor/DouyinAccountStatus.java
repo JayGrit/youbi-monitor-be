@@ -11,9 +11,6 @@ public record DouyinAccountStatus(
         LocalDateTime cookieUpdatedAt,
         String userId,
         String nickname,
-        Integer cdpPort,
-        String cdpEndpoint,
-        String note,
         LocalDateTime lastUploadAt,
         LocalDateTime nextUploadAllowedAt,
         Integer uploadCooldownMinSeconds,
@@ -36,9 +33,6 @@ public record DouyinAccountStatus(
             LocalDateTime cookieUpdatedAt,
             String userId,
             String nickname,
-            Integer cdpPort,
-            String cdpEndpoint,
-            String note,
             LocalDateTime lastUploadAt,
             LocalDateTime nextUploadAllowedAt,
             Integer uploadCooldownMinSeconds,
@@ -52,7 +46,7 @@ public record DouyinAccountStatus(
             Map<String, Object> raw
     ) {
         this(storage, accountKey, cookieExists, cookieSizeBytes, cookieUpdatedAt, userId, nickname,
-                cdpPort, cdpEndpoint, note, lastUploadAt, nextUploadAllowedAt, uploadCooldownMinSeconds,
+                lastUploadAt, nextUploadAllowedAt, uploadCooldownMinSeconds,
                 uploadCooldownMaxSeconds, todayUploadCount, cooldownWaitingCount, uploadRunningCount,
                 enabled, valid, message, raw, null, null);
     }

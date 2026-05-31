@@ -1,6 +1,6 @@
 # Server VNC Chrome Runbook
 
-本文记录如何在服务器 `120.53.92.66` 上启动一个可视化 Chrome，并在本机 macOS 通过屏幕共享连接使用。当前用途是手动登录抖音创作者中心，再让后端通过 Chrome DevTools Protocol 复用同一个 Chrome Profile。
+本文记录如何在服务器 `120.53.92.66` 上启动 VNC 图形环境，并在本机 macOS 通过屏幕共享连接使用。当前用途是手动登录/续期抖音创作者中心 Profile；后端上传时会按需启动同一个 Profile，不再要求服务器 Chrome 长期运行。
 
 ## 端口与路径
 
@@ -9,12 +9,11 @@
 | 服务器 | `root@120.53.92.66` |
 | Xvfb display | `:99` |
 | VNC 端口 | `127.0.0.1:5901` |
-| Chrome CDP 端口 | `127.0.0.1:9333` |
-| Chrome Profile | `/hoshuuch/YouBi/douyin-chrome-profile-animal` |
+| Chrome Profile 根目录 | `/hoshuuch/YouBi/workfolder/douyin-chrome-profiles` |
 | 日志目录 | `/hoshuuch/YouBi/logs` |
 | VNC 密码文件 | `/root/.vnc/passwd` |
 
-VNC 和 CDP 都只监听服务器本机 `127.0.0.1`，本机通过 SSH 隧道访问，不需要开放公网防火墙端口。
+VNC 只监听服务器本机 `127.0.0.1`，本机通过 SSH 隧道访问，不需要开放公网防火墙端口。
 
 ## 1. 首次安装依赖
 
@@ -52,10 +51,10 @@ x11vnc -storepasswd 'Hoshuuch0815@' /root/.vnc/passwd
 chmod 600 /root/.vnc/passwd
 ```
 
-## 3. 启动可视化 Chrome
+## 3. 启动 VNC 图形环境
 
 ```bash
-mkdir -p /hoshuuch/YouBi/douyin-chrome-profile-animal /hoshuuch/YouBi/logs
+mkdir -p /hoshuuch/YouBi/logs
 
 nohup Xvfb :99 -screen 0 1400x900x24 \
   > /hoshuuch/YouBi/logs/douyin-xvfb.log 2>&1 &
@@ -72,17 +71,23 @@ nohup x11vnc \
   -rfbauth /root/.vnc/passwd \
   > /hoshuuch/YouBi/logs/douyin-x11vnc.log 2>&1 &
 
-DISPLAY=:99 nohup google-chrome \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9333 \
-  --user-data-dir=/hoshuuch/YouBi/douyin-chrome-profile-animal \
+```
+
+需要登录或续期某个账号时，再临时启动对应 Profile 的 Chrome。示例 `animal`：
+
+```bash
+mkdir -p /hoshuuch/YouBi/workfolder/douyin-chrome-profiles/animal
+
+DISPLAY=:99 google-chrome \
+  --user-data-dir=/hoshuuch/YouBi/workfolder/douyin-chrome-profiles/animal \
   --no-first-run \
   --no-default-browser-check \
   --disable-dev-shm-usage \
   --no-sandbox \
-  https://creator.douyin.com/creator-micro/content/upload \
-  > /hoshuuch/YouBi/logs/douyin-animal-chrome.log 2>&1 &
+  https://creator.douyin.com/creator-micro/content/upload
 ```
+
+登录完成并确认能进入上传页后，关闭这个 Chrome。上传任务执行时不要同时打开同一个 Profile。
 
 ## 4. 本机连接屏幕共享
 
@@ -91,7 +96,6 @@ DISPLAY=:99 nohup google-chrome \
 ```bash
 ssh -N \
   -L 5901:127.0.0.1:5901 \
-  -L 9333:127.0.0.1:9333 \
   root@120.53.92.66
 ```
 
@@ -109,47 +113,28 @@ vnc://127.0.0.1:5901
 Hoshuuch0815@
 ```
 
-连接后看到的是服务器上的 Chrome。手动完成抖音登录、短信验证、滑块验证等流程，直到能进入创作者中心上传页。
+连接后看到的是服务器图形环境。手动完成抖音登录、短信验证、滑块验证等流程，直到能进入创作者中心上传页。
 
 ## 5. 验证服务状态
 
 服务器上检查进程和端口：
 
 ```bash
-ps -ef | grep -E 'Xvfb :99|x11vnc|fluxbox|google-chrome.*douyin-chrome-profile-animal' | grep -v grep
-ss -lntp | grep -E ':(5901|9333) '
-curl -sS http://127.0.0.1:9333/json/version
-curl -sS http://127.0.0.1:9333/json/list
-```
-
-本机在 SSH 隧道打开时检查 CDP 是否可用：
-
-```bash
-curl -sS http://127.0.0.1:9333/json/version
-```
-
-`/json/version` 应返回：
-
-```json
-{
-  "webSocketDebuggerUrl": "ws://127.0.0.1:9333/devtools/browser/..."
-}
+ps -ef | grep -E 'Xvfb :99|x11vnc|fluxbox' | grep -v grep
+ss -lntp | grep ':5901 '
 ```
 
 ## 6. 重启可视化环境
 
-如果 Chrome 或 VNC 卡住，可以在服务器上重启这一套环境：
+如果 VNC 卡住，可以在服务器上重启这一套环境：
 
 ```bash
-pkill -f 'google-chrome.*douyin-chrome-profile-animal' || true
 pkill -f 'x11vnc.*:99' || true
 pkill -f 'fluxbox' || true
 pkill -f 'Xvfb :99' || true
 ```
 
-然后重新执行“启动可视化 Chrome”一节的命令。
-
-注意：Chrome 重启后，`/json/version` 里的 `webSocketDebuggerUrl` 会变化。后端如果要通过 CDP 连接，需要重新读取这个 URL。
+然后重新执行“启动 VNC 图形环境”一节的命令。
 
 ## 7. 常见问题
 
@@ -184,7 +169,7 @@ VNC 应监听：
 
 ### Chrome 日志里有 GLX/GPU 报错
 
-Xvfb 环境下常见，例如 `GLX is not present`。只要 VNC 中 Chrome 能正常显示、`9333/json/version` 能返回数据，就可以忽略。
+Xvfb 环境下常见，例如 `GLX is not present`。只要 VNC 中 Chrome 能正常显示即可忽略。
 
 ### 不要开放公网 VNC 端口
 

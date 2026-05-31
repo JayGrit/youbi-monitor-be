@@ -42,9 +42,7 @@ youbi:
     headless: ${YDBI_DOUYIN_HEADLESS:true}
     browser-channel: ${YDBI_DOUYIN_BROWSER_CHANNEL:chrome}
     stealth-script-path: ${YDBI_DOUYIN_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-    browser-upload-work-dir: ${YDBI_DOUYIN_BROWSER_UPLOAD_WORK_DIR:}
-    cdp-url: ${YDBI_DOUYIN_CDP_URL:}
-    cdp-endpoints: ${YDBI_DOUYIN_CDP_ENDPOINTS:}
+    profile-root-dir: ${YDBI_DOUYIN_PROFILE_ROOT_DIR:/work/douyin-chrome-profiles}
   bilibili:
     playwright:
       headless: ${YDBI_BILIBILI_PLAYWRIGHT_HEADLESS:false}

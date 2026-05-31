@@ -5,14 +5,12 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -28,7 +26,7 @@ public class SocialPlaywrightInspectService {
     private final SocialBrowserFactory browserFactory;
     private final SocialRiskDetector riskDetector;
     private final DiagnosticArtifactService diagnosticArtifactService;
-    private final HttpClient httpClient;
+    private final Path douyinProfileRootDir;
 
     public SocialPlaywrightInspectService(
             DouyinAccountService douyinAccountService,
@@ -37,7 +35,8 @@ public class SocialPlaywrightInspectService {
             ShipinhaoAccountService shipinhaoAccountService,
             SocialBrowserFactory browserFactory,
             SocialRiskDetector riskDetector,
-            DiagnosticArtifactService diagnosticArtifactService
+            DiagnosticArtifactService diagnosticArtifactService,
+            @Value("${youbi.douyin.profile-root-dir:/work/douyin-chrome-profiles}") String douyinProfileRootDir
     ) {
         this.douyinAccountService = douyinAccountService;
         this.xiaohongshuAccountService = xiaohongshuAccountService;
@@ -46,7 +45,7 @@ public class SocialPlaywrightInspectService {
         this.browserFactory = browserFactory;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.douyinProfileRootDir = Path.of(text(douyinProfileRootDir).isBlank() ? "/work/douyin-chrome-profiles" : text(douyinProfileRootDir)).toAbsolutePath().normalize();
     }
 
     public Map<String, Object> fingerprint(String platformValue) {
@@ -113,8 +112,11 @@ public class SocialPlaywrightInspectService {
     public Map<String, Object> inspectUploadPage(String platformValue, String accountKey) throws IOException {
         SocialBrowserPlatform platform = platform(platformValue);
         String normalized = normalizeAccountKey(platform, accountKey);
-        String storageState = storageState(platform, normalized);
         String taskId = platform.configKey() + "-inspect-" + UUID.randomUUID();
+        if (platform == SocialBrowserPlatform.DOUYIN) {
+            return inspectDouyinPersistentUploadPage(normalized, taskId);
+        }
+        String storageState = storageState(platform, normalized);
         BrowserHandle browserHandle = openBrowser(platform, normalized);
         try {
             BrowserContext context = context(platform, browserHandle.browser(), storageState);
@@ -150,6 +152,39 @@ public class SocialPlaywrightInspectService {
             }
         } finally {
             browserHandle.close();
+        }
+    }
+
+    private Map<String, Object> inspectDouyinPersistentUploadPage(String accountKey, String taskId) throws IOException {
+        Path profileDir = douyinProfileRootDir.resolve(safeSegment(accountKey)).toAbsolutePath().normalize();
+        Files.createDirectories(profileDir);
+        try (BrowserContext context = douyinAccountService.launchPersistentContext(profileDir)) {
+            Page page = context.newPage();
+            page.navigate(uploadUrl(SocialBrowserPlatform.DOUYIN));
+            page.waitForTimeout(5000);
+            DiagnosticArtifactRecord snapshot = diagnosticArtifactService.archive(new DiagnosticArtifactRequest(
+                    page,
+                    taskId,
+                    taskId,
+                    SocialBrowserPlatform.DOUYIN.configKey(),
+                    "social-playwright-inspect",
+                    accountKey,
+                    1,
+                    "upload-page"
+            ));
+            SocialRiskState risk = riskDetector.detect(SocialBrowserPlatform.DOUYIN, page);
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("platform", SocialBrowserPlatform.DOUYIN.configKey());
+            result.put("accountKey", accountKey);
+            result.put("url", page.url());
+            result.put("risk", risk);
+            result.put("ready", ready(SocialBrowserPlatform.DOUYIN, page, risk));
+            result.put("screenshotUrl", snapshot.screenshotUrl());
+            result.put("htmlUrl", snapshot.htmlUrl());
+            result.put("archiveStatus", snapshot.status());
+            result.put("archiveError", snapshot.errorMessage());
+            result.put("fingerprint", fingerprintOnPage(page));
+            return result;
         }
     }
 
@@ -209,25 +244,6 @@ public class SocialPlaywrightInspectService {
     }
 
     private BrowserHandle openBrowser(SocialBrowserPlatform platform, String accountKey) throws IOException {
-        if (platform == SocialBrowserPlatform.DOUYIN) {
-            try {
-                return douyinAccountService.cdpEndpoint(accountKey)
-                    .map(endpoint -> {
-                        try {
-                            Browser browser = douyinAccountService.connectBrowserOverCdp(browserWsUrl(endpoint));
-                            return new BrowserHandle(browser, browser::close);
-                        } catch (IOException exception) {
-                            throw new BrowserOpenException(exception);
-                        }
-                    })
-                    .orElseGet(() -> {
-                        Browser browser = browserFactory.launchBrowser(platform);
-                        return new BrowserHandle(browser, browser::close);
-                    });
-            } catch (BrowserOpenException exception) {
-                throw (IOException) exception.getCause();
-            }
-        }
         if (platform == SocialBrowserPlatform.BILIBILI) {
             BilibiliPlaywrightAccountService.BrowserHandle handle = bilibiliAccountService.openUploadBrowser();
             return new BrowserHandle(handle.browser(), handle::close);
@@ -294,32 +310,6 @@ public class SocialPlaywrightInspectService {
         };
     }
 
-    private String browserWsUrl(String endpoint) throws IOException {
-        String base = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
-        HttpRequest request = HttpRequest.newBuilder(URI.create(base + "/json/version"))
-                .timeout(Duration.ofSeconds(10))
-                .GET()
-                .build();
-        try {
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IOException("CDP version endpoint returned HTTP " + response.statusCode());
-            }
-            String marker = "\"webSocketDebuggerUrl\"";
-            int markerIndex = response.body().indexOf(marker);
-            int colonIndex = markerIndex < 0 ? -1 : response.body().indexOf(':', markerIndex);
-            int firstQuote = colonIndex < 0 ? -1 : response.body().indexOf('"', colonIndex + 1);
-            int secondQuote = firstQuote < 0 ? -1 : response.body().indexOf('"', firstQuote + 1);
-            if (secondQuote <= firstQuote) {
-                throw new IOException("CDP version endpoint missing webSocketDebuggerUrl");
-            }
-            return response.body().substring(firstQuote + 1, secondQuote).replace("\\/", "/");
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted resolving CDP endpoint", exception);
-        }
-    }
-
     private boolean containsAny(String text, String... keywords) {
         for (String keyword : keywords) {
             if (text.contains(keyword)) {
@@ -327,6 +317,15 @@ public class SocialPlaywrightInspectService {
             }
         }
         return false;
+    }
+
+    private String safeSegment(String value) {
+        String sanitized = text(value).replaceAll("[^A-Za-z0-9._-]+", "_");
+        return sanitized.isBlank() ? "default" : sanitized;
+    }
+
+    private String text(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private record BrowserHandle(Browser browser, CloseAction closeAction) implements AutoCloseable {
@@ -341,9 +340,4 @@ public class SocialPlaywrightInspectService {
         void close();
     }
 
-    private static class BrowserOpenException extends RuntimeException {
-        BrowserOpenException(IOException cause) {
-            super(cause);
-        }
-    }
 }
