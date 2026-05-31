@@ -5,10 +5,13 @@ import argparse
 import json
 import os
 import re
+import shutil
+import time
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import mysql.connector
+from playwright.sync_api import sync_playwright
 
 
 DEFAULT_MYSQL_HOST = "120.53.92.66"
@@ -16,8 +19,9 @@ DEFAULT_MYSQL_PORT = 3306
 DEFAULT_MYSQL_DATABASE = "youbi"
 DEFAULT_MYSQL_USER = "hoshuuch"
 DEFAULT_MYSQL_PASSWORD = "490229"
-DEFAULT_CDP_URL = "http://127.0.0.1:9222"
 SHIPINHAO_PLATFORM_URL = "https://channels.weixin.qq.com/platform"
+CHROME_BIN = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+PROFILE_ROOT = Path("/private/tmp/youbi-shipinhao-manual-login")
 SHIPINHAO_DOMAINS = (
     "channels.weixin.qq.com",
     "weixin.qq.com",
@@ -28,11 +32,12 @@ SHIPINHAO_DOMAINS = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export Shipinhao login state from a local Chrome CDP session into uploader_account_shipinhao."
+        description="Open a temporary Chrome profile, wait for Shipinhao scan login, then save storage state into uploader_account_shipinhao."
     )
     parser.add_argument("--account-key", default=os.getenv("YDBI_SHIPINHAO_ACCOUNT_KEY", "default"))
-    parser.add_argument("--cdp-url", default=os.getenv("YDBI_CHROME_CDP_URL", DEFAULT_CDP_URL))
     parser.add_argument("--keep-all-origins", action="store_true", help="Store the full Chrome context state instead of only Weixin domains.")
+    parser.add_argument("--timeout-seconds", type=int, default=int(os.getenv("YDBI_SHIPINHAO_LOGIN_TIMEOUT_SECONDS", "600")))
+    parser.add_argument("--fresh", action="store_true", help="Delete the temporary Chrome profile dir before login.")
     parser.add_argument("--mysql-host", default=os.getenv("YDBI_MYSQL_HOST", DEFAULT_MYSQL_HOST))
     parser.add_argument("--mysql-port", type=int, default=int(os.getenv("YDBI_MYSQL_PORT", str(DEFAULT_MYSQL_PORT))))
     parser.add_argument("--mysql-database", default=os.getenv("YDBI_MYSQL_DATABASE", DEFAULT_MYSQL_DATABASE))
@@ -46,48 +51,6 @@ def normalize_account_key(value: str) -> str:
     if not account_key or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", account_key):
         raise ValueError(f"Invalid account key: {value!r}")
     return account_key
-
-
-def import_playwright():
-    try:
-        from playwright.sync_api import Error, sync_playwright
-    except ImportError as exc:
-        raise SystemExit(
-            "Missing Python package: playwright\n"
-            "Install it in this repo venv first, for example:\n"
-            "  .venv/bin/pip install playwright\n"
-        ) from exc
-    return Error, sync_playwright
-
-
-def disable_proxy_for_local_cdp(cdp_url: str) -> None:
-    host = (urlparse(cdp_url).hostname or "").lower()
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        return
-    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-        os.environ.pop(name, None)
-    no_proxy = "127.0.0.1,localhost,::1"
-    os.environ["NO_PROXY"] = no_proxy
-    os.environ["no_proxy"] = no_proxy
-
-
-def connect_chrome(cdp_url: str):
-    disable_proxy_for_local_cdp(cdp_url)
-    playwright_error, sync_playwright = import_playwright()
-    playwright = sync_playwright().start()
-    try:
-        browser = playwright.chromium.connect_over_cdp(cdp_url)
-    except playwright_error as exc:
-        playwright.stop()
-        raise SystemExit(
-            f"Cannot connect to Chrome DevTools at {cdp_url}.\n"
-            f"Playwright error: {exc}\n"
-            "Start Chrome with remote debugging enabled and the Default profile, for example:\n"
-            "  /Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome "
-            "--remote-debugging-port=9222 --profile-directory=Default\n"
-            f"Then open {SHIPINHAO_PLATFORM_URL}, confirm it is logged in, and run this script again."
-        ) from exc
-    return playwright, browser
 
 
 def is_shipinhao_host(value: str) -> bool:
@@ -107,24 +70,6 @@ def filter_shipinhao_state(state: dict[str, Any]) -> dict[str, Any]:
         if any(domain in str(origin.get("origin", "")).lower() for domain in SHIPINHAO_DOMAINS)
     ]
     return {"cookies": cookies, "origins": origins}
-
-
-def load_storage_state(cdp_url: str, keep_all_origins: bool) -> tuple[dict[str, Any], str]:
-    playwright, browser = connect_chrome(cdp_url)
-    try:
-        contexts = list(browser.contexts) or [browser.new_context()]
-        context = contexts[0]
-        page = context.new_page()
-        try:
-            page.goto(SHIPINHAO_PLATFORM_URL, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(5_000)
-            url = page.url
-            state = context.storage_state()
-        finally:
-            page.close()
-        return (state if keep_all_origins else filter_shipinhao_state(state), url)
-    finally:
-        playwright.stop()
 
 
 def first_text(*values: Any) -> str:
@@ -158,6 +103,37 @@ def profile_from_storage_state(state: dict[str, Any]) -> tuple[str | None, str |
                 user_id = first_text(user_id, parsed.get("userId"), parsed.get("user_id"), parsed.get("uin"), parsed.get("id"))
                 nickname = first_text(nickname, parsed.get("nickname"), parsed.get("nickName"), parsed.get("nick_name"), parsed.get("name"))
     return (user_id or None, nickname or None)
+
+
+def has_login_cookie(state: dict[str, Any]) -> bool:
+    for cookie in state.get("cookies", []):
+        name = str(cookie.get("name") or "").lower()
+        value = str(cookie.get("value") or "").strip()
+        if name in {"wxuin", "uin", "finderuin", "finder_uin"} and value and value != "0":
+            return True
+    return False
+
+
+def page_login_hint(page) -> bool:
+    try:
+        body_text = page.locator("body").inner_text(timeout=1_000)
+    except Exception:
+        return False
+    positive_markers = (
+        "发表视频",
+        "发布视频",
+        "视频管理",
+        "数据概览",
+        "创作者中心",
+        "助手",
+        "账号设置",
+    )
+    negative_markers = ("扫码登录", "微信扫码", "请使用微信")
+    return any(marker in body_text for marker in positive_markers) and not any(marker in body_text for marker in negative_markers)
+
+
+def looks_logged_in(state: dict[str, Any], page, user_id: str | None, nickname: str | None) -> bool:
+    return bool(user_id or nickname or has_login_cookie(state) or page_login_hint(page))
 
 
 def ensure_schema(cursor) -> None:
@@ -209,16 +185,63 @@ def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_i
         connection.close()
 
 
+def wait_for_login(args: argparse.Namespace) -> tuple[dict[str, Any], str, str | None, str | None]:
+    profile_dir = PROFILE_ROOT / args.account_key
+    if args.fresh and profile_dir.exists():
+        shutil.rmtree(profile_dir)
+    profile_dir.mkdir(parents=True, exist_ok=True)
+
+    print()
+    print("=" * 72)
+    print(f"请在弹出的 Chrome 窗口扫码登录视频号：account_key={args.account_key}")
+    print("脚本会轮询登录态；识别到登录后自动写入数据库。")
+    print("=" * 72, flush=True)
+
+    with sync_playwright() as playwright:
+        context = playwright.chromium.launch_persistent_context(
+            str(profile_dir),
+            executable_path=CHROME_BIN,
+            headless=False,
+            viewport={"width": 1400, "height": 1000},
+            args=["--no-first-run", "--no-default-browser-check"],
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        deadline = time.time() + args.timeout_seconds
+        last_status = ""
+        try:
+            page.goto(SHIPINHAO_PLATFORM_URL, wait_until="domcontentloaded", timeout=60_000)
+            while time.time() < deadline:
+                state = context.storage_state()
+                if not args.keep_all_origins:
+                    state = filter_shipinhao_state(state)
+                user_id, nickname = profile_from_storage_state(state)
+                cookie_count = len(state.get("cookies", []))
+                origin_count = len(state.get("origins", []))
+                status = (
+                    f"cookies={cookie_count} origins={origin_count} "
+                    f"has_login_cookie={has_login_cookie(state)} "
+                    f"user_id={user_id or '-'} nickname={nickname or '-'} url={page.url}"
+                )
+                if status != last_status:
+                    print(status, flush=True)
+                    last_status = status
+                if cookie_count > 0 and looks_logged_in(state, page, user_id, nickname):
+                    return state, page.url, user_id, nickname
+                page.wait_for_timeout(3_000)
+            raise SystemExit(f"等待视频号扫码登录超时：account_key={args.account_key}")
+        finally:
+            context.close()
+
+
 def main() -> int:
     args = parse_args()
     args.account_key = normalize_account_key(args.account_key)
-    state, final_url = load_storage_state(args.cdp_url, args.keep_all_origins)
+    state, final_url, user_id, nickname = wait_for_login(args)
     cookie_count = len(state.get("cookies", []))
     origin_count = len(state.get("origins", []))
     if cookie_count == 0 and origin_count == 0:
         raise SystemExit(f"No Shipinhao cookies or localStorage found after opening {final_url}.")
 
-    user_id, nickname = profile_from_storage_state(state)
     storage_state_json = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
     save_storage_state(args, storage_state_json, user_id, nickname)
     print(
