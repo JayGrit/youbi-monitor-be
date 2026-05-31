@@ -124,6 +124,35 @@ public class MonitorController {
         }
     }
 
+    @GetMapping("/api/upload-backfill/candidates")
+    public MonitorService.UploadBackfillCandidateList uploadBackfillCandidates(
+            @RequestParam String platform,
+            @RequestParam String accountKey,
+            @RequestParam String type
+    ) {
+        try {
+            return monitorService.uploadBackfillCandidates(platform, accountKey, type);
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        }
+    }
+
+    @PostMapping("/api/upload-backfill/register")
+    public MonitorService.UploadBackfillRegisterResult registerUploadBackfill(
+            @RequestBody MonitorService.UploadBackfillRegisterRequest request
+    ) {
+        try {
+            return monitorService.registerUploadBackfill(
+                    request == null ? null : request.platform(),
+                    request == null ? null : request.accountKey(),
+                    request == null ? null : request.type(),
+                    request == null ? List.of() : request.taskIds()
+            );
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        }
+    }
+
     @PostMapping("/api/video-tasks/{taskId}/restart")
     public MonitorService.TaskRestartResult restart(@PathVariable String taskId) {
         try {

@@ -508,6 +508,223 @@ public class MonitorService {
         return new UploadSubmissionRetryResult(normalized, retried, uploaderUpdated, taskUpdated);
     }
 
+    public UploadBackfillCandidateList uploadBackfillCandidates(String platform, String accountKey, String type) {
+        String normalized = normalizeUploadPlatform(platform);
+        String normalizedAccountKey = text(accountKey);
+        String normalizedType = text(type);
+        if (normalizedAccountKey.isBlank()) {
+            throw new IllegalArgumentException("Missing accountKey.");
+        }
+        if (normalizedType.isBlank()) {
+            throw new IllegalArgumentException("Missing type.");
+        }
+        String table = UPLOADER_TASK_TABLES.get(normalized);
+        String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(accountTable)) {
+            throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
+        }
+
+        List<UploadBackfillCandidate> rows = jdbcTemplate.query("""
+                SELECT
+                  task.id task_id,
+                  COALESCE(NULLIF(target.title, ''), NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), task.id) title,
+                  COALESCE(NULLIF(target.cover_url, ''), NULLIF(uploader.upload_cover_url, ''), NULLIF(video_info.source_thumbnail_url, '')) cover_url,
+                  %s final_video_ref,
+                  COALESCE(uploader.completed_at, task.completed_at, task.created_at) completed_at,
+                  GROUP_CONCAT(DISTINCT sent.platform ORDER BY sent.platform SEPARATOR ',') uploaded_platforms,
+                  target.id target_submission_id,
+                  target.status target_status,
+                  account.account_key IS NOT NULL account_exists,
+                  COALESCE(account.is_enabled, 0) account_enabled
+                FROM yd_task task
+                JOIN yd_video_info video_info ON video_info.task_id = task.id
+                JOIN yd_uploader uploader ON uploader.task_id = task.id
+                JOIN (
+                  %s
+                ) sent ON sent.task_id = task.id
+                LEFT JOIN %s target ON target.task_id = task.id AND target.account_key = ?
+                LEFT JOIN %s account ON account.account_key = ?
+                WHERE video_info.type = ?
+                GROUP BY
+                  task.id,
+                  title,
+                  cover_url,
+                  final_video_ref,
+                  completed_at,
+                  target.id,
+                  target.status,
+                  account_exists,
+                  account_enabled
+                ORDER BY completed_at DESC
+                LIMIT 500
+                """.formatted(finalVideoRefSql(), successfulUploadUnion(normalized), quotedIdentifier(table), quotedIdentifier(accountTable)),
+                (rs, rowNum) -> {
+                    boolean accountExists = rs.getBoolean("account_exists");
+                    boolean accountEnabled = rs.getBoolean("account_enabled");
+                    String finalVideoRef = rs.getString("final_video_ref");
+                    long targetSubmissionId = rs.getLong("target_submission_id");
+                    boolean hasTargetSubmission = !rs.wasNull();
+                    String blockedReason = "";
+                    if (!accountExists) {
+                        blockedReason = "目标账号不存在";
+                    } else if (!accountEnabled) {
+                        blockedReason = "目标账号已禁用";
+                    } else if (text(finalVideoRef).isBlank()) {
+                        blockedReason = "缺少 final_video_url";
+                    } else if (hasTargetSubmission) {
+                        blockedReason = "目标账号已存在发送任务：" + text(rs.getString("target_status"));
+                    }
+                    return new UploadBackfillCandidate(
+                            rs.getString("task_id"),
+                            rs.getString("title"),
+                            rs.getString("cover_url"),
+                            finalVideoRef,
+                            splitCsv(rs.getString("uploaded_platforms")),
+                            timestamp(rs, "completed_at"),
+                            blockedReason.isBlank(),
+                            blockedReason
+                    );
+                },
+                normalizedAccountKey,
+                normalizedAccountKey,
+                normalizedType
+        );
+        return new UploadBackfillCandidateList(normalized, normalizedAccountKey, normalizedType, rows.size(), rows);
+    }
+
+    @Transactional
+    public UploadBackfillRegisterResult registerUploadBackfill(String platform, String accountKey, String type, List<String> taskIds) {
+        String normalized = normalizeUploadPlatform(platform);
+        String normalizedAccountKey = text(accountKey);
+        String normalizedType = text(type);
+        if (normalizedAccountKey.isBlank()) {
+            throw new IllegalArgumentException("Missing accountKey.");
+        }
+        if (normalizedType.isBlank()) {
+            throw new IllegalArgumentException("Missing type.");
+        }
+        List<String> normalizedTaskIds = taskIds == null ? List.of() : taskIds.stream()
+                .map(MonitorService::text)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
+        if (normalizedTaskIds.isEmpty()) {
+            throw new IllegalArgumentException("No task selected.");
+        }
+        String table = UPLOADER_TASK_TABLES.get(normalized);
+        String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(accountTable)) {
+            throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
+        }
+
+        String taskPlaceholders = placeholders(normalizedTaskIds.size());
+        Object[] queryArgs = new Object[2 + normalizedTaskIds.size()];
+        queryArgs[0] = normalizedAccountKey;
+        for (int i = 0; i < normalizedTaskIds.size(); i++) {
+            queryArgs[i + 1] = normalizedTaskIds.get(i);
+        }
+        queryArgs[queryArgs.length - 1] = normalizedType;
+
+        List<UploadBackfillInsertRow> rows = jdbcTemplate.query("""
+                SELECT
+                  task.id task_id,
+                  COALESCE(NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), task.id) title,
+                  %s final_video_ref,
+                  COALESCE(NULLIF(uploader.upload_cover_url, ''), NULLIF(video_info.source_thumbnail_url, '')) cover_url,
+                  uploader.upload_desc,
+                  uploader.upload_tag
+                FROM yd_task task
+                JOIN yd_video_info video_info ON video_info.task_id = task.id
+                JOIN yd_uploader uploader ON uploader.task_id = task.id
+                JOIN %s account ON account.account_key = ? AND account.is_enabled = 1
+                JOIN (
+                  %s
+                ) sent ON sent.task_id = task.id
+                LEFT JOIN %s target ON target.task_id = task.id AND target.account_key = account.account_key
+                WHERE task.id IN (%s)
+                  AND video_info.type = ?
+                  AND COALESCE(NULLIF(%s, ''), '') <> ''
+                  AND target.id IS NULL
+                GROUP BY
+                  task.id,
+                  title,
+                  final_video_ref,
+                  cover_url,
+                  uploader.upload_desc,
+                  uploader.upload_tag
+                """.formatted(
+                        finalVideoRefSql(),
+                        quotedIdentifier(accountTable),
+                        successfulUploadUnion(normalized),
+                        quotedIdentifier(table),
+                        taskPlaceholders,
+                        finalVideoRefSql()
+                ),
+                (rs, rowNum) -> new UploadBackfillInsertRow(
+                        rs.getString("task_id"),
+                        rs.getString("title"),
+                        rs.getString("final_video_ref"),
+                        rs.getString("cover_url"),
+                        rs.getString("upload_desc"),
+                        rs.getString("upload_tag")
+                ),
+                queryArgs
+        );
+        if (rows.isEmpty()) {
+            return new UploadBackfillRegisterResult(normalized, normalizedAccountKey, normalizedType, 0, normalizedTaskIds.size(), 0, 0);
+        }
+
+        int registered = 0;
+        for (UploadBackfillInsertRow row : rows) {
+            registered += jdbcTemplate.update("""
+                    INSERT INTO %s (
+                        task_id, account_key, status, title, video_url, cover_url, description, tags
+                    )
+                    VALUES (?, ?, 'ready', ?, ?, ?, ?, ?)
+                    """.formatted(quotedIdentifier(table)),
+                    row.taskId(),
+                    normalizedAccountKey,
+                    row.title(),
+                    row.finalVideoUrl(),
+                    row.coverUrl(),
+                    row.description(),
+                    row.tags()
+            );
+        }
+
+        List<String> registeredTaskIds = rows.stream().map(UploadBackfillInsertRow::taskId).distinct().toList();
+        Object[] registeredArgs = registeredTaskIds.toArray();
+        String registeredPlaceholders = placeholders(registeredTaskIds.size());
+        int uploaderUpdated = jdbcTemplate.update("""
+                UPDATE yd_uploader
+                SET status = 'running',
+                    started_at = COALESCE(started_at, NOW()),
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE task_id IN (%s)
+                """.formatted(registeredPlaceholders), registeredArgs);
+        int taskUpdated = jdbcTemplate.update("""
+                UPDATE yd_task
+                SET status = 'running',
+                    current_stage = 'uploader',
+                    started_at = COALESCE(started_at, NOW()),
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE id IN (%s)
+                """.formatted(registeredPlaceholders), registeredArgs);
+        return new UploadBackfillRegisterResult(
+                normalized,
+                normalizedAccountKey,
+                normalizedType,
+                registered,
+                Math.max(0, normalizedTaskIds.size() - registeredTaskIds.size()),
+                uploaderUpdated,
+                taskUpdated
+        );
+    }
+
     public SubmitterAuthorType authorType(String author) {
         String normalized = text(author);
         if (normalized.isBlank()) {
@@ -1419,6 +1636,41 @@ public class MonitorService {
         return normalized;
     }
 
+    private static String successfulUploadUnion(String excludedPlatform) {
+        return UPLOADER_TASK_TABLES.entrySet().stream()
+                .filter(entry -> !entry.getKey().equals(excludedPlatform))
+                .map(entry -> "SELECT task_id, '" + entry.getKey() + "' platform FROM " + quotedIdentifier(entry.getValue()) + " WHERE status = 'success'")
+                .reduce((left, right) -> left + "\nUNION ALL\n" + right)
+                .orElse("SELECT NULL task_id, NULL platform WHERE FALSE");
+    }
+
+    private static String finalVideoRefSql() {
+        return """
+                COALESCE(
+                  NULLIF(video_info.final_video_url, ''),
+                  NULLIF(CONCAT('adrive://', COALESCE(
+                    NULLIF(uploader.final_video_alidrive_remote_path, ''),
+                    NULLIF(uploader.alidrive_final_video_remote_path, ''),
+                    NULLIF(uploader.final_video_alidrive_file_id, ''),
+                    NULLIF(uploader.alidrive_final_video_file_id, '')
+                  )), 'adrive://'),
+                  ''
+                )
+                """;
+    }
+
+    private static List<String> splitCsv(String value) {
+        String normalized = text(value);
+        if (normalized.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(normalized.split(","))
+                .map(MonitorService::text)
+                .filter(item -> !item.isBlank())
+                .distinct()
+                .toList();
+    }
+
     private static String minioPrefix(String taskId) {
         String clean = text(taskId).replaceFirst("^/+", "").replaceFirst("/+$", "");
         if (clean.isBlank()) {
@@ -1479,6 +1731,10 @@ public class MonitorService {
         ensureColumn("yd_uploader", "kuaishou_upload_account_name", "VARCHAR(128) NULL");
         ensureColumn("yd_uploader", "kuaishou_upload_result_json", "MEDIUMTEXT NULL");
         ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
+        ensureColumn("yd_uploader", "final_video_alidrive_file_id", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "final_video_alidrive_remote_path", "TEXT NULL");
+        ensureColumn("yd_uploader", "alidrive_final_video_file_id", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "alidrive_final_video_remote_path", "TEXT NULL");
     }
 
     private void ensureUploaderSubmissionMonitorSchema() {
@@ -1520,6 +1776,8 @@ public class MonitorService {
         ensureColumn("yd_video_info", "source_duration_seconds", "DOUBLE NULL");
         ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
         ensureColumn("yd_video_info", "need_dubbing", "TINYINT(1) NULL");
+        ensureColumn("yd_video_info", "final_video_url", "TEXT NULL");
+        ensureColumn("yd_video_info", "final_video_path", "TEXT NULL");
     }
 
     private void ensureSubmitterAuthorTypeSchema() {
@@ -1644,6 +1902,51 @@ public class MonitorService {
     }
 
     public record UploadSubmissionRetryResult(String platform, int retriedCount, int uploaderTaskCount, int taskCount) {
+    }
+
+    public record UploadBackfillCandidate(
+            String taskId,
+            String title,
+            String coverUrl,
+            String finalVideoUrl,
+            List<String> uploadedPlatforms,
+            LocalDateTime completedAt,
+            boolean selectable,
+            String blockedReason
+    ) {
+    }
+
+    public record UploadBackfillCandidateList(
+            String platform,
+            String accountKey,
+            String type,
+            int count,
+            List<UploadBackfillCandidate> rows
+    ) {
+    }
+
+    public record UploadBackfillRegisterRequest(String platform, String accountKey, String type, List<String> taskIds) {
+    }
+
+    public record UploadBackfillRegisterResult(
+            String platform,
+            String accountKey,
+            String type,
+            int registeredCount,
+            int skippedCount,
+            int uploaderTaskCount,
+            int taskCount
+    ) {
+    }
+
+    private record UploadBackfillInsertRow(
+            String taskId,
+            String title,
+            String finalVideoUrl,
+            String coverUrl,
+            String description,
+            String tags
+    ) {
     }
 
     public record SubmitterAuthorType(
