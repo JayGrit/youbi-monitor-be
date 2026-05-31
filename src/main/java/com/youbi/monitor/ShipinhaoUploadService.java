@@ -359,7 +359,8 @@ public class ShipinhaoUploadService {
         boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
         boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
         boolean missingVideo = TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new));
-        boolean ready = buttonEnabled && mediaVisible && !uploading && !uploadFailed && !missingVideo;
+        boolean pageStateReadable = TextSupport.hasText(body);
+        boolean ready = buttonEnabled && !uploading && !uploadFailed && !missingVideo && (mediaVisible || !pageStateReadable);
         return new UploadReadiness(ready, buttonEnabled, mediaVisible, fileSelected, uploading, uploadFailed, missingVideo, body);
     }
 
