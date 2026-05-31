@@ -89,6 +89,18 @@ DISPLAY=:99 google-chrome \
 
 登录完成并确认能进入上传页后，关闭这个 Chrome。上传任务执行时不要同时打开同一个 Profile。
 
+也可以直接从本机运行脚本，自动完成服务器侧启动和本机屏幕共享连接：
+
+```bash
+scripts/open_douyin_server_vnc.command animal
+```
+
+本机 zsh 函数 `lookc` 指向该脚本时，可直接运行：
+
+```bash
+lookc animal
+```
+
 ## 4. 本机连接屏幕共享
 
 本机新开一个终端，保持 SSH 隧道运行：
