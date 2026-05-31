@@ -57,7 +57,7 @@ public class SocialBrowserFactory {
             @Value("${youbi.bilibili.playwright.headless:false}") boolean bilibiliHeadless,
             @Value("${youbi.bilibili.playwright.browser-channel:chrome}") String bilibiliBrowserChannel,
             @Value("${youbi.bilibili.playwright.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String bilibiliStealthScriptPath,
-            @Value("${youbi.shipinhao.headless:false}") boolean shipinhaoHeadless,
+            @Value("${youbi.shipinhao.headless:true}") boolean shipinhaoHeadless,
             @Value("${youbi.shipinhao.browser-channel:chrome}") String shipinhaoBrowserChannel,
             @Value("${youbi.shipinhao.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String shipinhaoStealthScriptPath
     ) {

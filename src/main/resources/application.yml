@@ -53,6 +53,6 @@ youbi:
       cdp-url: ${YDBI_BILIBILI_PLAYWRIGHT_CDP_URL:}
       browser-upload-work-dir: ${YDBI_BILIBILI_PLAYWRIGHT_BROWSER_UPLOAD_WORK_DIR:}
   shipinhao:
-    headless: ${YDBI_SHIPINHAO_HEADLESS:false}
+    headless: ${YDBI_SHIPINHAO_HEADLESS:true}
     browser-channel: ${YDBI_SHIPINHAO_BROWSER_CHANNEL:chrome}
     stealth-script-path: ${YDBI_SHIPINHAO_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}

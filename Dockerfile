@@ -51,6 +51,7 @@ ENV YDBI_XHS_BROWSER_CHANNEL=chrome
 ENV YDBI_DOUYIN_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js
 ENV YDBI_XHS_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js
 ENV YDBI_BILIBILI_PLAYWRIGHT_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js
+ENV YDBI_SHIPINHAO_HEADLESS=true
 ENV YDBI_SHIPINHAO_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV JAVA_OPTS="-Xmx512m -Xms256m -XX:+UseSerialGC"
