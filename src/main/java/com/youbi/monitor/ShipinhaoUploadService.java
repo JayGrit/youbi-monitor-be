@@ -26,6 +26,15 @@ public class ShipinhaoUploadService {
     private static final Logger log = LoggerFactory.getLogger(ShipinhaoUploadService.class);
     private static final String DIAGNOSTIC_PLATFORM = "shipinhao";
     private static final String DIAGNOSTIC_SOURCE = "shipinhao-upload";
+    private static final List<String> UPLOAD_IN_PROGRESS_TEXTS = List.of(
+            "上传中", "正在上传", "视频上传中", "处理中", "视频处理中", "转码中", "上传进度"
+    );
+    private static final List<String> UPLOAD_FAILED_TEXTS = List.of(
+            "上传失败", "上传出错", "上传异常"
+    );
+    private static final List<String> MISSING_VIDEO_TEXTS = List.of(
+            "请上传视频", "请选择视频", "上传视频后"
+    );
 
     private final ShipinhaoAccountService accountService;
     private final UploadMaterialResolver materialResolver;
@@ -105,7 +114,7 @@ public class ShipinhaoUploadService {
         Locator fileInput = page.locator("input[type='file'][accept*='video']").first();
         fileInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
         fileInput.setInputFiles(videoPath);
-        page.waitForTimeout(8000);
+        waitForVideoFileAccepted(page, taskId);
         dumpDiagnostics(page, taskId, "after-set-video-file");
 
         fillDescription(page, request, taskId);
@@ -187,24 +196,30 @@ public class ShipinhaoUploadService {
     private void waitForUploadComplete(Page page, String taskId) {
         long deadline = System.currentTimeMillis() + Duration.ofMinutes(15).toMillis();
         int checks = 0;
+        int stableReadyChecks = 0;
+        UploadReadiness lastState = null;
         while (System.currentTimeMillis() < deadline) {
             checks += 1;
             try {
-                Locator publishButton = page.locator("div.form-btns button").filter(new Locator.FilterOptions().setHasText("发表")).first();
-                if (publishButton.count() > 0) {
-                    String className = TextSupport.text(publishButton.getAttribute("class"));
-                    String disabled = publishButton.getAttribute("disabled");
-                    if (checks == 1 || checks % 10 == 0) {
-                        log.info("Shipinhao upload wait taskId={} checks={} class={} disabled={} url={}", taskId, checks, className, disabled, page.url());
-                        dumpDiagnostics(page, taskId, "upload-wait-" + checks);
-                    }
-                    if (!className.contains("weui-desktop-btn_disabled") && disabled == null) {
-                        return;
-                    }
+                UploadReadiness state = uploadReadiness(page);
+                lastState = state;
+                if (checks == 1 || checks % 10 == 0 || state.ready()) {
+                    log.info("Shipinhao upload wait taskId={} checks={} ready={} stable={} buttonEnabled={} mediaVisible={} fileSelected={} uploading={} missingVideo={} uploadFailed={} url={} body={}",
+                            taskId, checks, state.ready(), stableReadyChecks, state.buttonEnabled(), state.mediaVisible(), state.fileSelected(),
+                            state.uploading(), state.missingVideo(), state.uploadFailed(), page.url(), TextSupport.truncate(state.body(), 300));
+                    dumpDiagnostics(page, taskId, "upload-wait-" + checks);
                 }
-                if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "上传失败", "上传出错")) {
+                if (state.uploadFailed()) {
                     dumpDiagnostics(page, taskId, "upload-error");
                     throw new RuntimeException("Shipinhao video upload failed");
+                }
+                if (state.ready()) {
+                    stableReadyChecks += 1;
+                    if (stableReadyChecks >= 2) {
+                        return;
+                    }
+                } else {
+                    stableReadyChecks = 0;
                 }
             } catch (RuntimeException exception) {
                 throw exception;
@@ -213,25 +228,110 @@ public class ShipinhaoUploadService {
             page.waitForTimeout(3000);
         }
         dumpDiagnostics(page, taskId, "upload-timeout");
-        throw new RuntimeException("Timed out waiting for Shipinhao video upload to complete");
+        throw new RuntimeException("Timed out waiting for Shipinhao video upload to complete, lastState=" + lastState);
     }
 
     private void clickSubmit(Page page, String taskId, String buttonText, String successUrlPattern) {
-        Locator button = page.locator("div.form-btns button").filter(new Locator.FilterOptions().setHasText(buttonText)).first();
-        button.waitFor(new Locator.WaitForOptions().setTimeout(30000));
-        button.scrollIntoViewIfNeeded();
-        page.waitForTimeout(500);
-        button.click();
-        dumpDiagnostics(page, taskId, "after-click-" + buttonText);
-        try {
-            page.waitForURL(successUrlPattern, new Page.WaitForURLOptions().setTimeout(30000));
-        } catch (TimeoutError exception) {
-            log.warn("Shipinhao upload submit did not reach list in time taskId={} button={} url={}", taskId, buttonText, page.url());
+        RuntimeException last = null;
+        long deadline = System.currentTimeMillis() + Duration.ofMinutes(6).toMillis();
+        int attempts = 0;
+        while (System.currentTimeMillis() < deadline && attempts < 3) {
+            attempts += 1;
+            waitForUploadComplete(page, taskId);
+            try {
+                Locator button = page.locator("div.form-btns button").filter(new Locator.FilterOptions().setHasText(buttonText)).first();
+                button.waitFor(new Locator.WaitForOptions().setTimeout(30000));
+                button.scrollIntoViewIfNeeded();
+                page.waitForTimeout(500);
+                button.click();
+                dumpDiagnostics(page, taskId, "after-click-" + buttonText + "-" + attempts);
+                try {
+                    page.waitForURL(successUrlPattern, new Page.WaitForURLOptions().setTimeout(30000));
+                } catch (TimeoutError exception) {
+                    log.warn("Shipinhao upload submit did not reach list in time taskId={} button={} attempt={} url={}", taskId, buttonText, attempts, page.url());
+                }
+                page.waitForTimeout(3000);
+                if (page.url().contains("/post/list")) {
+                    return;
+                }
+                String body = PlaywrightDiagnostics.safeBodyText(page);
+                if (TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new))) {
+                    dumpDiagnostics(page, taskId, "submit-missing-video-" + attempts);
+                    log.warn("Shipinhao upload submit reported missing video taskId={} attempt={} body={}",
+                            taskId, attempts, TextSupport.truncate(body, 300));
+                    page.waitForTimeout(5000);
+                    continue;
+                }
+                last = new RuntimeException("Shipinhao submit did not finish, currentUrl=" + page.url());
+            } catch (RuntimeException exception) {
+                last = exception;
+                log.warn("Shipinhao upload submit retry taskId={} button={} attempt={} message={}",
+                        taskId, buttonText, attempts, exception.getMessage());
+                page.waitForTimeout(3000);
+            }
         }
-        page.waitForTimeout(3000);
-        if (!page.url().contains("/post/list")) {
-            throw new RuntimeException("Shipinhao submit did not finish, currentUrl=" + page.url());
+        dumpDiagnostics(page, taskId, "submit-failed");
+        throw last == null ? new RuntimeException("Shipinhao submit did not finish") : last;
+    }
+
+    private void waitForVideoFileAccepted(Page page, String taskId) {
+        long deadline = System.currentTimeMillis() + Duration.ofSeconds(30).toMillis();
+        int checks = 0;
+        while (System.currentTimeMillis() < deadline) {
+            checks += 1;
+            try {
+                UploadReadiness state = uploadReadiness(page);
+                if (state.fileSelected() || state.mediaVisible()) {
+                    log.info("Shipinhao upload video file accepted taskId={} checks={} fileSelected={} mediaVisible={}",
+                            taskId, checks, state.fileSelected(), state.mediaVisible());
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+            page.waitForTimeout(1000);
         }
+        dumpDiagnostics(page, taskId, "video-file-not-accepted");
+        throw new RuntimeException("Shipinhao did not accept selected video file");
+    }
+
+    private UploadReadiness uploadReadiness(Page page) {
+        String body = PlaywrightDiagnostics.safeBodyText(page);
+        Locator publishButton = page.locator("div.form-btns button").filter(new Locator.FilterOptions().setHasText("发表")).first();
+        boolean buttonEnabled = false;
+        if (publishButton.count() > 0) {
+            String className = TextSupport.text(publishButton.getAttribute("class"));
+            String disabled = publishButton.getAttribute("disabled");
+            buttonEnabled = !className.contains("weui-desktop-btn_disabled") && disabled == null && publishButton.isEnabled();
+        }
+        boolean fileSelected = Boolean.TRUE.equals(page.evaluate(
+                """
+                () => Array.from(document.querySelectorAll('input[type="file"][accept*="video"]'))
+                  .some((input) => input.files && input.files.length > 0)
+                """
+        ));
+        boolean mediaVisible = Boolean.TRUE.equals(page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const rect = el.getBoundingClientRect();
+                    const style = getComputedStyle(el);
+                    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 80 && rect.height >= 60;
+                  };
+                  return Array.from(document.querySelectorAll('video, canvas, img')).some((el) => {
+                    if (!visible(el)) return false;
+                    const src = el.getAttribute('src') || '';
+                    const cls = el.className || '';
+                    const text = (el.closest('form, .post-create, .weui-desktop-form, .form') || document.body).innerText || '';
+                    return src.startsWith('blob:') || src.startsWith('data:') || /cover|poster|preview|thumb|video/i.test(cls) || text.includes('封面');
+                  });
+                }
+                """
+        ));
+        boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
+        boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
+        boolean missingVideo = TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new));
+        boolean ready = buttonEnabled && mediaVisible && !uploading && !uploadFailed && !missingVideo;
+        return new UploadReadiness(ready, buttonEnabled, mediaVisible, fileSelected, uploading, uploadFailed, missingVideo, body);
     }
 
     private String clickVisibleText(Page page, String text) {
@@ -317,5 +417,30 @@ public class ShipinhaoUploadService {
             value += " ";
         }
         return value;
+    }
+
+    private record UploadReadiness(
+            boolean ready,
+            boolean buttonEnabled,
+            boolean mediaVisible,
+            boolean fileSelected,
+            boolean uploading,
+            boolean uploadFailed,
+            boolean missingVideo,
+            String body
+    ) {
+        @Override
+        public String toString() {
+            return "UploadReadiness{"
+                    + "ready=" + ready
+                    + ", buttonEnabled=" + buttonEnabled
+                    + ", mediaVisible=" + mediaVisible
+                    + ", fileSelected=" + fileSelected
+                    + ", uploading=" + uploading
+                    + ", uploadFailed=" + uploadFailed
+                    + ", missingVideo=" + missingVideo
+                    + ", body='" + TextSupport.truncate(body, 200) + "'"
+                    + '}';
+        }
     }
 }
