@@ -66,13 +66,15 @@ public class MonitorService {
             "bilibili", "uploader_task_bilibili",
             "douyin", "uploader_task_douyin",
             "xiaohongshu", "uploader_task_xiaohongshu",
-            "shipinhao", "uploader_task_shipinhao"
+            "shipinhao", "uploader_task_shipinhao",
+            "kuaishou", "uploader_task_kuaishou"
     );
     private static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
             "bilibili", "uploader_account_bilibili",
             "douyin", "uploader_account_douyin",
             "xiaohongshu", "uploader_account_xiaohongshu",
-            "shipinhao", "uploader_account_shipinhao"
+            "shipinhao", "uploader_account_shipinhao",
+            "kuaishou", "uploader_account_kuaishou"
     );
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
@@ -118,7 +120,7 @@ public class MonitorService {
             "translator", List.of("translation_json_path", "target_language"),
             "speaker", List.of("tts_segments_dir"),
             "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
-            "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name", "shipinhao_upload_account_key", "shipinhao_upload_account_name", "shipinhao_upload_result_json")
+            "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name", "shipinhao_upload_account_key", "shipinhao_upload_account_name", "shipinhao_upload_result_json", "kuaishou_upload_account_key", "kuaishou_upload_account_name", "kuaishou_upload_result_json")
     );
 
     private static final String MONITOR_SQL = """
@@ -204,6 +206,8 @@ public class MonitorService {
                 SELECT task_id, title FROM uploader_task_xiaohongshu WHERE title IS NOT NULL AND title <> ''
                 UNION ALL
                 SELECT task_id, title FROM uploader_task_shipinhao WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_kuaishou WHERE title IS NOT NULL AND title <> ''
               ) upload_titles
               GROUP BY task_id
             ) ut ON ut.task_id = t.id
@@ -271,6 +275,8 @@ public class MonitorService {
                 SELECT task_id, status FROM uploader_task_xiaohongshu
                 UNION ALL
                 SELECT task_id, status FROM uploader_task_shipinhao
+                UNION ALL
+                SELECT task_id, status FROM uploader_task_kuaishou
               ) upload_task
               GROUP BY task_id
             ) us ON us.task_id = t.id
@@ -290,6 +296,8 @@ public class MonitorService {
                 SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_task_xiaohongshu
                 UNION ALL
                 SELECT task_id, account_key, status, error_message, 'shipinhao' platform FROM uploader_task_shipinhao
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'kuaishou' platform FROM uploader_task_kuaishou
               ) upload_task
               WHERE status = 'failed'
               GROUP BY task_id
@@ -1402,6 +1410,8 @@ public class MonitorService {
             normalized = "douyin";
         } else if ("sph".equals(normalized) || "channels".equals(normalized) || "wx_channels".equals(normalized) || "wechat_channels".equals(normalized) || "weixin-channels".equals(normalized) || "视频号".equals(normalized)) {
             normalized = "shipinhao";
+        } else if ("ks".equals(normalized) || "kwai".equals(normalized) || "快手".equals(normalized)) {
+            normalized = "kuaishou";
         }
         if (!UPLOADER_TASK_TABLES.containsKey(normalized)) {
             throw new IllegalArgumentException("Unsupported upload platform: " + platform);
@@ -1465,6 +1475,9 @@ public class MonitorService {
         ensureColumn("yd_uploader", "shipinhao_upload_account_key", "VARCHAR(128) NULL");
         ensureColumn("yd_uploader", "shipinhao_upload_account_name", "VARCHAR(128) NULL");
         ensureColumn("yd_uploader", "shipinhao_upload_result_json", "MEDIUMTEXT NULL");
+        ensureColumn("yd_uploader", "kuaishou_upload_account_key", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "kuaishou_upload_account_name", "VARCHAR(128) NULL");
+        ensureColumn("yd_uploader", "kuaishou_upload_result_json", "MEDIUMTEXT NULL");
         ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
     }
 

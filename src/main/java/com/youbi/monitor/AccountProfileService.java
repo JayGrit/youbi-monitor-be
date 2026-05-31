@@ -20,7 +20,8 @@ public class AccountProfileService {
             "bilibili", "uploader_account_bilibili",
             "douyin", "uploader_account_douyin",
             "xiaohongshu", "uploader_account_xiaohongshu",
-            "shipinhao", "uploader_account_shipinhao"
+            "shipinhao", "uploader_account_shipinhao",
+            "kuaishou", "uploader_account_kuaishou"
     );
 
     private final JdbcTemplate jdbcTemplate;

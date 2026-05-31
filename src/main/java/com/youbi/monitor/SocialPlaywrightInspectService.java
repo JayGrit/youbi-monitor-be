@@ -23,6 +23,7 @@ public class SocialPlaywrightInspectService {
     private final XiaohongshuAccountService xiaohongshuAccountService;
     private final BilibiliPlaywrightAccountService bilibiliAccountService;
     private final ShipinhaoAccountService shipinhaoAccountService;
+    private final KuaishouAccountService kuaishouAccountService;
     private final SocialBrowserFactory browserFactory;
     private final SocialRiskDetector riskDetector;
     private final DiagnosticArtifactService diagnosticArtifactService;
@@ -33,6 +34,7 @@ public class SocialPlaywrightInspectService {
             XiaohongshuAccountService xiaohongshuAccountService,
             BilibiliPlaywrightAccountService bilibiliAccountService,
             ShipinhaoAccountService shipinhaoAccountService,
+            KuaishouAccountService kuaishouAccountService,
             SocialBrowserFactory browserFactory,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
@@ -42,6 +44,7 @@ public class SocialPlaywrightInspectService {
         this.xiaohongshuAccountService = xiaohongshuAccountService;
         this.bilibiliAccountService = bilibiliAccountService;
         this.shipinhaoAccountService = shipinhaoAccountService;
+        this.kuaishouAccountService = kuaishouAccountService;
         this.browserFactory = browserFactory;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
@@ -198,6 +201,7 @@ public class SocialPlaywrightInspectService {
             case XIAOHONGSHU -> containsAny(body, "上传视频", "发布笔记", "请选择视频", "添加视频");
             case BILIBILI -> containsAny(body, "上传视频", "稿件", "发布", "点击上传");
             case SHIPINHAO -> containsAny(body, "发表动态", "视频描述", "发表", "保存草稿");
+            case KUAISHOU -> containsAny(body, "发布视频", "上传视频", "选择视频", "作品描述");
         };
     }
 
@@ -258,6 +262,7 @@ public class SocialPlaywrightInspectService {
             case XIAOHONGSHU -> xiaohongshuAccountService.newContext(browser, storageState);
             case BILIBILI -> bilibiliAccountService.newContext(browser, storageState);
             case SHIPINHAO -> shipinhaoAccountService.newContext(browser, storageState);
+            case KUAISHOU -> kuaishouAccountService.newContext(browser, storageState);
         };
     }
 
@@ -267,6 +272,7 @@ public class SocialPlaywrightInspectService {
             case XIAOHONGSHU -> xiaohongshuAccountService.normalizeAccountKey(accountKey);
             case BILIBILI -> bilibiliAccountService.normalizeAccountKey(accountKey);
             case SHIPINHAO -> shipinhaoAccountService.normalizeAccountKey(accountKey);
+            case KUAISHOU -> kuaishouAccountService.normalizeAccountKey(accountKey);
         };
     }
 
@@ -276,6 +282,7 @@ public class SocialPlaywrightInspectService {
             case XIAOHONGSHU -> xiaohongshuAccountService.storageState(accountKey);
             case BILIBILI -> bilibiliAccountService.storageState(accountKey);
             case SHIPINHAO -> shipinhaoAccountService.storageState(accountKey);
+            case KUAISHOU -> kuaishouAccountService.storageState(accountKey);
         };
     }
 
@@ -285,6 +292,7 @@ public class SocialPlaywrightInspectService {
             case XIAOHONGSHU -> XiaohongshuAccountService.PUBLISH_VIDEO_URL;
             case BILIBILI -> BilibiliPlaywrightAccountService.PUBLISH_VIDEO_URL;
             case SHIPINHAO -> ShipinhaoAccountService.PUBLISH_VIDEO_URL;
+            case KUAISHOU -> KuaishouAccountService.PUBLISH_VIDEO_URL;
         };
     }
 
@@ -306,6 +314,7 @@ public class SocialPlaywrightInspectService {
             case "xiaohongshu", "xhs" -> SocialBrowserPlatform.XIAOHONGSHU;
             case "bilibili", "bili" -> SocialBrowserPlatform.BILIBILI;
             case "shipinhao", "sph", "channels", "weixin-channels" -> SocialBrowserPlatform.SHIPINHAO;
+            case "kuaishou", "ks" -> SocialBrowserPlatform.KUAISHOU;
             default -> throw new IllegalArgumentException("Unsupported platform: " + value);
         };
     }

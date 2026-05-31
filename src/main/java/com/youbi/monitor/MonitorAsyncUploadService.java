@@ -21,7 +21,7 @@ import java.util.concurrent.Executors;
 public class MonitorAsyncUploadService {
     private static final Logger log = LoggerFactory.getLogger(MonitorAsyncUploadService.class);
     private static final String TABLE = "monitor_upload_task";
-    private static final int UPLOAD_TASK_TIMEOUT_SECONDS = 8 * 60;
+    private static final int UPLOAD_TASK_TIMEOUT_SECONDS = 75 * 60;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -30,6 +30,7 @@ public class MonitorAsyncUploadService {
     private final XiaohongshuUploadService xiaohongshuUploadService;
     private final DouyinUploadService douyinUploadService;
     private final ShipinhaoUploadService shipinhaoUploadService;
+    private final KuaishouUploadService kuaishouUploadService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
@@ -44,6 +45,7 @@ public class MonitorAsyncUploadService {
             XiaohongshuUploadService xiaohongshuUploadService,
             DouyinUploadService douyinUploadService,
             ShipinhaoUploadService shipinhaoUploadService,
+            KuaishouUploadService kuaishouUploadService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper
     ) {
@@ -52,6 +54,7 @@ public class MonitorAsyncUploadService {
         this.xiaohongshuUploadService = xiaohongshuUploadService;
         this.douyinUploadService = douyinUploadService;
         this.shipinhaoUploadService = shipinhaoUploadService;
+        this.kuaishouUploadService = kuaishouUploadService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
     }
@@ -216,6 +219,7 @@ public class MonitorAsyncUploadService {
             case "xiaohongshu" -> xiaohongshuUploadService.upload((XiaohongshuUploadRequest) request);
             case "douyin" -> douyinUploadService.upload((DouyinUploadRequest) request);
             case "shipinhao" -> shipinhaoUploadService.upload((ShipinhaoUploadRequest) request);
+            case "kuaishou" -> kuaishouUploadService.upload((KuaishouUploadRequest) request);
             default -> throw new IllegalArgumentException("Unsupported upload platform: " + platform);
         };
     }
