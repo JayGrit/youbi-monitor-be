@@ -44,6 +44,7 @@ public class XiaohongshuUploadService {
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
             ObjectMapper objectMapper,
+            AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -61,7 +62,7 @@ public class XiaohongshuUploadService {
         String bucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
-        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, log, "XHS upload", true);
+        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, aliDriveService, log, "XHS upload", true);
     }
 
     public XiaohongshuUploadResult upload(XiaohongshuUploadRequest request) throws IOException {
@@ -405,7 +406,7 @@ public class XiaohongshuUploadService {
     }
 
     private UploadMaterialResolver.ResolvedFile resolveVideo(XiaohongshuUploadRequest request) throws IOException {
-        return materialResolver.resolveVideo(request.videoUrl(), request.minioUrl(), request.videoPath(), request.taskId());
+        return materialResolver.resolveVideo(request.videoLocation(), request.videoUrl(), request.minioUrl(), request.videoPath(), request.alidriveFileId(), request.alidriveRemotePath(), request.taskId());
     }
 
     private UploadMaterialResolver.ResolvedFile resolveCover(XiaohongshuUploadRequest request) throws IOException {

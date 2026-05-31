@@ -38,6 +38,7 @@ public class DouyinUploadService {
     private static final String DIAGNOSTIC_SOURCE = "douyin-upload";
 
     private final DouyinAccountService accountService;
+    private final AliDriveService aliDriveService;
     private final MinioClient minioClient;
     private final String minioBucket;
     private final Path uploadWorkDir;
@@ -54,6 +55,7 @@ public class DouyinUploadService {
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
+            AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -65,6 +67,7 @@ public class DouyinUploadService {
         this.humanActions = humanActions;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
+        this.aliDriveService = aliDriveService;
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -555,11 +558,33 @@ public class DouyinUploadService {
     }
 
     private ResolvedFile resolveVideo(DouyinUploadRequest request) throws IOException {
+        if (isAliDriveVideo(request)) {
+            return new ResolvedFile(downloadAliDriveFile(request), true);
+        }
         String minioUrl = firstText(request.videoUrl(), request.minioUrl());
         if (!minioUrl.isBlank()) {
             return new ResolvedFile(downloadMinioFile(minioUrl, request.taskId(), "video.mp4"), true);
         }
         return new ResolvedFile(Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize(), false);
+    }
+
+    private Path downloadAliDriveFile(DouyinUploadRequest request) throws IOException {
+        AliDriveRef ref = aliDriveRef(request.videoUrl(), request.minioUrl(), request.alidriveFileId(), request.alidriveRemotePath());
+        if (ref.fileId().isBlank() && ref.remotePath().isBlank()) {
+            throw new IOException("AliDrive video reference is missing");
+        }
+        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(request.taskId(), "manual"))).resolve(UUID.randomUUID().toString());
+        try {
+            AliDriveTransferResult result = aliDriveService.download(new AliDriveDownloadRequest(ref.remotePath(), ref.fileId(), taskDir.toString(), ""));
+            Path path = Path.of(required(result.localPath(), "localPath")).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(path) || Files.size(path) == 0) {
+                throw new IOException("Downloaded AliDrive video is empty: " + path);
+            }
+            return path;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted downloading AliDrive video", exception);
+        }
     }
 
     private ResolvedFile resolveCover(DouyinUploadRequest request) throws IOException {
@@ -736,10 +761,44 @@ public class DouyinUploadService {
         return sanitized.isBlank() ? "manual" : sanitized;
     }
 
+    private boolean isAliDriveVideo(DouyinUploadRequest request) {
+        String location = text(request.videoLocation()).toLowerCase();
+        return location.equals("adrive")
+                || location.equals("alidrive")
+                || location.equals("aliyun")
+                || location.equals("aliyundrive")
+                || hasText(request.alidriveFileId())
+                || hasText(request.alidriveRemotePath())
+                || isAliDriveRef(request.videoUrl())
+                || isAliDriveRef(request.minioUrl());
+    }
+
+    private boolean isAliDriveRef(String ref) {
+        return text(ref).startsWith("adrive://");
+    }
+
+    private AliDriveRef aliDriveRef(String videoUrl, String minioUrl, String fileId, String remotePath) {
+        String resolvedFileId = text(fileId);
+        String resolvedRemotePath = text(remotePath);
+        String ref = firstText(videoUrl, minioUrl);
+        if (resolvedFileId.isBlank() && resolvedRemotePath.isBlank() && isAliDriveRef(ref)) {
+            String value = text(ref).replaceFirst("^adrive://", "").trim();
+            if (value.startsWith("/")) {
+                resolvedRemotePath = value;
+            } else {
+                resolvedFileId = value;
+            }
+        }
+        return new AliDriveRef(resolvedFileId, resolvedRemotePath);
+    }
+
     private record ObjectRef(String bucket, String objectName) {
     }
 
     private record ResolvedFile(Path path, boolean temporary) {
+    }
+
+    private record AliDriveRef(String fileId, String remotePath) {
     }
 
     private record UploadPaths(Path localPath, Path browserPath) {

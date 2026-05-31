@@ -327,16 +327,16 @@ public class MonitorAsyncUploadService {
 
     private String requestVideoUrl(Object request) {
         if (request instanceof BilibiliUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
         }
         if (request instanceof XiaohongshuUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
         }
         if (request instanceof DouyinUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
         }
         if (request instanceof ShipinhaoUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.videoPath());
+            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
         }
         return "";
     }

@@ -46,6 +46,7 @@ public class BilibiliPlaywrightUploadService {
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
+            AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -65,7 +66,7 @@ public class BilibiliPlaywrightUploadService {
         this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
         this.browserUploadWorkDir = text(browserUploadWorkDir).isBlank() ? null : Path.of(browserUploadWorkDir).toAbsolutePath().normalize();
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
-        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, log, "Bilibili Playwright", false);
+        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, this.uploadWorkDir, httpClient, aliDriveService, log, "Bilibili Playwright", false);
     }
 
     public BilibiliUploadResult upload(BilibiliUploadRequest request) throws IOException {
@@ -856,7 +857,7 @@ public class BilibiliPlaywrightUploadService {
     }
 
     private UploadMaterialResolver.ResolvedFile resolveVideo(BilibiliUploadRequest request) throws IOException {
-        return materialResolver.resolveVideo(request.videoUrl(), request.minioUrl(), request.videoPath(), request.taskId());
+        return materialResolver.resolveVideo(request.videoLocation(), request.videoUrl(), request.minioUrl(), request.videoPath(), request.alidriveFileId(), request.alidriveRemotePath(), request.taskId());
     }
 
     private UploadMaterialResolver.ResolvedFile resolveCover(BilibiliUploadRequest request) throws IOException {

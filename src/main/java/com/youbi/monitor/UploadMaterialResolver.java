@@ -24,6 +24,7 @@ final class UploadMaterialResolver {
     private final String minioBucket;
     private final Path uploadWorkDir;
     private final HttpClient httpClient;
+    private final AliDriveService aliDriveService;
     private final Logger log;
     private final String logPrefix;
     private final boolean logMinioDownloads;
@@ -33,6 +34,7 @@ final class UploadMaterialResolver {
             String minioBucket,
             Path uploadWorkDir,
             HttpClient httpClient,
+            AliDriveService aliDriveService,
             Logger log,
             String logPrefix,
             boolean logMinioDownloads
@@ -41,12 +43,28 @@ final class UploadMaterialResolver {
         this.minioBucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
         this.uploadWorkDir = uploadWorkDir;
         this.httpClient = httpClient;
+        this.aliDriveService = aliDriveService;
         this.log = log;
         this.logPrefix = logPrefix;
         this.logMinioDownloads = logMinioDownloads;
     }
 
     ResolvedFile resolveVideo(String videoUrl, String minioUrl, String videoPath, String taskId) throws IOException {
+        return resolveVideo("", videoUrl, minioUrl, videoPath, "", "", taskId);
+    }
+
+    ResolvedFile resolveVideo(
+            String videoLocation,
+            String videoUrl,
+            String minioUrl,
+            String videoPath,
+            String alidriveFileId,
+            String alidriveRemotePath,
+            String taskId
+    ) throws IOException {
+        if (isAliDriveLocation(videoLocation) || hasAliDriveRef(alidriveFileId, alidriveRemotePath) || isAliDriveRef(videoUrl) || isAliDriveRef(minioUrl)) {
+            return new ResolvedFile(downloadAliDriveFile(videoUrl, minioUrl, alidriveFileId, alidriveRemotePath, taskId), true);
+        }
         String ref = TextSupport.firstText(videoUrl, minioUrl);
         if (!ref.isBlank()) {
             return new ResolvedFile(downloadMinioFile(ref, taskId, "video.mp4"), true);
@@ -132,6 +150,33 @@ final class UploadMaterialResolver {
         return destination;
     }
 
+    private Path downloadAliDriveFile(String videoUrl, String minioUrl, String fileId, String remotePath, String taskId) throws IOException {
+        if (aliDriveService == null) {
+            throw new IOException("AliDrive service is not configured for upload material resolver");
+        }
+        AliDriveRef ref = aliDriveRef(videoUrl, minioUrl, fileId, remotePath);
+        if (ref.fileId().isBlank() && ref.remotePath().isBlank()) {
+            throw new IOException("AliDrive video reference is missing");
+        }
+        Path taskDir = uploadWorkDir.resolve(TextSupport.safeSegment(TextSupport.firstText(taskId, "manual"))).resolve(UUID.randomUUID().toString());
+        Files.createDirectories(taskDir);
+        long startedAt = System.currentTimeMillis();
+        log.info("{} download AliDrive start taskId={} fileId={} remotePath={} outDir={}", logPrefix, TextSupport.firstText(taskId, "manual"), ref.fileId(), ref.remotePath(), taskDir);
+        try {
+            AliDriveTransferResult result = aliDriveService.download(new AliDriveDownloadRequest(ref.remotePath(), ref.fileId(), taskDir.toString(), ""));
+            Path destination = Path.of(TextSupport.required(result.localPath(), "localPath")).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(destination) || Files.size(destination) == 0) {
+                throw new IOException("Downloaded AliDrive video is empty: " + destination);
+            }
+            log.info("{} download AliDrive done taskId={} fileId={} remotePath={} path={} bytes={} elapsedMs={}",
+                    logPrefix, TextSupport.firstText(taskId, "manual"), result.fileId(), result.remotePath(), destination, Files.size(destination), System.currentTimeMillis() - startedAt);
+            return destination;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted downloading AliDrive video", exception);
+        }
+    }
+
     private ObjectRef parseObjectRef(String ref) throws IOException {
         String value = TextSupport.text(ref);
         URI uri;
@@ -185,6 +230,34 @@ final class UploadMaterialResolver {
         }
     }
 
+    private boolean isAliDriveLocation(String value) {
+        String text = TextSupport.text(value).toLowerCase();
+        return text.equals("adrive") || text.equals("alidrive") || text.equals("aliyun") || text.equals("aliyundrive");
+    }
+
+    private boolean hasAliDriveRef(String fileId, String remotePath) {
+        return TextSupport.hasText(fileId) || TextSupport.hasText(remotePath);
+    }
+
+    private boolean isAliDriveRef(String ref) {
+        return TextSupport.text(ref).startsWith("adrive://");
+    }
+
+    private AliDriveRef aliDriveRef(String videoUrl, String minioUrl, String fileId, String remotePath) {
+        String resolvedFileId = TextSupport.text(fileId);
+        String resolvedRemotePath = TextSupport.text(remotePath);
+        String ref = TextSupport.firstText(videoUrl, minioUrl);
+        if ((resolvedFileId.isBlank() && resolvedRemotePath.isBlank()) && isAliDriveRef(ref)) {
+            String value = TextSupport.text(ref).replaceFirst("^adrive://", "").trim();
+            if (value.startsWith("/")) {
+                resolvedRemotePath = value;
+            } else {
+                resolvedFileId = value;
+            }
+        }
+        return new AliDriveRef(resolvedFileId, resolvedRemotePath);
+    }
+
     private String decode(String value) {
         return URLDecoder.decode(TextSupport.text(value), StandardCharsets.UTF_8);
     }
@@ -197,5 +270,8 @@ final class UploadMaterialResolver {
     }
 
     private record ObjectRef(String bucket, String objectName) {
+    }
+
+    private record AliDriveRef(String fileId, String remotePath) {
     }
 }

@@ -44,6 +44,7 @@ public class ShipinhaoUploadService {
     public ShipinhaoUploadService(
             ShipinhaoAccountService accountService,
             DiagnosticArtifactService diagnosticArtifactService,
+            AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -59,7 +60,7 @@ public class ShipinhaoUploadService {
         String bucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
         Path workDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
-        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, workDir, httpClient, log, "Shipinhao upload", true);
+        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, workDir, httpClient, aliDriveService, log, "Shipinhao upload", true);
     }
 
     public ShipinhaoUploadResult upload(ShipinhaoUploadRequest request) throws IOException {
@@ -419,7 +420,7 @@ public class ShipinhaoUploadService {
     }
 
     private UploadMaterialResolver.ResolvedFile resolveVideo(ShipinhaoUploadRequest request) throws IOException {
-        return materialResolver.resolveVideo(request.videoUrl(), request.minioUrl(), request.videoPath(), request.taskId());
+        return materialResolver.resolveVideo(request.videoLocation(), request.videoUrl(), request.minioUrl(), request.videoPath(), request.alidriveFileId(), request.alidriveRemotePath(), request.taskId());
     }
 
     private List<String> parseTags(String tags) {

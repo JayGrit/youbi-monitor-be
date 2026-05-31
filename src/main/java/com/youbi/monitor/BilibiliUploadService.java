@@ -34,6 +34,7 @@ public class BilibiliUploadService {
     private static final String USER_AGENT = "Mozilla/5.0 BiliDroid/7.80.0 (bbcallen@gmail.com) os/android model/MI 6 mobi_app/android build/7800300 channel/bili innerVer/7800310 osVer/13 network/2";
 
     private final BilibiliAccountService accountService;
+    private final AliDriveService aliDriveService;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final MinioClient minioClient;
@@ -43,6 +44,7 @@ public class BilibiliUploadService {
     public BilibiliUploadService(
             BilibiliAccountService accountService,
             ObjectMapper objectMapper,
+            AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -50,6 +52,7 @@ public class BilibiliUploadService {
             @Value("${youbi.minio.work-dir}") String uploadWorkDir
     ) {
         this.accountService = accountService;
+        this.aliDriveService = aliDriveService;
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(60))
@@ -96,6 +99,9 @@ public class BilibiliUploadService {
     }
 
     private ResolvedVideo resolveVideo(BilibiliUploadRequest request) throws IOException {
+        if (isAliDriveVideo(request)) {
+            return new ResolvedVideo(downloadAliDriveVideo(request), true);
+        }
         String minioUrl = firstText(request.videoUrl(), request.minioUrl());
         if (!minioUrl.isBlank()) {
             return new ResolvedVideo(downloadMinioVideo(minioUrl, request.taskId()), true);
@@ -103,6 +109,25 @@ public class BilibiliUploadService {
 
         Path videoPath = Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize();
         return new ResolvedVideo(videoPath, false);
+    }
+
+    private Path downloadAliDriveVideo(BilibiliUploadRequest request) throws IOException {
+        AliDriveRef ref = aliDriveRef(request.videoUrl(), request.minioUrl(), request.alidriveFileId(), request.alidriveRemotePath());
+        if (ref.fileId().isBlank() && ref.remotePath().isBlank()) {
+            throw new IOException("AliDrive video reference is missing");
+        }
+        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(request.taskId(), "manual"))).resolve(UUID.randomUUID().toString());
+        try {
+            AliDriveTransferResult result = aliDriveService.download(new AliDriveDownloadRequest(ref.remotePath(), ref.fileId(), taskDir.toString(), ""));
+            Path path = Path.of(required(result.localPath(), "localPath")).toAbsolutePath().normalize();
+            if (!Files.isRegularFile(path) || Files.size(path) == 0) {
+                throw new IOException("Downloaded AliDrive video is empty: " + path);
+            }
+            return path;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted downloading AliDrive video", exception);
+        }
     }
 
     private Path downloadMinioVideo(String minioUrl, String taskId) throws IOException {
@@ -467,6 +492,40 @@ public class BilibiliUploadService {
         return sanitized.isBlank() ? "manual" : sanitized;
     }
 
+    private boolean isAliDriveVideo(BilibiliUploadRequest request) {
+        String location = text(request.videoLocation()).toLowerCase();
+        return location.equals("adrive")
+                || location.equals("alidrive")
+                || location.equals("aliyun")
+                || location.equals("aliyundrive")
+                || hasAliDriveRef(request.alidriveFileId(), request.alidriveRemotePath())
+                || isAliDriveRef(request.videoUrl())
+                || isAliDriveRef(request.minioUrl());
+    }
+
+    private boolean hasAliDriveRef(String fileId, String remotePath) {
+        return !text(fileId).isBlank() || !text(remotePath).isBlank();
+    }
+
+    private boolean isAliDriveRef(String ref) {
+        return text(ref).startsWith("adrive://");
+    }
+
+    private AliDriveRef aliDriveRef(String videoUrl, String minioUrl, String fileId, String remotePath) {
+        String resolvedFileId = text(fileId);
+        String resolvedRemotePath = text(remotePath);
+        String ref = firstText(videoUrl, minioUrl);
+        if (resolvedFileId.isBlank() && resolvedRemotePath.isBlank() && isAliDriveRef(ref)) {
+            String value = text(ref).replaceFirst("^adrive://", "").trim();
+            if (value.startsWith("/")) {
+                resolvedRemotePath = value;
+            } else {
+                resolvedFileId = value;
+            }
+        }
+        return new AliDriveRef(resolvedFileId, resolvedRemotePath);
+    }
+
     private AccountIdentity accountIdentity(String accountKey, JsonNode loginInfo) {
         Long uid = loginInfo.path("token_info").path("mid").canConvertToLong()
                 ? loginInfo.path("token_info").path("mid").asLong()
@@ -508,6 +567,9 @@ public class BilibiliUploadService {
     }
 
     private record ResolvedVideo(Path path, boolean temporary) {
+    }
+
+    private record AliDriveRef(String fileId, String remotePath) {
     }
 
     private record UploadedVideo(String title, String filename, String description) {
