@@ -32,12 +32,12 @@ SHIPINHAO_DOMAINS = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Open a temporary Chrome profile, wait for Shipinhao scan login, then save storage state into uploader_account_shipinhao."
+        description="Open a fresh temporary Chrome profile, wait for Shipinhao scan login, then insert a new uploader_account_shipinhao row."
     )
-    parser.add_argument("--account-key", default=os.getenv("YDBI_SHIPINHAO_ACCOUNT_KEY", "default"))
+    parser.add_argument("--account-key", default=os.getenv("YDBI_SHIPINHAO_ACCOUNT_KEY", "default"), help="Base account key. If it already exists, the script uses base-1, base-2, ...")
     parser.add_argument("--keep-all-origins", action="store_true", help="Store the full Chrome context state instead of only Weixin domains.")
     parser.add_argument("--timeout-seconds", type=int, default=int(os.getenv("YDBI_SHIPINHAO_LOGIN_TIMEOUT_SECONDS", "600")))
-    parser.add_argument("--fresh", action="store_true", help="Delete the temporary Chrome profile dir before login.")
+    parser.add_argument("--fresh", action="store_true", help="Ignored for compatibility; new-account login always starts from a clean temporary profile.")
     parser.add_argument("--mysql-host", default=os.getenv("YDBI_MYSQL_HOST", DEFAULT_MYSQL_HOST))
     parser.add_argument("--mysql-port", type=int, default=int(os.getenv("YDBI_MYSQL_PORT", str(DEFAULT_MYSQL_PORT))))
     parser.add_argument("--mysql-database", default=os.getenv("YDBI_MYSQL_DATABASE", DEFAULT_MYSQL_DATABASE))
@@ -51,6 +51,42 @@ def normalize_account_key(value: str) -> str:
     if not account_key or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", account_key):
         raise ValueError(f"Invalid account key: {value!r}")
     return account_key
+
+
+def connect_mysql(args: argparse.Namespace):
+    return mysql.connector.connect(
+        host=args.mysql_host,
+        port=args.mysql_port,
+        user=args.mysql_user,
+        password=args.mysql_password,
+        database=args.mysql_database,
+        connection_timeout=10,
+    )
+
+
+def account_key_candidate(base_key: str, index: int) -> str:
+    if index == 0:
+        return base_key
+    suffix = f"-{index}"
+    max_base_len = 64 - len(suffix)
+    return f"{base_key[:max_base_len]}{suffix}"
+
+
+def next_account_key(args: argparse.Namespace, base_key: str) -> str:
+    connection = connect_mysql(args)
+    try:
+        cursor = connection.cursor()
+        ensure_schema(cursor)
+        cursor.execute("SELECT account_key FROM uploader_account_shipinhao")
+        existing = {str(row[0]) for row in cursor.fetchall()}
+    finally:
+        connection.close()
+
+    for index in range(0, 1000):
+        candidate = account_key_candidate(base_key, index)
+        if candidate not in existing:
+            return candidate
+    raise RuntimeError(f"No available Shipinhao account key for base: {base_key}")
 
 
 def is_shipinhao_host(value: str) -> bool:
@@ -157,14 +193,7 @@ def ensure_schema(cursor) -> None:
 
 
 def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_id: str | None, nickname: str | None) -> None:
-    connection = mysql.connector.connect(
-        host=args.mysql_host,
-        port=args.mysql_port,
-        user=args.mysql_user,
-        password=args.mysql_password,
-        database=args.mysql_database,
-        connection_timeout=10,
-    )
+    connection = connect_mysql(args)
     try:
         cursor = connection.cursor()
         ensure_schema(cursor)
@@ -172,11 +201,6 @@ def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_i
             """
             INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, updated_at)
             VALUES (%s, %s, %s, %s, NOW())
-            ON DUPLICATE KEY UPDATE
-              user_id = VALUES(user_id),
-              nickname = VALUES(nickname),
-              storage_state_json = VALUES(storage_state_json),
-              updated_at = NOW()
             """,
             (args.account_key, user_id, nickname, storage_state_json),
         )
@@ -187,7 +211,7 @@ def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_i
 
 def wait_for_login(args: argparse.Namespace) -> tuple[dict[str, Any], str, str | None, str | None]:
     profile_dir = PROFILE_ROOT / args.account_key
-    if args.fresh and profile_dir.exists():
+    if profile_dir.exists():
         shutil.rmtree(profile_dir)
     profile_dir.mkdir(parents=True, exist_ok=True)
 
@@ -235,7 +259,10 @@ def wait_for_login(args: argparse.Namespace) -> tuple[dict[str, Any], str, str |
 
 def main() -> int:
     args = parse_args()
-    args.account_key = normalize_account_key(args.account_key)
+    base_account_key = normalize_account_key(args.account_key)
+    args.account_key = next_account_key(args, base_account_key)
+    if args.account_key != base_account_key:
+        print(f"account_key={base_account_key} 已存在，本次新增账号将写入 account_key={args.account_key}")
     state, final_url, user_id, nickname = wait_for_login(args)
     cookie_count = len(state.get("cookies", []))
     origin_count = len(state.get("origins", []))
