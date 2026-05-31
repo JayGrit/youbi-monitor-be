@@ -291,7 +291,7 @@ public class ShipinhaoUploadService {
             page.waitForTimeout(1000);
         }
         dumpDiagnostics(page, taskId, "video-file-not-accepted");
-        throw new RuntimeException("Shipinhao did not accept selected video file");
+        log.warn("Shipinhao upload selected video was not detected by early DOM check taskId={}, continue to metadata/upload readiness checks", taskId);
     }
 
     private UploadReadiness uploadReadiness(Page page) {
@@ -309,7 +309,7 @@ public class ShipinhaoUploadService {
                   .some((input) => input.files && input.files.length > 0)
                 """
         ));
-        boolean mediaVisible = Boolean.TRUE.equals(page.evaluate(
+        boolean domMediaVisible = Boolean.TRUE.equals(page.evaluate(
                 """
                 () => {
                   const visible = (el) => {
@@ -327,6 +327,10 @@ public class ShipinhaoUploadService {
                 }
                 """
         ));
+        boolean uploadPreviewText = body.contains("封面预览")
+                || (body.contains("个人主页卡片") && body.contains("分享卡片"))
+                || (body.contains("删除") && body.contains("短标题"));
+        boolean mediaVisible = domMediaVisible || uploadPreviewText;
         boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
         boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
         boolean missingVideo = TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new));
