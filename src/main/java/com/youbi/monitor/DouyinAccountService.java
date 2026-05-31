@@ -54,7 +54,7 @@ public class DouyinAccountService {
 
     public List<DouyinAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, cdp_port, cdp_endpoint, note, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, cdp_port, cdp_endpoint, note, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -80,7 +80,9 @@ public class DouyinAccountService {
                             rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
-                            Map.of()
+                            Map.of(),
+                            rs.getString("display_name"),
+                            rs.getString("avatar_url")
                     );
                 }
         );
@@ -774,6 +776,8 @@ public class DouyinAccountService {
         ensureColumn("uploader_account_douyin", "cdp_port", "INT NULL");
         ensureColumn("uploader_account_douyin", "cdp_endpoint", "VARCHAR(255) NULL");
         ensureColumn("uploader_account_douyin", "note", "VARCHAR(255) NULL");
+        ensureColumn("uploader_account_douyin", "display_name", "VARCHAR(128) NULL");
+        ensureColumn("uploader_account_douyin", "avatar_url", "VARCHAR(1024) NULL");
     }
 
     private void ensureColumn(String table, String column, String definition) {

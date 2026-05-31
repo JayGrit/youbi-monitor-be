@@ -1,21 +1,25 @@
 package com.youbi.monitor;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
 @RestController
 public class DouyinAccountController {
     private final DouyinAccountService accountService;
+    private final AccountProfileService accountProfileService;
 
-    public DouyinAccountController(DouyinAccountService accountService) {
+    public DouyinAccountController(DouyinAccountService accountService, AccountProfileService accountProfileService) {
         this.accountService = accountService;
+        this.accountProfileService = accountProfileService;
     }
 
     @GetMapping("/api/douyin/accounts")
@@ -91,6 +95,24 @@ public class DouyinAccountController {
                     request == null ? null : request.minSeconds(),
                     request == null ? null : request.maxSeconds()
             ));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
+
+    @PostMapping("/api/douyin/account/{accountKey}/profile")
+    public ResponseEntity<?> updateProfile(@PathVariable String accountKey, @RequestBody AccountProfileUpdateRequest request) {
+        try {
+            return ResponseEntity.ok(accountProfileService.updateProfile("douyin", accountKey, request));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
+
+    @PostMapping(value = "/api/douyin/account/{accountKey}/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadAvatar(@PathVariable String accountKey, @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(accountProfileService.uploadAvatar("douyin", accountKey, file));
         } catch (Exception exception) {
             return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
         }

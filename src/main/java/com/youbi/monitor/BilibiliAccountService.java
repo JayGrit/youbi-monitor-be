@@ -58,7 +58,7 @@ public class BilibiliAccountService {
 
     public List<BilibiliAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, mid, uname, login_info_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, mid, uname, login_info_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("login_info_json");
@@ -85,7 +85,9 @@ public class BilibiliAccountService {
                             rs.getBoolean("is_enabled"),
                             null,
                             "已保存",
-                            Map.of()
+                            Map.of(),
+                            rs.getString("display_name"),
+                            rs.getString("avatar_url")
                     );
                 }
         );
@@ -457,6 +459,8 @@ public class BilibiliAccountService {
         ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
         ensureColumn("upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
         ensureColumn("upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
+        ensureColumn("display_name", "VARCHAR(128) NULL");
+        ensureColumn("avatar_url", "VARCHAR(1024) NULL");
     }
 
     private void ensureColumn(String column, String definition) {
