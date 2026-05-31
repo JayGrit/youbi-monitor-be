@@ -21,6 +21,7 @@ import java.util.concurrent.Executors;
 public class MonitorAsyncUploadService {
     private static final Logger log = LoggerFactory.getLogger(MonitorAsyncUploadService.class);
     private static final String TABLE = "monitor_upload_task";
+    private static final int UPLOAD_TASK_TIMEOUT_SECONDS = 8 * 60;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -31,7 +32,7 @@ public class MonitorAsyncUploadService {
     private final ShipinhaoUploadService shipinhaoUploadService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
+    private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "monitor-upload-task");
         thread.setDaemon(true);
         return thread;
@@ -117,6 +118,7 @@ public class MonitorAsyncUploadService {
 
     public MonitorUploadTaskResponse status(String uploadTaskId) {
         ensureSchema();
+        failStaleRunningTasks();
         try {
             return jdbcTemplate.queryForObject(
                     "SELECT * FROM " + TABLE + " WHERE upload_task_id = ?",
@@ -159,10 +161,15 @@ public class MonitorAsyncUploadService {
 
     private void execute(String uploadTaskId, String platform, Object request) {
         long startedAt = System.currentTimeMillis();
-        jdbcTemplate.update(
-                "UPDATE " + TABLE + " SET status = 'running', started_at = COALESCE(started_at, NOW()), error_message = NULL WHERE upload_task_id = ?",
+        int started = jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET status = 'running', started_at = COALESCE(started_at, NOW()), error_message = NULL WHERE upload_task_id = ? AND status = 'accepted'",
                 uploadTaskId
         );
+        if (started == 0) {
+            log.warn("Async upload skipped because task is no longer accepted uploadTaskId={} platform={} taskId={}",
+                    uploadTaskId, platform, taskId(request));
+            return;
+        }
         try {
             Object result = upload(platform, request);
             Map<String, Object> resultMap = objectMapper.convertValue(result, MAP_TYPE);
@@ -172,23 +179,32 @@ public class MonitorAsyncUploadService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("result", resultMap);
-            jdbcTemplate.update(
-                    "UPDATE " + TABLE + " SET status = 'success', result_json = ?, error_code = NULL, error_message = NULL, completed_at = NOW() WHERE upload_task_id = ?",
+            int updated = jdbcTemplate.update(
+                    "UPDATE " + TABLE + " SET status = 'success', result_json = ?, error_code = NULL, error_message = NULL, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
                     toJson(payload),
                     uploadTaskId
             );
+            if (updated == 0) {
+                log.warn("Async upload finished after task status changed uploadTaskId={} platform={} taskId={}",
+                        uploadTaskId, platform, taskId(request));
+            }
         } catch (Exception exception) {
             String message = firstText(exception.getMessage(), exception.getClass().getSimpleName());
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("error", message);
-            jdbcTemplate.update(
-                    "UPDATE " + TABLE + " SET status = 'failed', result_json = ?, error_code = ?, error_message = ?, completed_at = NOW() WHERE upload_task_id = ?",
+            int updated = jdbcTemplate.update(
+                    "UPDATE " + TABLE + " SET status = 'failed', result_json = ?, error_code = ?, error_message = ?, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
                     toJson(payload),
                     classifyErrorCode(message),
                     message,
                     uploadTaskId
             );
+            if (updated == 0) {
+                log.warn("Async upload failed after task status changed uploadTaskId={} platform={} taskId={} message={}",
+                        uploadTaskId, platform, taskId(request), message);
+                return;
+            }
             log.warn("Async upload failed uploadTaskId={} platform={} taskId={} accountKey={} message={}",
                     uploadTaskId, platform, taskId(request), accountKey(request), message, exception);
         }
@@ -264,12 +280,14 @@ public class MonitorAsyncUploadService {
                 UPDATE monitor_upload_task
                 SET status = 'failed',
                     error_code = 'MONITOR_UPLOAD_TIMEOUT',
-                    error_message = 'monitor upload task timed out before completion',
+                    error_message = ?,
                     completed_at = NOW()
                 WHERE status IN ('accepted', 'running')
                   AND started_at IS NOT NULL
-                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) > 7200
-                """);
+                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) > ?
+                """,
+                "monitor upload task timed out after " + UPLOAD_TASK_TIMEOUT_SECONDS + "s",
+                UPLOAD_TASK_TIMEOUT_SECONDS);
     }
 
     private String classifyErrorCode(String message) {

@@ -36,6 +36,7 @@ public class DouyinUploadService {
     private static final String MANAGE_URL_PATTERN = "**/creator-micro/content/manage**";
     private static final String DIAGNOSTIC_PLATFORM = "douyin";
     private static final String DIAGNOSTIC_SOURCE = "douyin-upload";
+    private static final Duration PUBLISH_TIMEOUT = Duration.ofMinutes(8);
 
     private final DouyinAccountService accountService;
     private final AliDriveService aliDriveService;
@@ -418,7 +419,7 @@ public class DouyinUploadService {
     }
 
     private void clickPublish(Page page, String taskId) {
-        long deadline = System.currentTimeMillis() + Duration.ofMinutes(30).toMillis();
+        long deadline = System.currentTimeMillis() + PUBLISH_TIMEOUT.toMillis();
         RuntimeException last = null;
         int attempts = 0;
         while (System.currentTimeMillis() < deadline) {
@@ -449,10 +450,13 @@ public class DouyinUploadService {
         if (risk.blocking()) {
             throw new RuntimeException("Douyin publish blocked: " + risk.message());
         }
-        throw last == null ? new RuntimeException("Timed out publishing Douyin video") : last;
+        throw new RuntimeException("Timed out publishing Douyin video after " + PUBLISH_TIMEOUT.toMinutes() + " minutes", last);
     }
 
     private boolean dismissBlockingDialog(Page page, String taskId) {
+        if (clickKnownFloatingPrompt(page, taskId)) {
+            return true;
+        }
         for (String text : List.of("暂不设置", "我知道了", "知道了", "稍后再说", "完成", "取消")) {
             if (clickDialogButtonByText(page, taskId, text)) {
                 return true;
@@ -476,6 +480,34 @@ public class DouyinUploadService {
             log.debug("Douyin upload modal dismiss skipped taskId={} message={}", taskId, exception.getMessage());
             return false;
         }
+    }
+
+    private boolean clickKnownFloatingPrompt(Page page, String taskId) {
+        for (String promptText : List.of("视频预览功能")) {
+            try {
+                Locator prompt = page.getByText(promptText).first();
+                if (prompt.count() == 0 || !prompt.isVisible()) {
+                    continue;
+                }
+                Locator container = prompt.locator("xpath=ancestor::div[contains(@class, 'semi-popover') or contains(@class, 'tooltip') or contains(@class, 'popover')][1]");
+                if (container.count() == 0) {
+                    container = prompt.locator("xpath=ancestor::div[1]");
+                }
+                Locator button = container.getByText("我知道了", new Locator.GetByTextOptions().setExact(true)).first();
+                if (button.count() == 0) {
+                    button = page.getByText("我知道了", new Page.GetByTextOptions().setExact(true)).first();
+                }
+                if (button.count() > 0 && button.isVisible()) {
+                    clickWithFallback(page, button);
+                    log.info("Douyin upload dismissed floating prompt taskId={} prompt={}", taskId, promptText);
+                    page.waitForTimeout(500);
+                    return true;
+                }
+            } catch (Exception exception) {
+                log.debug("Douyin upload floating prompt skipped taskId={} prompt={} message={}", taskId, promptText, exception.getMessage());
+            }
+        }
+        return false;
     }
 
     private Locator visibleDialog(Page page) {
