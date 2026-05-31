@@ -1476,7 +1476,6 @@ public class MonitorService {
                         task_id VARCHAR(64) NOT NULL,
                         account_key VARCHAR(128) NOT NULL,
                         status VARCHAR(32) NOT NULL DEFAULT 'ready',
-                        request_json MEDIUMTEXT NULL,
                         title VARCHAR(512) NULL,
                         video_url TEXT NULL,
                         cover_url TEXT NULL,
@@ -1493,7 +1492,6 @@ public class MonitorService {
                         KEY idx_uploader_task_task (task_id, status)
                     )
                     """.formatted(table));
-            ensureColumn(table, "request_json", "MEDIUMTEXT NULL");
             ensureColumn(table, "title", "VARCHAR(512) NULL");
             ensureColumn(table, "video_url", "TEXT NULL");
             ensureColumn(table, "cover_url", "TEXT NULL");
