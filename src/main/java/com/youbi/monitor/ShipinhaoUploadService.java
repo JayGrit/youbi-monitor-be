@@ -120,6 +120,7 @@ public class ShipinhaoUploadService {
         fillDescription(page, request, taskId);
         setShortTitle(page, request, taskId);
         dumpDiagnostics(page, taskId, "after-fill-metadata");
+        scrollToSubmitArea(page, taskId);
 
         waitForUploadComplete(page, taskId);
         dumpDiagnostics(page, taskId, "upload-complete");
@@ -213,6 +214,9 @@ public class ShipinhaoUploadService {
                     dumpDiagnostics(page, taskId, "upload-error");
                     throw new RuntimeException("Shipinhao video upload failed");
                 }
+                if (state.mediaVisible() && !state.buttonEnabled() && checks % 3 == 0) {
+                    scrollToSubmitArea(page, taskId);
+                }
                 if (state.ready()) {
                     stableReadyChecks += 1;
                     if (stableReadyChecks >= 2) {
@@ -229,6 +233,27 @@ public class ShipinhaoUploadService {
         }
         dumpDiagnostics(page, taskId, "upload-timeout");
         throw new RuntimeException("Timed out waiting for Shipinhao video upload to complete, lastState=" + lastState);
+    }
+
+    private void scrollToSubmitArea(Page page, String taskId) {
+        try {
+            Locator formButtons = page.locator("div.form-btns").first();
+            if (formButtons.count() > 0) {
+                formButtons.scrollIntoViewIfNeeded();
+                page.waitForTimeout(1000);
+                log.info("Shipinhao upload scrolled to submit area taskId={} method=form-buttons", taskId);
+                return;
+            }
+        } catch (Exception exception) {
+            log.debug("Shipinhao upload submit area scroll by locator skipped taskId={} message={}", taskId, exception.getMessage());
+        }
+        try {
+            page.evaluate("() => window.scrollTo({top: document.body.scrollHeight, behavior: 'instant'})");
+            page.waitForTimeout(1000);
+            log.info("Shipinhao upload scrolled to submit area taskId={} method=window-bottom", taskId);
+        } catch (Exception exception) {
+            log.warn("Shipinhao upload submit area scroll failed taskId={} message={}", taskId, exception.getMessage());
+        }
     }
 
     private void clickSubmit(Page page, String taskId, String buttonText, String successUrlPattern) {
