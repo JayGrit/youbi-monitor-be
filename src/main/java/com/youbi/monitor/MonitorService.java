@@ -67,14 +67,16 @@ public class MonitorService {
             "douyin", "uploader_task_douyin",
             "xiaohongshu", "uploader_task_xiaohongshu",
             "shipinhao", "uploader_task_shipinhao",
-            "kuaishou", "uploader_task_kuaishou"
+            "kuaishou", "uploader_task_kuaishou",
+            "jinritoutiao", "uploader_task_jinritoutiao"
     );
     private static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
             "bilibili", "uploader_account_bilibili",
             "douyin", "uploader_account_douyin",
             "xiaohongshu", "uploader_account_xiaohongshu",
             "shipinhao", "uploader_account_shipinhao",
-            "kuaishou", "uploader_account_kuaishou"
+            "kuaishou", "uploader_account_kuaishou",
+            "jinritoutiao", "uploader_account_jinritoutiao"
     );
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
@@ -1638,6 +1640,8 @@ public class MonitorService {
             normalized = "shipinhao";
         } else if ("ks".equals(normalized) || "kwai".equals(normalized) || "快手".equals(normalized)) {
             normalized = "kuaishou";
+        } else if ("toutiao".equals(normalized) || "tt".equals(normalized) || "今日头条".equals(normalized)) {
+            normalized = "jinritoutiao";
         }
         if (!UPLOADER_TASK_TABLES.containsKey(normalized)) {
             throw new IllegalArgumentException("Unsupported upload platform: " + platform);
