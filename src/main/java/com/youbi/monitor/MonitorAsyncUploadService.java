@@ -367,6 +367,9 @@ public class MonitorAsyncUploadService {
         if (request instanceof KuaishouUploadRequest item) {
             return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
         }
+        if (request instanceof JinritoutiaoUploadRequest item) {
+            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
+        }
         return "";
     }
 
@@ -386,6 +389,9 @@ public class MonitorAsyncUploadService {
         if (request instanceof KuaishouUploadRequest item) {
             return text(item.taskId());
         }
+        if (request instanceof JinritoutiaoUploadRequest item) {
+            return text(item.taskId());
+        }
         return "";
     }
 
@@ -403,6 +409,9 @@ public class MonitorAsyncUploadService {
             return text(item.accountKey());
         }
         if (request instanceof KuaishouUploadRequest item) {
+            return text(item.accountKey());
+        }
+        if (request instanceof JinritoutiaoUploadRequest item) {
             return text(item.accountKey());
         }
         return "";
