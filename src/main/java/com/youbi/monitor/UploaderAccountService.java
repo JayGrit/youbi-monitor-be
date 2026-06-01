@@ -6,11 +6,20 @@ import org.springframework.stereotype.Service;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
 public class UploaderAccountService {
     private static final String TABLE = "uploader_account";
+    private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
+            "bilibili", "uploader_task_bilibili",
+            "douyin", "uploader_task_douyin",
+            "xiaohongshu", "uploader_task_xiaohongshu",
+            "shipinhao", "uploader_task_shipinhao",
+            "kuaishou", "uploader_task_kuaishou",
+            "jinritoutiao", "uploader_task_jinritoutiao"
+    );
 
     private final JdbcTemplate jdbcTemplate;
 
@@ -62,6 +71,7 @@ public class UploaderAccountService {
                 nextUploadAllowedAt,
                 sourceUpdatedAt
         );
+        refreshMetricsIfMissing(normalizedPlatform, normalizedKey);
         return state(normalizedPlatform, normalizedKey).orElseGet(() -> UploaderAccountState.defaults(normalizedPlatform, normalizedKey));
     }
 
@@ -151,6 +161,101 @@ public class UploaderAccountService {
                 normalize(platform),
                 normalize(accountKey)
         );
+    }
+
+    private void refreshMetricsIfMissing(String platform, String accountKey) {
+        List<LocalDateTime> rows = jdbcTemplate.query(
+                """
+                SELECT metrics_updated_at
+                FROM uploader_account
+                WHERE platform = ? AND account_key = ?
+                LIMIT 1
+                """,
+                (rs, rowNum) -> toLocalDateTime(rs.getTimestamp("metrics_updated_at")),
+                platform,
+                accountKey
+        );
+        if (!rows.isEmpty() && rows.get(0) != null) {
+            return;
+        }
+        refreshMetrics(platform, accountKey);
+    }
+
+    private void refreshMetrics(String platform, String accountKey) {
+        String taskTable = UPLOADER_TASK_TABLES.get(platform);
+        if (taskTable == null || !tableExists(taskTable)) {
+            return;
+        }
+        jdbcTemplate.update(
+                ("""
+                UPDATE uploader_account ua
+                SET today_upload_count = (
+                        SELECT COUNT(*)
+                        FROM %s s
+                        WHERE s.account_key = ua.account_key
+                          AND s.status = 'success'
+                          AND s.completed_at >= DATE_ADD(
+                              CASE
+                                  WHEN TIME(NOW()) >= '08:00:00' THEN CURDATE()
+                                  ELSE DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+                              END,
+                              INTERVAL 8 HOUR
+                          )
+                          AND s.completed_at < DATE_ADD(
+                              CASE
+                                  WHEN TIME(NOW()) >= '08:00:00' THEN DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                                  ELSE CURDATE()
+                              END,
+                              INTERVAL 2 HOUR
+                          )
+                    ),
+                    upload_running_count = (
+                        SELECT COUNT(*)
+                        FROM %s s
+                        WHERE s.account_key = ua.account_key
+                          AND s.status = 'running'
+                    ),
+                    cooldown_waiting_count = (
+                        SELECT COUNT(*)
+                        FROM %s s
+                        WHERE s.account_key = ua.account_key
+                          AND s.status = 'ready'
+                          AND ua.next_upload_allowed_at > NOW()
+                    ) + (
+                        SELECT COUNT(*)
+                        FROM %s s
+                        WHERE s.account_key = ua.account_key
+                          AND s.status = 'running'
+                    ),
+                    last_upload_at = COALESCE(
+                        ua.last_upload_at,
+                        (
+                            SELECT MAX(s.completed_at)
+                            FROM %s s
+                            WHERE s.account_key = ua.account_key
+                              AND s.status = 'success'
+                        )
+                    ),
+                    metrics_updated_at = NOW(),
+                    updated_at = NOW()
+                WHERE ua.platform = ? AND ua.account_key = ?
+                """).formatted(taskTable, taskTable, taskTable, taskTable, taskTable),
+                platform,
+                accountKey
+        );
+    }
+
+    private boolean tableExists(String table) {
+        Integer count = jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                """,
+                Integer.class,
+                table
+        );
+        return count != null && count > 0;
     }
 
     private void ensureSchema() {
