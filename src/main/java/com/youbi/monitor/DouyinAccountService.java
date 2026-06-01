@@ -58,16 +58,16 @@ public class DouyinAccountService {
 
     public List<DouyinAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
                     UploaderAccountState accountState = syncAccountState(
                             accountKey,
-                            rs.getBoolean("is_enabled"),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
+                            null,
+                            null,
+                            null,
                             null,
                             null,
                             updatedAt
@@ -135,11 +135,6 @@ public class DouyinAccountService {
         String normalized = normalizeAccountKey(accountKey);
         return loadStorageState(normalized)
                 .orElseThrow(() -> new IOException("Douyin account is not logged in: " + normalized));
-    }
-
-    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
     }
 
     public DouyinQrCode createQrCode(String accountKey) throws IOException {
@@ -275,28 +270,21 @@ public class DouyinAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         jdbcTemplate.update(
                 """
-                INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, is_enabled, updated_at)
-                VALUES (?, ?, ?, ?, ?, NOW())
+                INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, updated_at)
+                VALUES (?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
                 normalized,
                 truncate(profile.userId(), 128),
                 truncate(profile.nickname(), 128),
-                storageState,
-                accountEnabled(normalized)
+                storageState
         );
-        int[] cooldown = cooldownConfig(normalized);
-        syncAccountState(normalized, accountEnabled(normalized), cooldown[0], cooldown[1], null, null, LocalDateTime.now());
+        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
     }
 
     public DouyinAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
-        int updated = jdbcTemplate.update(
-                "UPDATE " + TABLE + " SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?",
-                enabled,
-                normalized
-        );
-        if (updated != 1) {
+        if (!accountKeyExists(normalized)) {
             throw new IOException("Douyin account key not found: " + normalized);
         }
         uploaderAccountService.updateEnabled("douyin", normalized, enabled);
@@ -306,13 +294,7 @@ public class DouyinAccountService {
     public DouyinAccountStatus setCooldown(String accountKey, Integer minSeconds, Integer maxSeconds) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
-        int updated = jdbcTemplate.update(
-                "UPDATE " + TABLE + " SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
-                cooldown[0],
-                cooldown[1],
-                normalized
-        );
-        if (updated != 1) {
+        if (!accountKeyExists(normalized)) {
             throw new IOException("Douyin account key not found: " + normalized);
         }
         uploaderAccountService.updateCooldown("douyin", normalized, cooldown[0], cooldown[1]);
@@ -335,15 +317,12 @@ public class DouyinAccountService {
     }
 
     private int[] cooldownConfig(String accountKey) {
-        List<int[]> rows = jdbcTemplate.query(
-                "SELECT upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new int[] {
-                        rs.getObject("upload_cooldown_min_seconds") == null ? 3600 : rs.getInt("upload_cooldown_min_seconds"),
-                        rs.getObject("upload_cooldown_max_seconds") == null ? 7200 : rs.getInt("upload_cooldown_max_seconds")
-                },
-                accountKey
-        );
-        return rows.isEmpty() ? new int[] {3600, 7200} : rows.get(0);
+        UploaderAccountState state = uploaderAccountService.state("douyin", accountKey)
+                .orElseGet(() -> UploaderAccountState.defaults("douyin", accountKey));
+        return new int[] {
+                state.uploadCooldownMinSeconds() == null ? 3600 : state.uploadCooldownMinSeconds(),
+                state.uploadCooldownMaxSeconds() == null ? 7200 : state.uploadCooldownMaxSeconds()
+        };
     }
 
     private int[] normalizeCooldown(Integer minSeconds, Integer maxSeconds) {
@@ -382,12 +361,9 @@ public class DouyinAccountService {
     }
 
     private boolean accountEnabled(String accountKey) {
-        List<Boolean> values = jdbcTemplate.query(
-                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getBoolean("is_enabled"),
-                accountKey
-        );
-        return values.isEmpty() || values.get(0);
+        return uploaderAccountService.state("douyin", accountKey)
+                .map(UploaderAccountState::enabled)
+                .orElse(true);
     }
 
     private String extractQrImage(Page page) {
@@ -691,17 +667,11 @@ public class DouyinAccountService {
                     user_id VARCHAR(128) NULL,
                     nickname VARCHAR(128) NULL,
                     storage_state_json MEDIUMTEXT NOT NULL,
-                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
-        ensureColumn("uploader_account_douyin", "is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("uploader_account_douyin", "upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
-        ensureColumn("uploader_account_douyin", "upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
-        ensureColumn("uploader_account_douyin", "last_upload_at", "DATETIME NULL");
-        ensureColumn("uploader_account_douyin", "next_upload_allowed_at", "DATETIME NULL");
         ensureColumn("uploader_account_douyin", "display_name", "VARCHAR(128) NULL");
         ensureColumn("uploader_account_douyin", "avatar_url", "VARCHAR(1024) NULL");
     }

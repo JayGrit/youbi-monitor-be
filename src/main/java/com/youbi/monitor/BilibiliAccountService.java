@@ -60,7 +60,7 @@ public class BilibiliAccountService {
 
     public List<BilibiliAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, mid, uname, login_info_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, mid, uname, login_info_json, updated_at, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("login_info_json");
@@ -68,9 +68,9 @@ public class BilibiliAccountService {
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
                     UploaderAccountState accountState = syncAccountState(
                             accountKey,
-                            rs.getBoolean("is_enabled"),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
+                            null,
+                            null,
+                            null,
                             null,
                             null,
                             updatedAt
@@ -215,12 +215,7 @@ public class BilibiliAccountService {
 
     public BilibiliAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
-        int updated = jdbcTemplate.update(
-                "UPDATE " + TABLE + " SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?",
-                enabled,
-                normalized
-        );
-        if (updated != 1) {
+        if (!accountKeyExists(normalized)) {
             throw new IOException("Bilibili account key not found: " + normalized);
         }
         uploaderAccountService.updateEnabled("bilibili", normalized, enabled);
@@ -230,13 +225,7 @@ public class BilibiliAccountService {
     public BilibiliAccountStatus setCooldown(String accountKey, Integer minSeconds, Integer maxSeconds) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
-        int updated = jdbcTemplate.update(
-                "UPDATE " + TABLE + " SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
-                cooldown[0],
-                cooldown[1],
-                normalized
-        );
-        if (updated != 1) {
+        if (!accountKeyExists(normalized)) {
             throw new IOException("Bilibili account key not found: " + normalized);
         }
         uploaderAccountService.updateCooldown("bilibili", normalized, cooldown[0], cooldown[1]);
@@ -349,15 +338,12 @@ public class BilibiliAccountService {
     }
 
     private int[] cooldownConfig(String accountKey) {
-        List<int[]> rows = jdbcTemplate.query(
-                "SELECT upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new int[] {
-                        rs.getObject("upload_cooldown_min_seconds") == null ? 3600 : rs.getInt("upload_cooldown_min_seconds"),
-                        rs.getObject("upload_cooldown_max_seconds") == null ? 7200 : rs.getInt("upload_cooldown_max_seconds")
-                },
-                accountKey
-        );
-        return rows.isEmpty() ? new int[] {3600, 7200} : rows.get(0);
+        UploaderAccountState state = uploaderAccountService.state("bilibili", accountKey)
+                .orElseGet(() -> UploaderAccountState.defaults("bilibili", accountKey));
+        return new int[] {
+                state.uploadCooldownMinSeconds() == null ? 3600 : state.uploadCooldownMinSeconds(),
+                state.uploadCooldownMaxSeconds() == null ? 7200 : state.uploadCooldownMaxSeconds()
+        };
     }
 
     private int[] normalizeCooldown(Integer minSeconds, Integer maxSeconds) {
@@ -369,18 +355,10 @@ public class BilibiliAccountService {
         return new int[] {min, max};
     }
 
-    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
-    }
-
     private boolean accountEnabled(String accountKey) {
-        List<Boolean> values = jdbcTemplate.query(
-                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getBoolean("is_enabled"),
-                accountKey
-        );
-        return values.isEmpty() || values.get(0);
+        return uploaderAccountService.state("bilibili", accountKey)
+                .map(UploaderAccountState::enabled)
+                .orElse(true);
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
@@ -475,8 +453,7 @@ public class BilibiliAccountService {
                 uname,
                 objectMapper.writeValueAsString(normalized)
         );
-        int[] cooldown = cooldownConfig(accountKey);
-        syncAccountState(accountKey, true, cooldown[0], cooldown[1], null, null, LocalDateTime.now());
+        syncAccountState(accountKey, null, null, null, null, null, LocalDateTime.now());
     }
 
     private void ensureSchema() {
@@ -487,15 +464,11 @@ public class BilibiliAccountService {
                     mid BIGINT NULL,
                     uname VARCHAR(128) NULL,
                     login_info_json MEDIUMTEXT NOT NULL,
-                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
-        ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
-        ensureColumn("upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
     }

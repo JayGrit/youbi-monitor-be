@@ -78,6 +78,7 @@ public class MonitorService {
             "kuaishou", "uploader_account_kuaishou",
             "jinritoutiao", "uploader_account_jinritoutiao"
     );
+    private static final String UNIFIED_UPLOADER_ACCOUNT_TABLE = "uploader_account";
     private static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
             "source_url",
@@ -536,7 +537,7 @@ public class MonitorService {
                   GROUP_CONCAT(DISTINCT sent.platform ORDER BY sent.platform SEPARATOR ',') uploaded_platforms,
                   target.id target_submission_id,
                   target.status target_status,
-                  account.account_key IS NOT NULL account_exists,
+                  platform_account.account_key IS NOT NULL account_exists,
                   COALESCE(account.is_enabled, 0) account_enabled
                 FROM yd_task task
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
@@ -545,7 +546,8 @@ public class MonitorService {
                   %s
                 ) sent ON sent.task_id = task.id
                 LEFT JOIN %s target ON target.task_id = task.id AND target.account_key = ?
-                LEFT JOIN %s account ON account.account_key = ?
+                LEFT JOIN %s platform_account ON platform_account.account_key = ?
+                LEFT JOIN %s account ON account.platform = ? AND account.account_key = ?
                 WHERE video_info.type = ?
                 GROUP BY
                   task.id,
@@ -559,7 +561,7 @@ public class MonitorService {
                   account_enabled
                 ORDER BY completed_at DESC
                 LIMIT 500
-                """.formatted(finalVideoRefSql(), successfulUploadUnion(normalized), quotedIdentifier(table), quotedIdentifier(accountTable)),
+                """.formatted(finalVideoRefSql(), successfulUploadUnion(normalized), quotedIdentifier(table), quotedIdentifier(accountTable), UNIFIED_UPLOADER_ACCOUNT_TABLE),
                 (rs, rowNum) -> {
                     boolean accountExists = rs.getBoolean("account_exists");
                     boolean accountEnabled = rs.getBoolean("account_enabled");
@@ -588,6 +590,8 @@ public class MonitorService {
                     );
                 },
                 normalizedAccountKey,
+                normalizedAccountKey,
+                normalized,
                 normalizedAccountKey,
                 normalizedType
         );
@@ -620,10 +624,12 @@ public class MonitorService {
         }
 
         String taskPlaceholders = placeholders(normalizedTaskIds.size());
-        Object[] queryArgs = new Object[2 + normalizedTaskIds.size()];
+        Object[] queryArgs = new Object[3 + normalizedTaskIds.size()];
         queryArgs[0] = normalizedAccountKey;
+        queryArgs[1] = normalized;
+        queryArgs[2] = normalizedAccountKey;
         for (int i = 0; i < normalizedTaskIds.size(); i++) {
-            queryArgs[i + 1] = normalizedTaskIds.get(i);
+            queryArgs[i + 3] = normalizedTaskIds.get(i);
         }
         queryArgs[queryArgs.length - 1] = normalizedType;
 
@@ -638,7 +644,8 @@ public class MonitorService {
                 FROM yd_task task
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
                 JOIN yd_uploader uploader ON uploader.task_id = task.id
-                JOIN %s account ON account.account_key = ? AND account.is_enabled = 1
+                JOIN %s platform_account ON platform_account.account_key = ?
+                JOIN %s account ON account.platform = ? AND account.account_key = platform_account.account_key AND account.is_enabled = 1
                 JOIN (
                   %s
                 ) sent ON sent.task_id = task.id
@@ -657,6 +664,7 @@ public class MonitorService {
                 """.formatted(
                         finalVideoRefSql(),
                         quotedIdentifier(accountTable),
+                        UNIFIED_UPLOADER_ACCOUNT_TABLE,
                         successfulUploadUnion(normalized),
                         quotedIdentifier(table),
                         taskPlaceholders,

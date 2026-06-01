@@ -41,6 +41,9 @@ public class UploaderAccountService {
     ) {
         String normalizedPlatform = normalize(platform);
         String normalizedKey = normalize(accountKey);
+        boolean mergedEnabled = enabled == null
+                ? state(normalizedPlatform, normalizedKey).map(UploaderAccountState::enabled).orElse(true)
+                : enabled;
         jdbcTemplate.update(
                 """
                 INSERT INTO uploader_account (
@@ -63,8 +66,8 @@ public class UploaderAccountService {
                 normalizedPlatform,
                 normalizedKey,
                 sourceTable,
-                enabled == null || enabled,
-                enabled == null || enabled,
+                mergedEnabled,
+                mergedEnabled,
                 minSeconds == null ? 3600 : minSeconds,
                 maxSeconds == null ? 7200 : maxSeconds,
                 lastUploadAt,

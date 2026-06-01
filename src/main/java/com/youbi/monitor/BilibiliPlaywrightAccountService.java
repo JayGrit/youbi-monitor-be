@@ -34,6 +34,7 @@ public class BilibiliPlaywrightAccountService {
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
+    private final UploaderAccountService uploaderAccountService;
     private final HttpClient httpClient;
     private final SocialBrowserFactory browserFactory;
     private final String cdpUrl;
@@ -43,12 +44,14 @@ public class BilibiliPlaywrightAccountService {
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
+            UploaderAccountService uploaderAccountService,
             SocialBrowserFactory browserFactory,
             @Value("${youbi.bilibili.playwright.cdp-url:}") String cdpUrl
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
+        this.uploaderAccountService = uploaderAccountService;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).followRedirects(HttpClient.Redirect.NORMAL).build();
         this.browserFactory = browserFactory;
         this.cdpUrl = text(cdpUrl);
@@ -104,7 +107,7 @@ public class BilibiliPlaywrightAccountService {
     public List<BilibiliPlaywrightAccountStatus> accounts() {
         return jdbcTemplate.query(
                 """
-                SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at, is_enabled
+                SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at
                 FROM uploader_account_bilibili
                 ORDER BY account_key
                 """,
@@ -125,7 +128,7 @@ public class BilibiliPlaywrightAccountService {
                             sendAvailability.todayUploadCount(),
                             sendAvailability.cooldownWaitingCount(),
                             sendAvailability.uploadRunningCount(),
-                            rs.getBoolean("is_enabled"),
+                            accountEnabled(accountKey),
                             null,
                             "已保存",
                             Map.of()
@@ -369,12 +372,9 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private boolean accountEnabled(String accountKey) {
-        List<Boolean> values = jdbcTemplate.query(
-                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getBoolean("is_enabled"),
-                accountKey
-        );
-        return values.isEmpty() || values.get(0);
+        return uploaderAccountService.state("bilibili", accountKey)
+                .map(UploaderAccountState::enabled)
+                .orElse(true);
     }
 
     private void ensureSchema() {
@@ -382,7 +382,6 @@ public class BilibiliPlaywrightAccountService {
         ensureColumn("playwright_uname", "VARCHAR(128) NULL");
         ensureColumn("playwright_storage_state_json", "MEDIUMTEXT NULL");
         ensureColumn("playwright_updated_at", "DATETIME NULL");
-        ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private void ensureColumn(String column, String definition) {

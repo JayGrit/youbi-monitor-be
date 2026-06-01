@@ -79,10 +79,13 @@ def load_accounts(args: argparse.Namespace) -> list[Account]:
         ensure_schema(cursor)
         cursor.execute(
             """
-            SELECT account_key, user_id, nickname
-            FROM uploader_account_kuaishou
-            WHERE is_enabled = 1
-            ORDER BY account_key
+            SELECT account.account_key, account.user_id, account.nickname
+            FROM uploader_account_kuaishou account
+            JOIN uploader_account state
+              ON state.platform = 'kuaishou'
+             AND state.account_key = account.account_key
+             AND state.is_enabled = 1
+            ORDER BY account.account_key
             """
         )
         accounts = []

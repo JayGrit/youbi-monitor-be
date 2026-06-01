@@ -47,16 +47,16 @@ public class JinritoutiaoAccountService {
 
     public List<JinritoutiaoAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, is_enabled, upload_cooldown_min_seconds, upload_cooldown_max_seconds, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
+                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
                     UploaderAccountState accountState = syncAccountState(
                             accountKey,
-                            rs.getBoolean("is_enabled"),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
+                            null,
+                            null,
+                            null,
                             null,
                             null,
                             updatedAt
@@ -145,8 +145,7 @@ public class JinritoutiaoAccountService {
 
     public JinritoutiaoAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
-        int updated = jdbcTemplate.update("UPDATE " + TABLE + " SET is_enabled = ?, updated_at = NOW() WHERE account_key = ?", enabled, normalized);
-        if (updated != 1) {
+        if (!accountKeyExists(normalized)) {
             throw new IOException("Jinritoutiao account key not found: " + normalized);
         }
         uploaderAccountService.updateEnabled("jinritoutiao", normalized, enabled);
@@ -156,13 +155,7 @@ public class JinritoutiaoAccountService {
     public JinritoutiaoAccountStatus setCooldown(String accountKey, Integer minSeconds, Integer maxSeconds) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
-        int updated = jdbcTemplate.update(
-                "UPDATE " + TABLE + " SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW() WHERE account_key = ?",
-                cooldown[0],
-                cooldown[1],
-                normalized
-        );
-        if (updated != 1) {
+        if (!accountKeyExists(normalized)) {
             throw new IOException("Jinritoutiao account key not found: " + normalized);
         }
         uploaderAccountService.updateCooldown("jinritoutiao", normalized, cooldown[0], cooldown[1]);
@@ -202,8 +195,7 @@ public class JinritoutiaoAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
-        int[] cooldown = cooldownConfig(normalized);
-        syncAccountState(normalized, accountEnabled(normalized), cooldown[0], cooldown[1], null, null, LocalDateTime.now());
+        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
     }
 
     private boolean isStorageStateValid(String storageState) {
@@ -283,15 +275,12 @@ public class JinritoutiaoAccountService {
     }
 
     private int[] cooldownConfig(String accountKey) {
-        List<int[]> rows = jdbcTemplate.query(
-                "SELECT upload_cooldown_min_seconds, upload_cooldown_max_seconds FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new int[] {
-                        rs.getObject("upload_cooldown_min_seconds") == null ? 3600 : rs.getInt("upload_cooldown_min_seconds"),
-                        rs.getObject("upload_cooldown_max_seconds") == null ? 7200 : rs.getInt("upload_cooldown_max_seconds")
-                },
-                accountKey
-        );
-        return rows.isEmpty() ? new int[] {3600, 7200} : rows.get(0);
+        UploaderAccountState state = uploaderAccountService.state("jinritoutiao", accountKey)
+                .orElseGet(() -> UploaderAccountState.defaults("jinritoutiao", accountKey));
+        return new int[] {
+                state.uploadCooldownMinSeconds() == null ? 3600 : state.uploadCooldownMinSeconds(),
+                state.uploadCooldownMaxSeconds() == null ? 7200 : state.uploadCooldownMaxSeconds()
+        };
     }
 
     private int[] normalizeCooldown(Integer minSeconds, Integer maxSeconds) {
@@ -304,12 +293,9 @@ public class JinritoutiaoAccountService {
     }
 
     private boolean accountEnabled(String accountKey) {
-        List<Boolean> values = jdbcTemplate.query(
-                "SELECT is_enabled FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getBoolean("is_enabled"),
-                accountKey
-        );
-        return values.isEmpty() || values.get(0);
+        return uploaderAccountService.state("jinritoutiao", accountKey)
+                .map(UploaderAccountState::enabled)
+                .orElse(true);
     }
 
     private AccountSendAvailability sendAvailability(String accountKey) {
@@ -338,6 +324,11 @@ public class JinritoutiaoAccountService {
         );
     }
 
+    private boolean accountKeyExists(String accountKey) {
+        Integer exists = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, accountKey);
+        return exists != null && exists > 0;
+    }
+
     private void ensureSchema() {
         jdbcTemplate.execute(
                 """
@@ -346,21 +337,11 @@ public class JinritoutiaoAccountService {
                     user_id VARCHAR(128) NULL,
                     nickname VARCHAR(128) NULL,
                     storage_state_json MEDIUMTEXT NOT NULL,
-                    is_enabled TINYINT(1) NOT NULL DEFAULT 1,
-                    upload_cooldown_min_seconds INT NOT NULL DEFAULT 3600,
-                    upload_cooldown_max_seconds INT NOT NULL DEFAULT 7200,
-                    last_upload_at DATETIME NULL,
-                    next_upload_allowed_at DATETIME NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """
         );
-        ensureColumn("is_enabled", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("upload_cooldown_min_seconds", "INT NOT NULL DEFAULT 3600");
-        ensureColumn("upload_cooldown_max_seconds", "INT NOT NULL DEFAULT 7200");
-        ensureColumn("last_upload_at", "DATETIME NULL");
-        ensureColumn("next_upload_allowed_at", "DATETIME NULL");
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
     }
@@ -381,11 +362,6 @@ public class JinritoutiaoAccountService {
         if (count == null || count == 0) {
             jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
-    }
-
-    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
     }
 
     private boolean containsAny(String text, String... values) {

@@ -52,19 +52,26 @@ def fetch_storage_state(args: argparse.Namespace) -> tuple[str, str]:
         if args.account_key:
             cursor.execute(
                 """
-                SELECT account_key, storage_state_json
-                FROM uploader_account_jinritoutiao
-                WHERE account_key = %s AND is_enabled = 1
+                SELECT account.account_key, account.storage_state_json
+                FROM uploader_account_jinritoutiao account
+                JOIN uploader_account state
+                  ON state.platform = 'jinritoutiao'
+                 AND state.account_key = account.account_key
+                 AND state.is_enabled = 1
+                WHERE account.account_key = %s
                 """,
                 (args.account_key,),
             )
         else:
             cursor.execute(
                 """
-                SELECT account_key, storage_state_json
-                FROM uploader_account_jinritoutiao
-                WHERE is_enabled = 1
-                ORDER BY updated_at DESC
+                SELECT account.account_key, account.storage_state_json
+                FROM uploader_account_jinritoutiao account
+                JOIN uploader_account state
+                  ON state.platform = 'jinritoutiao'
+                 AND state.account_key = account.account_key
+                 AND state.is_enabled = 1
+                ORDER BY account.updated_at DESC
                 LIMIT 1
                 """
             )
