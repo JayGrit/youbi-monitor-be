@@ -68,12 +68,16 @@ public class JinritoutiaoUploadService {
         String taskId = TextSupport.firstText(request.taskId(), "manual");
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
+        UploadMaterialResolver.ResolvedFile resolvedCover = resolveCover(request);
         DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
         diagnosticContext.set(diagnostics);
         try {
             Path videoPath = resolvedVideo.path();
             if (!Files.isRegularFile(videoPath) || Files.size(videoPath) == 0) {
                 throw new IOException("Video file does not exist or is empty: " + videoPath);
+            }
+            if (resolvedCover != null && (!Files.isRegularFile(resolvedCover.path()) || Files.size(resolvedCover.path()) == 0)) {
+                throw new IOException("Cover file does not exist or is empty: " + resolvedCover.path());
             }
             log.info("Jinritoutiao upload start taskId={} accountKey={} video={} size={} title={}",
                     taskId, accountKey, videoPath, Files.size(videoPath), TextSupport.text(request.title()));
@@ -83,7 +87,7 @@ public class JinritoutiaoUploadService {
                 BrowserContext context = accountService.newContext(browser, storageState);
                 try {
                     Page page = context.newPage();
-                    uploadVideoContent(page, request, videoPath, taskId);
+                    uploadVideoContent(page, request, videoPath, resolvedCover == null ? null : resolvedCover.path(), taskId);
                     accountService.saveStorageState(accountKey, context.storageState());
                 } finally {
                     context.close();
@@ -105,10 +109,11 @@ public class JinritoutiaoUploadService {
         } finally {
             diagnosticContext.remove();
             materialResolver.cleanupThrowing(resolvedVideo);
+            materialResolver.cleanupThrowing(resolvedCover);
         }
     }
 
-    private void uploadVideoContent(Page page, JinritoutiaoUploadRequest request, Path videoPath, String taskId) {
+    private void uploadVideoContent(Page page, JinritoutiaoUploadRequest request, Path videoPath, Path coverPath, String taskId) {
         openPublishPage(page, taskId);
         dumpDiagnostics(page, taskId, "create-page-ready");
 
@@ -125,7 +130,11 @@ public class JinritoutiaoUploadService {
         scrollToSubmitArea(page, taskId);
 
         waitForUploadComplete(page, taskId);
-        selectSuggestedCover(page, taskId);
+        if (coverPath == null) {
+            selectGeneratedCover(page, taskId);
+        } else {
+            uploadCover(page, coverPath, taskId);
+        }
         dismissKnownDialogs(page, taskId);
         dumpDiagnostics(page, taskId, "upload-complete");
 
@@ -201,7 +210,35 @@ public class JinritoutiaoUploadService {
         }
     }
 
-    private void selectSuggestedCover(Page page, String taskId) {
+    private void uploadCover(Page page, Path coverPath, String taskId) {
+        try {
+            if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "修改封面", "重新上传封面")) {
+                return;
+            }
+            String clicked = clickVisibleText(page, "上传封面");
+            if ("not-clicked".equals(clicked)) {
+                log.warn("Jinritoutiao upload cover trigger not found taskId={}", taskId);
+                return;
+            }
+            page.waitForTimeout(1500);
+            clickVisibleText(page, "本地上传");
+            Locator coverInput = page.locator("input[type='file'][accept*='image']").last();
+            coverInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
+            coverInput.setInputFiles(coverPath);
+            page.waitForTimeout(3000);
+            dumpDiagnostics(page, taskId, "cover-uploaded");
+            clickVisibleText(page, "确定");
+            page.waitForTimeout(3000);
+            dumpDiagnostics(page, taskId, "cover-confirmed");
+            log.info("Jinritoutiao upload cover uploaded taskId={} cover={} trigger={}", taskId, coverPath, clicked);
+        } catch (Exception exception) {
+            dumpDiagnostics(page, taskId, "cover-upload-failed");
+            log.warn("Jinritoutiao upload cover upload failed taskId={} cover={} message={}", taskId, coverPath, exception.getMessage());
+            selectGeneratedCover(page, taskId);
+        }
+    }
+
+    private void selectGeneratedCover(Page page, String taskId) {
         try {
             if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "修改封面", "重新上传封面")) {
                 return;
@@ -517,6 +554,10 @@ public class JinritoutiaoUploadService {
 
     private UploadMaterialResolver.ResolvedFile resolveVideo(JinritoutiaoUploadRequest request) throws IOException {
         return materialResolver.resolveVideo(request.videoLocation(), request.videoUrl(), request.minioUrl(), request.videoPath(), request.alidriveFileId(), request.alidriveRemotePath(), request.taskId());
+    }
+
+    private UploadMaterialResolver.ResolvedFile resolveCover(JinritoutiaoUploadRequest request) throws IOException {
+        return materialResolver.resolveCover(request.coverPath(), request.coverUrl(), request.taskId());
     }
 
     private List<String> parseTags(String tags) {
