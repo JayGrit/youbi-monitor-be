@@ -69,8 +69,8 @@ DISPLAY=:99 google-chrome \
 本地打开服务器 VNC：
 
 ```bash
-scripts/open_douyin_server_vnc.command animal
-scripts/open_douyin_server_vnc.command knowledge
+scripts/douyin/open_server_vnc.command animal
+scripts/douyin/open_server_vnc.command knowledge
 ```
 
 该脚本会在服务器上启动 VNC 图形环境和指定 `accountKey` 的 Chrome Profile，然后在本机打开屏幕共享。脚本只转发 VNC 端口，不再转发 `9333/9334`。

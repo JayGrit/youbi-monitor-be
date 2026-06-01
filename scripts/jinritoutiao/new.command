@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PY_SCRIPT="${SCRIPT_DIR}/update_jinritoutiao_storage_state_from_chrome.py"
+PY_SCRIPT="${SCRIPT_DIR}/new.py"
 REPO_DIR="/Users/hoshuuch/Money/YouBi/monitor/monitor-be"
 PYTHON="${REPO_DIR}/.venv/bin/python"
 PIP="${REPO_DIR}/.venv/bin/pip"

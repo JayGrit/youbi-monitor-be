@@ -40,10 +40,10 @@ default      1396070809  NULL      12606       1           2026-05-28 14:17:21
 
 ## 已落地脚本
 
-- `scripts/update_shipinhao_storage_state_from_chrome.py`
-- `scripts/update_shipinhao_storage_state_from_chrome.command`
+- `scripts/shipinhao/new.py`
+- `scripts/shipinhao/new.command`
 
-Python 脚本参考了 Bilibili 的 `update_bilibili_playwright_storage_state_from_chrome.py`：
+Python 脚本参考了 Bilibili 的 `bilibili/renew_from_chrome.py`：
 
 - 连接本机 Chrome CDP：默认 `http://127.0.0.1:9222`
 - 打开 `https://channels.weixin.qq.com/platform`
@@ -56,7 +56,7 @@ Python 脚本参考了 Bilibili 的 `update_bilibili_playwright_storage_state_fr
 
 ```bash
 /Users/hoshuuch/Money/YouBi/monitor/monitor-be/.venv/bin/python \
-  /Users/hoshuuch/Money/YouBi/monitor/monitor-be/scripts/update_shipinhao_storage_state_from_chrome.py \
+  /Users/hoshuuch/Money/YouBi/monitor/monitor-be/scripts/shipinhao/new.py \
   --account-key default
 ```
 
@@ -147,7 +147,7 @@ Operation not permitted: '.../__pycache__/update_shipinhao_storage_state_from_ch
 
 ```bash
 /Users/hoshuuch/Money/YouBi/monitor/monitor-be/.venv/bin/python -c \
-  "import ast, pathlib; ast.parse(pathlib.Path('/Users/hoshuuch/Money/YouBi/monitor/monitor-be/scripts/update_shipinhao_storage_state_from_chrome.py').read_text())"
+  "import ast, pathlib; ast.parse(pathlib.Path('/Users/hoshuuch/Money/YouBi/monitor/monitor-be/scripts/shipinhao/new.py').read_text())"
 ```
 
 ## 清理
@@ -187,4 +187,3 @@ https://channels.weixin.qq.com/platform
 - 表单填写后
 - 点击发布前后
 - 任意超时或风控提示时
-

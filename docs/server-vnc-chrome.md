@@ -92,7 +92,7 @@ DISPLAY=:99 google-chrome \
 也可以直接从本机运行脚本，自动完成服务器侧启动和本机屏幕共享连接：
 
 ```bash
-scripts/open_douyin_server_vnc.command animal
+scripts/douyin/open_server_vnc.command animal
 ```
 
 本机 zsh 函数 `lookc` 指向该脚本时，可直接运行：

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PY_SCRIPT="${SCRIPT_DIR}/update_kuaishou_storage_state_from_chrome.py"
+PY_SCRIPT="${SCRIPT_DIR}/renew.py"
 REPO_DIR="/Users/hoshuuch/Money/YouBi/monitor/monitor-be"
 PYTHON="${REPO_DIR}/.venv/bin/python"
 PIP="${REPO_DIR}/.venv/bin/pip"
@@ -28,13 +28,13 @@ then
   "${PIP}" install playwright mysql-connector-python
 fi
 
-echo "准备新增快手账号登录态。"
-echo "脚本会启动一个临时 Chrome，扫码成功后写入 uploader_account_kuaishou。"
+echo "准备逐个扫码同步视频号登录态。"
+echo "每个窗口都会提示要登录的 key/user_id/nickname，账号信息匹配后才写入数据库。"
 echo
 
 if ! "${PYTHON}" "${PY_SCRIPT}" "$@"; then
   echo
-  echo "同步失败。上面是具体错误。"
+  echo "同步未完全成功。上面是具体结果。"
   read "?按回车关闭窗口..."
   exit 1
 fi

@@ -337,7 +337,7 @@ public class AliDriveService {
             refreshToken = storedRefreshToken;
         }
         if (text(refreshToken).isBlank()) {
-            throw new IOException("Missing AliDrive refresh token in uploader_account_alidrive. Run scripts/update_alidrive_refresh_token_from_chrome.zsh first.");
+            throw new IOException("Missing AliDrive refresh token in uploader_account_alidrive. Run scripts/alidrive/renew.zsh first.");
         }
         HttpRequest request = HttpRequest.newBuilder(URI.create(API + "token/refresh"))
                 .timeout(Duration.ofSeconds(30))

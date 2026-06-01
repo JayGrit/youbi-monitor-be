@@ -13,17 +13,17 @@ from typing import Any
 import mysql.connector
 from playwright.sync_api import sync_playwright
 
-from update_kuaishou_storage_state_from_chrome import (
+from new import (
     CHROME_BIN,
     DEFAULT_MYSQL_DATABASE,
     DEFAULT_MYSQL_HOST,
     DEFAULT_MYSQL_PASSWORD,
     DEFAULT_MYSQL_PORT,
     DEFAULT_MYSQL_USER,
-    KUAISHOU_CREATOR_URL,
     PROFILE_ROOT,
+    SHIPINHAO_PLATFORM_URL,
     ensure_schema,
-    filter_kuaishou_state,
+    filter_shipinhao_state,
     has_login_cookie,
     page_login_hint,
     profile_from_storage_state,
@@ -39,11 +39,11 @@ class Account:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Open one temporary Chrome profile per Kuaishou account, wait for scan login, verify known profile info, then save storage state to MySQL."
+        description="Open one temporary Chrome profile per Shipinhao account, wait for scan login, verify known profile info, then save storage state to MySQL."
     )
     parser.add_argument("--account-key", action="append", default=[], help="Only update selected account_key. Can be specified multiple times.")
-    parser.add_argument("--keep-all-origins", action="store_true", help="Store the full Chrome context state instead of only Kuaishou domains.")
-    parser.add_argument("--timeout-seconds", type=int, default=int(os.getenv("YDBI_KUAISHOU_LOGIN_TIMEOUT_SECONDS", "600")))
+    parser.add_argument("--keep-all-origins", action="store_true", help="Store the full Chrome context state instead of only Weixin domains.")
+    parser.add_argument("--timeout-seconds", type=int, default=int(os.getenv("YDBI_SHIPINHAO_LOGIN_TIMEOUT_SECONDS", "600")))
     parser.add_argument("--fresh", action="store_true", help="Delete temporary Chrome profile dirs before each login.")
     parser.add_argument("--mysql-host", default=os.getenv("YDBI_MYSQL_HOST", DEFAULT_MYSQL_HOST))
     parser.add_argument("--mysql-port", type=int, default=int(os.getenv("YDBI_MYSQL_PORT", str(DEFAULT_MYSQL_PORT))))
@@ -80,7 +80,7 @@ def load_accounts(args: argparse.Namespace) -> list[Account]:
         cursor.execute(
             """
             SELECT account_key, user_id, nickname
-            FROM uploader_account_kuaishou
+            FROM uploader_account_shipinhao
             WHERE is_enabled = 1
             ORDER BY account_key
             """
@@ -108,7 +108,7 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
         cursor = connection.cursor()
         cursor.execute(
             """
-            UPDATE uploader_account_kuaishou
+            UPDATE uploader_account_shipinhao
             SET user_id = %s,
                 nickname = %s,
                 storage_state_json = %s,
@@ -118,7 +118,7 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
             (user_id or account.user_id or None, nickname or account.nickname or None, state_json, account.account_key),
         )
         if cursor.rowcount == 0:
-            raise RuntimeError(f"Kuaishou account key not found: {account.account_key}")
+            raise RuntimeError(f"Shipinhao account key not found: {account.account_key}")
         connection.commit()
     finally:
         connection.close()
@@ -153,7 +153,7 @@ def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
     print()
     print("=" * 72)
     print(
-        "请在弹出的 Chrome 窗口扫码登录快手账号："
+        "请在弹出的 Chrome 窗口扫码登录视频号账号："
         f"key={account.account_key} user_id={account.user_id or '-'} nickname={account.nickname or '-'}"
     )
     print("脚本会轮询登录态；已保存的 user_id/nickname 匹配后才写入数据库。")
@@ -171,11 +171,11 @@ def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
         deadline = time.time() + args.timeout_seconds
         last_status = ""
         try:
-            page.goto(KUAISHOU_CREATOR_URL, wait_until="domcontentloaded", timeout=60_000)
+            page.goto(SHIPINHAO_PLATFORM_URL, wait_until="domcontentloaded", timeout=60_000)
             while time.time() < deadline:
                 state = context.storage_state()
                 if not args.keep_all_origins:
-                    state = filter_kuaishou_state(state)
+                    state = filter_shipinhao_state(state)
                 user_id, nickname = profile_from_storage_state(state)
                 cookie_count = len(state.get("cookies", []))
                 origin_count = len(state.get("origins", []))
@@ -217,9 +217,9 @@ def main() -> int:
     args = parse_args()
     accounts = load_accounts(args)
     if not accounts:
-        raise SystemExit("No enabled Kuaishou accounts found.")
+        raise SystemExit("No enabled Shipinhao accounts found.")
 
-    print("将依次更新以下快手账号：")
+    print("将依次更新以下视频号账号：")
     for account in accounts:
         print(f"- {account.account_key}: user_id={account.user_id or '-'} nickname={account.nickname or '-'}")
 
@@ -232,7 +232,7 @@ def main() -> int:
     if failed:
         print("完成，但以下账号未更新成功：" + ", ".join(failed))
         return 1
-    print("全部快手登录态已更新完成。")
+    print("全部视频号登录态已更新完成。")
     return 0
 
 

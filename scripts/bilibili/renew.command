@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PY_SCRIPT="${SCRIPT_DIR}/update_shipinhao_storage_state_by_login.py"
+PY_SCRIPT="${SCRIPT_DIR}/renew.py"
 REPO_DIR="/Users/hoshuuch/Money/YouBi/monitor/monitor-be"
 PYTHON="${REPO_DIR}/.venv/bin/python"
 PIP="${REPO_DIR}/.venv/bin/pip"
@@ -28,8 +28,8 @@ then
   "${PIP}" install playwright mysql-connector-python
 fi
 
-echo "准备逐个扫码同步视频号登录态。"
-echo "每个窗口都会提示要登录的 key/user_id/nickname，账号信息匹配后才写入数据库。"
+echo "准备逐个扫码同步 Bilibili Playwright 登录态。"
+echo "每个窗口都会提示要登录的 key/name，账号 mid 匹配后才写入数据库。"
 echo
 
 if ! "${PYTHON}" "${PY_SCRIPT}" "$@"; then
