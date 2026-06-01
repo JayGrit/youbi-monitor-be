@@ -39,10 +39,12 @@ public class BilibiliAccountService {
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
+    private final UploaderAccountService uploaderAccountService;
 
-    public BilibiliAccountService(JdbcTemplate jdbcTemplate, AccountSendAvailabilityService sendAvailabilityService) {
+    public BilibiliAccountService(JdbcTemplate jdbcTemplate, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sendAvailabilityService = sendAvailabilityService;
+        this.uploaderAccountService = uploaderAccountService;
         this.httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
         this.objectMapper = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
         ensureSchema();
@@ -64,7 +66,15 @@ public class BilibiliAccountService {
                     String json = rs.getString("login_info_json");
                     Long mid = rs.getObject("mid") == null ? null : rs.getLong("mid");
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
-                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
+                    UploaderAccountState accountState = syncAccountState(
+                            accountKey,
+                            rs.getBoolean("is_enabled"),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
+                            null,
+                            null,
+                            updatedAt
+                    );
                     return new BilibiliAccountStatus(
                             "database",
                             accountKey,
@@ -75,14 +85,14 @@ public class BilibiliAccountService {
                             rs.getString("uname"),
                             null,
                             null,
-                            sendAvailability.lastUploadAt(),
-                            sendAvailability.nextUploadAllowedAt(),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            sendAvailability.todayUploadCount(),
-                            sendAvailability.cooldownWaitingCount(),
-                            sendAvailability.uploadRunningCount(),
-                            rs.getBoolean("is_enabled"),
+                            accountState.lastUploadAt(),
+                            accountState.nextUploadAllowedAt(),
+                            accountState.uploadCooldownMinSeconds(),
+                            accountState.uploadCooldownMaxSeconds(),
+                            accountState.todayUploadCount(),
+                            accountState.cooldownWaitingCount(),
+                            accountState.uploadRunningCount(),
+                            accountState.enabled(),
                             null,
                             "已保存",
                             Map.of(),
@@ -199,6 +209,7 @@ public class BilibiliAccountService {
         if (updated != 1) {
             throw new IOException("Bilibili account key not found: " + oldKey);
         }
+        uploaderAccountService.renameAccount("bilibili", oldKey, newKey);
         return status(newKey);
     }
 
@@ -212,6 +223,7 @@ public class BilibiliAccountService {
         if (updated != 1) {
             throw new IOException("Bilibili account key not found: " + normalized);
         }
+        uploaderAccountService.updateEnabled("bilibili", normalized, enabled);
         return status(normalized);
     }
 
@@ -227,6 +239,7 @@ public class BilibiliAccountService {
         if (updated != 1) {
             throw new IOException("Bilibili account key not found: " + normalized);
         }
+        uploaderAccountService.updateCooldown("bilibili", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -374,6 +387,28 @@ public class BilibiliAccountService {
         return sendAvailabilityService.availability("bilibili", accountKey, TABLE);
     }
 
+    private UploaderAccountState syncAccountState(
+            String accountKey,
+            Boolean enabled,
+            Integer minSeconds,
+            Integer maxSeconds,
+            LocalDateTime lastUploadAt,
+            LocalDateTime nextUploadAllowedAt,
+            LocalDateTime sourceUpdatedAt
+    ) {
+        return uploaderAccountService.syncFromPlatformRow(
+                "bilibili",
+                accountKey,
+                TABLE,
+                enabled,
+                minSeconds,
+                maxSeconds,
+                lastUploadAt,
+                nextUploadAllowedAt,
+                sourceUpdatedAt
+        );
+    }
+
     private JsonNode getMyInfo(JsonNode loginInfo) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.bilibili.com/x/space/myinfo"))
                 .header("User-Agent", "Mozilla/5.0")
@@ -440,6 +475,8 @@ public class BilibiliAccountService {
                 uname,
                 objectMapper.writeValueAsString(normalized)
         );
+        int[] cooldown = cooldownConfig(accountKey);
+        syncAccountState(accountKey, true, cooldown[0], cooldown[1], null, null, LocalDateTime.now());
     }
 
     private void ensureSchema() {

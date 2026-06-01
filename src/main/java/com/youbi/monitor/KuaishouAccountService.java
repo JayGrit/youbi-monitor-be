@@ -28,17 +28,20 @@ public class KuaishouAccountService {
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
+    private final UploaderAccountService uploaderAccountService;
 
     public KuaishouAccountService(
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
-            SocialBrowserFactory browserFactory
+            SocialBrowserFactory browserFactory,
+            UploaderAccountService uploaderAccountService
     ) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
+        this.uploaderAccountService = uploaderAccountService;
         ensureSchema();
     }
 
@@ -48,23 +51,32 @@ public class KuaishouAccountService {
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
-                    AccountSendAvailability availability = sendAvailability(accountKey);
+                    LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
+                    UploaderAccountState accountState = syncAccountState(
+                            accountKey,
+                            rs.getBoolean("is_enabled"),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
+                            null,
+                            null,
+                            updatedAt
+                    );
                     return new KuaishouAccountStatus(
                             "database",
                             accountKey,
                             json != null && !json.isBlank(),
                             json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
-                            rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime(),
+                            updatedAt,
                             rs.getString("user_id"),
                             rs.getString("nickname"),
-                            availability.lastUploadAt(),
-                            availability.nextUploadAllowedAt(),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            availability.todayUploadCount(),
-                            availability.cooldownWaitingCount(),
-                            availability.uploadRunningCount(),
-                            rs.getBoolean("is_enabled"),
+                            accountState.lastUploadAt(),
+                            accountState.nextUploadAllowedAt(),
+                            accountState.uploadCooldownMinSeconds(),
+                            accountState.uploadCooldownMaxSeconds(),
+                            accountState.todayUploadCount(),
+                            accountState.cooldownWaitingCount(),
+                            accountState.uploadRunningCount(),
+                            accountState.enabled(),
                             null,
                             "已保存",
                             Map.of(),
@@ -127,6 +139,7 @@ public class KuaishouAccountService {
         if (updated != 1) {
             throw new IOException("Kuaishou account key not found: " + oldKey);
         }
+        uploaderAccountService.renameAccount("kuaishou", oldKey, newKey);
         return status(newKey);
     }
 
@@ -136,6 +149,7 @@ public class KuaishouAccountService {
         if (updated != 1) {
             throw new IOException("Kuaishou account key not found: " + normalized);
         }
+        uploaderAccountService.updateEnabled("kuaishou", normalized, enabled);
         return status(normalized);
     }
 
@@ -151,6 +165,7 @@ public class KuaishouAccountService {
         if (updated != 1) {
             throw new IOException("Kuaishou account key not found: " + normalized);
         }
+        uploaderAccountService.updateCooldown("kuaishou", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -187,6 +202,8 @@ public class KuaishouAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
+        int[] cooldown = cooldownConfig(normalized);
+        syncAccountState(normalized, accountEnabled(normalized), cooldown[0], cooldown[1], null, null, LocalDateTime.now());
     }
 
     private boolean isStorageStateValid(String storageState) {
@@ -296,6 +313,28 @@ public class KuaishouAccountService {
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("kuaishou", accountKey, TABLE);
+    }
+
+    private UploaderAccountState syncAccountState(
+            String accountKey,
+            Boolean enabled,
+            Integer minSeconds,
+            Integer maxSeconds,
+            LocalDateTime lastUploadAt,
+            LocalDateTime nextUploadAllowedAt,
+            LocalDateTime sourceUpdatedAt
+    ) {
+        return uploaderAccountService.syncFromPlatformRow(
+                "kuaishou",
+                accountKey,
+                TABLE,
+                enabled,
+                minSeconds,
+                maxSeconds,
+                lastUploadAt,
+                nextUploadAllowedAt,
+                sourceUpdatedAt
+        );
     }
 
     private void ensureSchema() {
