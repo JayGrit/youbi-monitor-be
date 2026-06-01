@@ -279,7 +279,7 @@ public class JinritoutiaoUploadService {
             }
             for (String text : List.of("完成", "确定", "确认")) {
                 try {
-                    String clicked = clickVisibleText(page, text);
+                    String clicked = clickTopmostVisibleText(page, text);
                     if (!"not-clicked".equals(clicked)) {
                         log.info("Jinritoutiao upload cover editor confirm clicked taskId={} attempt={} text={} method={}",
                                 taskId, attempt, text, clicked);
@@ -309,6 +309,50 @@ public class JinritoutiaoUploadService {
                 "图片截取",
                 "本地上传"
         );
+    }
+
+    private String clickTopmostVisibleText(Page page, String text) {
+        Object result = page.evaluate(
+                """
+                (needle) => {
+                  const isVisible = (el) => {
+                    const style = getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+                  };
+                  const ownText = (el) => Array.from(el.childNodes)
+                    .filter((node) => node.nodeType === Node.TEXT_NODE)
+                    .map((node) => node.textContent || '')
+                    .join('')
+                    .trim();
+                  const isTopmost = (el) => {
+                    const rect = el.getBoundingClientRect();
+                    const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1);
+                    const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1);
+                    const top = document.elementFromPoint(x, y);
+                    return top && (el === top || el.contains(top));
+                  };
+                  const matches = Array.from(document.querySelectorAll('*'))
+                    .filter((el) => isVisible(el) && isTopmost(el) && (ownText(el) === needle || (el.innerText || el.textContent || '').trim() === needle));
+                  matches.sort((a, b) => {
+                    const ar = a.getBoundingClientRect();
+                    const br = b.getBoundingClientRect();
+                    const aButton = a.tagName === 'BUTTON' ? 0 : 1;
+                    const bButton = b.tagName === 'BUTTON' ? 0 : 1;
+                    if (aButton !== bButton) return aButton - bButton;
+                    return (ar.width * ar.height) - (br.width * br.height);
+                  });
+                  const target = matches.find((el) => el.tagName === 'BUTTON') || matches[0];
+                  if (!target) return 'not-clicked';
+                  target.scrollIntoView({block: 'center', inline: 'center'});
+                  const rect = target.getBoundingClientRect();
+                  target.click();
+                  return `${target.tagName}.${target.className || ''}:text=${(target.innerText || target.textContent || '').trim()}:rect=${Math.round(rect.x)},${Math.round(rect.y)},${Math.round(rect.width)},${Math.round(rect.height)}`;
+                }
+                """,
+                text
+        );
+        return result == null ? "not-clicked" : result.toString();
     }
 
     private void waitForUploadComplete(Page page, String taskId) {
