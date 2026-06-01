@@ -11,6 +11,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.imageio.ImageIO;
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +31,8 @@ public class JinritoutiaoUploadService {
     private static final Logger log = LoggerFactory.getLogger(JinritoutiaoUploadService.class);
     private static final String DIAGNOSTIC_PLATFORM = "jinritoutiao";
     private static final String DIAGNOSTIC_SOURCE = "jinritoutiao-upload";
+    private static final int MIN_COVER_WIDTH = 412;
+    private static final int MIN_COVER_HEIGHT = 667;
     private static final List<String> UPLOAD_IN_PROGRESS_TEXTS = List.of(
             "上传中", "正在上传", "视频上传中", "处理中", "视频处理中", "转码中", "上传进度", "解析中"
     );
@@ -219,10 +226,12 @@ public class JinritoutiaoUploadService {
     }
 
     private void uploadCover(Page page, Path coverPath, String taskId) {
+        Path preparedCoverPath = coverPath;
         try {
             if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "修改封面", "重新上传封面")) {
                 return;
             }
+            preparedCoverPath = prepareCoverForUpload(coverPath, taskId);
             String clicked = clickVisibleText(page, "上传封面");
             if ("not-clicked".equals(clicked)) {
                 log.warn("Jinritoutiao upload cover trigger not found taskId={}", taskId);
@@ -232,17 +241,61 @@ public class JinritoutiaoUploadService {
             clickVisibleText(page, "本地上传");
             Locator coverInput = page.locator("input[type='file'][accept*='image']").last();
             coverInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
-            coverInput.setInputFiles(coverPath);
+            coverInput.setInputFiles(preparedCoverPath);
             page.waitForTimeout(3000);
             dumpDiagnostics(page, taskId, "cover-uploaded");
             confirmCoverEditor(page, taskId);
             dumpDiagnostics(page, taskId, "cover-confirmed");
-            log.info("Jinritoutiao upload cover uploaded taskId={} cover={} trigger={}", taskId, coverPath, clicked);
+            log.info("Jinritoutiao upload cover uploaded taskId={} cover={} preparedCover={} trigger={}", taskId, coverPath, preparedCoverPath, clicked);
         } catch (Exception exception) {
             dumpDiagnostics(page, taskId, "cover-upload-failed");
             log.warn("Jinritoutiao upload cover upload failed taskId={} cover={} message={}", taskId, coverPath, exception.getMessage());
             selectGeneratedCover(page, taskId);
+        } finally {
+            if (preparedCoverPath != null && !preparedCoverPath.equals(coverPath)) {
+                try {
+                    Files.deleteIfExists(preparedCoverPath);
+                } catch (IOException exception) {
+                    log.warn("Jinritoutiao upload temporary cover cleanup failed taskId={} cover={} message={}",
+                            taskId, preparedCoverPath, exception.getMessage());
+                }
+            }
         }
+    }
+
+    private Path prepareCoverForUpload(Path coverPath, String taskId) throws IOException {
+        BufferedImage source = ImageIO.read(coverPath.toFile());
+        if (source == null) {
+            log.warn("Jinritoutiao upload cover image cannot be decoded taskId={} cover={}, using original", taskId, coverPath);
+            return coverPath;
+        }
+        int width = source.getWidth();
+        int height = source.getHeight();
+        if (width >= MIN_COVER_WIDTH && height >= MIN_COVER_HEIGHT) {
+            return coverPath;
+        }
+        double scale = Math.max((double) MIN_COVER_WIDTH / width, (double) MIN_COVER_HEIGHT / height);
+        int targetWidth = Math.max(MIN_COVER_WIDTH, (int) Math.ceil(width * scale));
+        int targetHeight = Math.max(MIN_COVER_HEIGHT, (int) Math.ceil(height * scale));
+        BufferedImage target = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = target.createGraphics();
+        try {
+            graphics.setColor(Color.WHITE);
+            graphics.fillRect(0, 0, targetWidth, targetHeight);
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            graphics.drawImage(source, 0, 0, targetWidth, targetHeight, null);
+        } finally {
+            graphics.dispose();
+        }
+        Path prepared = Files.createTempFile("jinritoutiao-cover-", ".jpg");
+        if (!ImageIO.write(target, "jpg", prepared.toFile())) {
+            throw new IOException("No JPEG writer available for Jinritoutiao cover");
+        }
+        log.info("Jinritoutiao upload cover upscaled taskId={} cover={} original={}x{} prepared={} preparedSize={}x{}",
+                taskId, coverPath, width, height, prepared, targetWidth, targetHeight);
+        return prepared;
     }
 
     private void selectGeneratedCover(Page page, String taskId) {
