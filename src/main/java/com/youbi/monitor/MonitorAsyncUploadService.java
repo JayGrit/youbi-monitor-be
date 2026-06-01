@@ -31,6 +31,7 @@ public class MonitorAsyncUploadService {
     private final DouyinUploadService douyinUploadService;
     private final ShipinhaoUploadService shipinhaoUploadService;
     private final KuaishouUploadService kuaishouUploadService;
+    private final JinritoutiaoUploadService jinritoutiaoUploadService;
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
@@ -46,6 +47,7 @@ public class MonitorAsyncUploadService {
             DouyinUploadService douyinUploadService,
             ShipinhaoUploadService shipinhaoUploadService,
             KuaishouUploadService kuaishouUploadService,
+            JinritoutiaoUploadService jinritoutiaoUploadService,
             JdbcTemplate jdbcTemplate,
             ObjectMapper objectMapper
     ) {
@@ -55,6 +57,7 @@ public class MonitorAsyncUploadService {
         this.douyinUploadService = douyinUploadService;
         this.shipinhaoUploadService = shipinhaoUploadService;
         this.kuaishouUploadService = kuaishouUploadService;
+        this.jinritoutiaoUploadService = jinritoutiaoUploadService;
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
     }
@@ -220,6 +223,7 @@ public class MonitorAsyncUploadService {
             case "douyin" -> douyinUploadService.upload((DouyinUploadRequest) request);
             case "shipinhao" -> shipinhaoUploadService.upload((ShipinhaoUploadRequest) request);
             case "kuaishou" -> kuaishouUploadService.upload((KuaishouUploadRequest) request);
+            case "jinritoutiao" -> jinritoutiaoUploadService.upload((JinritoutiaoUploadRequest) request);
             default -> throw new IllegalArgumentException("Unsupported upload platform: " + platform);
         };
     }

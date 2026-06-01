@@ -21,7 +21,8 @@ public class AccountProfileService {
             "douyin", "uploader_account_douyin",
             "xiaohongshu", "uploader_account_xiaohongshu",
             "shipinhao", "uploader_account_shipinhao",
-            "kuaishou", "uploader_account_kuaishou"
+            "kuaishou", "uploader_account_kuaishou",
+            "jinritoutiao", "uploader_account_jinritoutiao"
     );
 
     private final JdbcTemplate jdbcTemplate;

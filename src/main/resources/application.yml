@@ -58,3 +58,7 @@ youbi:
     headless: ${YDBI_KUAISHOU_HEADLESS:true}
     browser-channel: ${YDBI_KUAISHOU_BROWSER_CHANNEL:chrome}
     stealth-script-path: ${YDBI_KUAISHOU_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
+  jinritoutiao:
+    headless: ${YDBI_JINRITOUTIAO_HEADLESS:true}
+    browser-channel: ${YDBI_JINRITOUTIAO_BROWSER_CHANNEL:chrome}
+    stealth-script-path: ${YDBI_JINRITOUTIAO_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}

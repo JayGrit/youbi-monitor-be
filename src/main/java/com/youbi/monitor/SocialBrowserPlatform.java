@@ -5,7 +5,8 @@ enum SocialBrowserPlatform {
     XIAOHONGSHU("xiaohongshu"),
     BILIBILI("bilibili"),
     SHIPINHAO("shipinhao"),
-    KUAISHOU("kuaishou");
+    KUAISHOU("kuaishou"),
+    JINRITOUTIAO("jinritoutiao");
 
     private final String configKey;
 

@@ -24,6 +24,7 @@ public class SocialPlaywrightInspectService {
     private final BilibiliPlaywrightAccountService bilibiliAccountService;
     private final ShipinhaoAccountService shipinhaoAccountService;
     private final KuaishouAccountService kuaishouAccountService;
+    private final JinritoutiaoAccountService jinritoutiaoAccountService;
     private final SocialBrowserFactory browserFactory;
     private final SocialRiskDetector riskDetector;
     private final DiagnosticArtifactService diagnosticArtifactService;
@@ -35,6 +36,7 @@ public class SocialPlaywrightInspectService {
             BilibiliPlaywrightAccountService bilibiliAccountService,
             ShipinhaoAccountService shipinhaoAccountService,
             KuaishouAccountService kuaishouAccountService,
+            JinritoutiaoAccountService jinritoutiaoAccountService,
             SocialBrowserFactory browserFactory,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
@@ -45,6 +47,7 @@ public class SocialPlaywrightInspectService {
         this.bilibiliAccountService = bilibiliAccountService;
         this.shipinhaoAccountService = shipinhaoAccountService;
         this.kuaishouAccountService = kuaishouAccountService;
+        this.jinritoutiaoAccountService = jinritoutiaoAccountService;
         this.browserFactory = browserFactory;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
@@ -202,6 +205,7 @@ public class SocialPlaywrightInspectService {
             case BILIBILI -> containsAny(body, "上传视频", "稿件", "发布", "点击上传");
             case SHIPINHAO -> containsAny(body, "发表动态", "视频描述", "发表", "保存草稿");
             case KUAISHOU -> containsAny(body, "发布视频", "上传视频", "选择视频", "作品描述");
+            case JINRITOUTIAO -> containsAny(body, "发布视频", "点击上传", "基本信息", "视频简介");
         };
     }
 
@@ -263,6 +267,7 @@ public class SocialPlaywrightInspectService {
             case BILIBILI -> bilibiliAccountService.newContext(browser, storageState);
             case SHIPINHAO -> shipinhaoAccountService.newContext(browser, storageState);
             case KUAISHOU -> kuaishouAccountService.newContext(browser, storageState);
+            case JINRITOUTIAO -> jinritoutiaoAccountService.newContext(browser, storageState);
         };
     }
 
@@ -273,6 +278,7 @@ public class SocialPlaywrightInspectService {
             case BILIBILI -> bilibiliAccountService.normalizeAccountKey(accountKey);
             case SHIPINHAO -> shipinhaoAccountService.normalizeAccountKey(accountKey);
             case KUAISHOU -> kuaishouAccountService.normalizeAccountKey(accountKey);
+            case JINRITOUTIAO -> jinritoutiaoAccountService.normalizeAccountKey(accountKey);
         };
     }
 
@@ -283,6 +289,7 @@ public class SocialPlaywrightInspectService {
             case BILIBILI -> bilibiliAccountService.storageState(accountKey);
             case SHIPINHAO -> shipinhaoAccountService.storageState(accountKey);
             case KUAISHOU -> kuaishouAccountService.storageState(accountKey);
+            case JINRITOUTIAO -> jinritoutiaoAccountService.storageState(accountKey);
         };
     }
 
@@ -293,6 +300,7 @@ public class SocialPlaywrightInspectService {
             case BILIBILI -> BilibiliPlaywrightAccountService.PUBLISH_VIDEO_URL;
             case SHIPINHAO -> ShipinhaoAccountService.PUBLISH_VIDEO_URL;
             case KUAISHOU -> KuaishouAccountService.PUBLISH_VIDEO_URL;
+            case JINRITOUTIAO -> JinritoutiaoAccountService.PUBLISH_VIDEO_URL;
         };
     }
 
@@ -315,6 +323,7 @@ public class SocialPlaywrightInspectService {
             case "bilibili", "bili" -> SocialBrowserPlatform.BILIBILI;
             case "shipinhao", "sph", "channels", "weixin-channels" -> SocialBrowserPlatform.SHIPINHAO;
             case "kuaishou", "ks" -> SocialBrowserPlatform.KUAISHOU;
+            case "jinritoutiao", "toutiao", "tt" -> SocialBrowserPlatform.JINRITOUTIAO;
             default -> throw new IllegalArgumentException("Unsupported platform: " + value);
         };
     }
