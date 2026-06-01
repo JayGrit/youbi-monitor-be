@@ -125,6 +125,7 @@ public class JinritoutiaoUploadService {
         scrollToSubmitArea(page, taskId);
 
         waitForUploadComplete(page, taskId);
+        selectSuggestedCover(page, taskId);
         dismissKnownDialogs(page, taskId);
         dumpDiagnostics(page, taskId, "upload-complete");
 
@@ -197,6 +198,41 @@ public class JinritoutiaoUploadService {
                 }
             } catch (Exception ignored) {
             }
+        }
+    }
+
+    private void selectSuggestedCover(Page page, String taskId) {
+        try {
+            if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "修改封面", "重新上传封面")) {
+                return;
+            }
+            String clicked = clickVisibleText(page, "上传封面");
+            if ("not-clicked".equals(clicked)) {
+                log.warn("Jinritoutiao upload cover trigger not found taskId={}", taskId);
+                return;
+            }
+            page.waitForTimeout(2000);
+            dumpDiagnostics(page, taskId, "cover-picker-open");
+
+            Locator firstFrame = page.locator("img.select-img").first();
+            if (firstFrame.count() > 0) {
+                firstFrame.click(new Locator.ClickOptions().setForce(true));
+                page.waitForTimeout(500);
+            }
+            clickVisibleText(page, "下一步");
+            page.waitForTimeout(2000);
+            for (String text : List.of("完成", "确定", "确认")) {
+                String confirmed = clickVisibleText(page, text);
+                if (!"not-clicked".equals(confirmed)) {
+                    page.waitForTimeout(2000);
+                    break;
+                }
+            }
+            dumpDiagnostics(page, taskId, "cover-selected");
+            log.info("Jinritoutiao upload selected generated cover taskId={} trigger={}", taskId, clicked);
+        } catch (Exception exception) {
+            dumpDiagnostics(page, taskId, "cover-select-failed");
+            log.warn("Jinritoutiao upload generated cover selection skipped taskId={} message={}", taskId, exception.getMessage());
         }
     }
 
