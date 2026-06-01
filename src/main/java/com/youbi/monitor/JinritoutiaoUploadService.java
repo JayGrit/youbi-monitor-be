@@ -35,6 +35,21 @@ public class JinritoutiaoUploadService {
     private static final List<String> MISSING_VIDEO_TEXTS = List.of(
             "请上传视频", "请选择视频", "上传视频后", "请添加视频"
     );
+    private static final List<String> TITLE_SELECTORS = List.of(
+            ".form-item-title input",
+            "input[placeholder*='0～30']",
+            "input[placeholder*='0-30']",
+            "input[placeholder*='1～30']",
+            "input[placeholder*='1-30']",
+            "input[placeholder*='请输入 0']",
+            "input[placeholder*='请输入 1']",
+            "input.xigua-input.show-limit"
+    );
+    private static final List<String> DESCRIPTION_SELECTORS = List.of(
+            ".form-item-abstract textarea",
+            "textarea[placeholder*='视频简介']",
+            "textarea[placeholder*='简介']"
+    );
 
     private final JinritoutiaoAccountService accountService;
     private final UploadMaterialResolver materialResolver;
@@ -167,15 +182,8 @@ public class JinritoutiaoUploadService {
             throw new IllegalArgumentException("Missing title");
         }
         String description = TextSupport.firstText(request.description(), title);
-        fillFirstVisible(page, List.of(
-                "input[placeholder*='1～30']",
-                "input[placeholder*='1-30']",
-                "input[placeholder*='请输入 1']"
-        ), title, taskId, "title");
-        fillFirstVisible(page, List.of(
-                "textarea[placeholder*='视频简介']",
-                "textarea[placeholder*='简介']"
-        ), description, taskId, "description");
+        fillFirstVisible(page, TITLE_SELECTORS, title, taskId, "title");
+        fillFirstVisibleOptional(page, DESCRIPTION_SELECTORS, description, taskId, "description");
         for (String tag : parseTags(request.tags())) {
             fillTopic(page, tag, taskId);
         }
@@ -491,8 +499,7 @@ public class JinritoutiaoUploadService {
         while (System.currentTimeMillis() < deadline) {
             checks += 1;
             try {
-                Locator title = page.locator("input[placeholder*='1～30'], input[placeholder*='1-30'], input[placeholder*='请输入 1']").first();
-                if (title.count() > 0 && title.isVisible()) {
+                if (hasVisibleLocator(page, String.join(", ", TITLE_SELECTORS)) || hasMetadataFormText(page)) {
                     log.info("Jinritoutiao upload metadata form ready taskId={} checks={}", taskId, checks);
                     return;
                 }
@@ -507,6 +514,13 @@ public class JinritoutiaoUploadService {
         }
         dumpDiagnostics(page, taskId, "metadata-form-timeout");
         throw new RuntimeException("Timed out waiting for Jinritoutiao metadata form");
+    }
+
+    private boolean hasMetadataFormText(Page page) {
+        String body = PlaywrightDiagnostics.safeBodyText(page);
+        return TextSupport.containsAny(body, "发布设置", "标题", "封面")
+                && TextSupport.containsAny(body, "上传成功", "重新上传", "删除")
+                && TextSupport.containsAny(body, "发布", "存草稿");
     }
 
     private UploadReadiness uploadReadiness(Page page) {
@@ -609,6 +623,39 @@ public class JinritoutiaoUploadService {
         }
         dumpDiagnostics(page, taskId, "fill-" + label + "-failed");
         throw last == null ? new RuntimeException("Jinritoutiao " + label + " field not found") : last;
+    }
+
+    private void fillFirstVisibleOptional(Page page, List<String> selectors, String value, String taskId, String label) {
+        RuntimeException last = null;
+        for (String selector : selectors) {
+            try {
+                Locator locator = page.locator(selector).first();
+                if (locator.count() == 0) {
+                    continue;
+                }
+                locator.waitFor(new Locator.WaitForOptions().setTimeout(3000));
+                locator.scrollIntoViewIfNeeded();
+                locator.click(new Locator.ClickOptions().setForce(true));
+                page.keyboard().press("Control+A");
+                page.keyboard().press("Delete");
+                page.keyboard().type(value);
+                log.info("Jinritoutiao upload filled optional {} taskId={} selector={}", label, taskId, selector);
+                return;
+            } catch (RuntimeException exception) {
+                last = exception;
+            }
+        }
+        log.info("Jinritoutiao upload optional {} field skipped taskId={} lastMessage={}",
+                label, taskId, last == null ? "not-found" : last.getMessage());
+    }
+
+    private boolean hasVisibleLocator(Page page, String selector) {
+        try {
+            Locator locator = page.locator(selector).first();
+            return locator.count() > 0 && locator.isVisible();
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     private boolean hasVisibleLoginGate(Page page) {
