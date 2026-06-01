@@ -22,9 +22,11 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @CrossOrigin
 public class MonitorController {
     private final MonitorService monitorService;
+    private final DiagnosticArtifactService diagnosticArtifactService;
 
-    public MonitorController(MonitorService monitorService) {
+    public MonitorController(MonitorService monitorService, DiagnosticArtifactService diagnosticArtifactService) {
         this.monitorService = monitorService;
+        this.diagnosticArtifactService = diagnosticArtifactService;
     }
 
     @GetMapping("/api/video-tasks/monitor")
@@ -40,6 +42,11 @@ public class MonitorController {
             throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
         }
         return detail;
+    }
+
+    @GetMapping("/api/video-tasks/{taskId}/uploader-diagnostics")
+    public List<DiagnosticArtifactRecord> uploaderDiagnostics(@PathVariable String taskId) {
+        return diagnosticArtifactService.list(taskId, null);
     }
 
     @PatchMapping("/api/video-tasks/{taskId}/speaker-segments/{segmentId}/dst-text")
