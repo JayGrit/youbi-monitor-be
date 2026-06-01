@@ -37,12 +37,8 @@ jobs:
           cd "${TXY_PATH}"
           git fetch origin && git reset --hard origin/main
           printf 'nameserver 183.60.82.98\nnameserver 183.60.83.19\nnameserver 8.8.8.8\n' > /etc/resolv.conf
-          OLD_MONITOR_BE_IMAGE="$(docker inspect -f '{{.Image}}' monitor-be 2>/dev/null || true)"
-          docker rm -f monitor-be || true
-          if [ -n "${OLD_MONITOR_BE_IMAGE}" ]; then
-            docker rmi -f "${OLD_MONITOR_BE_IMAGE}" || true
-          fi
           docker image prune -f --filter label=youbi.service=monitor-be
+          OLD_MONITOR_BE_IMAGE="$(docker inspect -f '{{.Image}}' monitor-be 2>/dev/null || true)"
           DOCKER_BUILDKIT=1 docker build --label youbi.service=monitor-be -t monitor-be:latest .
 
           DOUYIN_CDP_URL=""
@@ -68,6 +64,7 @@ jobs:
           )
           echo "Bilibili Playwright will launch system Chrome in headless mode."
 
+          docker rm -f monitor-be || true
           docker run -d \
             --name monitor-be \
             --network host \
@@ -77,5 +74,8 @@ jobs:
             monitor-be:latest
 
           docker logs monitor-be --tail 20
+          if [ -n "${OLD_MONITOR_BE_IMAGE}" ]; then
+            docker rmi -f "${OLD_MONITOR_BE_IMAGE}" || true
+          fi
           docker rmi -f monitor-be:latest || true
           EOF
