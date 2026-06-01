@@ -227,8 +227,7 @@ public class JinritoutiaoUploadService {
             coverInput.setInputFiles(coverPath);
             page.waitForTimeout(3000);
             dumpDiagnostics(page, taskId, "cover-uploaded");
-            clickVisibleText(page, "确定");
-            page.waitForTimeout(3000);
+            confirmCoverEditor(page, taskId);
             dumpDiagnostics(page, taskId, "cover-confirmed");
             log.info("Jinritoutiao upload cover uploaded taskId={} cover={} trigger={}", taskId, coverPath, clicked);
         } catch (Exception exception) {
@@ -258,19 +257,58 @@ public class JinritoutiaoUploadService {
             }
             clickVisibleText(page, "下一步");
             page.waitForTimeout(2000);
-            for (String text : List.of("完成", "确定", "确认")) {
-                String confirmed = clickVisibleText(page, text);
-                if (!"not-clicked".equals(confirmed)) {
-                    page.waitForTimeout(2000);
-                    break;
-                }
-            }
+            confirmCoverEditor(page, taskId);
             dumpDiagnostics(page, taskId, "cover-selected");
             log.info("Jinritoutiao upload selected generated cover taskId={} trigger={}", taskId, clicked);
         } catch (Exception exception) {
             dumpDiagnostics(page, taskId, "cover-select-failed");
             log.warn("Jinritoutiao upload generated cover selection skipped taskId={} message={}", taskId, exception.getMessage());
         }
+    }
+
+    private void confirmCoverEditor(Page page, String taskId) {
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= 4; attempt++) {
+            String body = PlaywrightDiagnostics.safeBodyText(page);
+            if (!coverEditorNeedsConfirmation(body)) {
+                page.waitForTimeout(1000);
+                if (!coverEditorNeedsConfirmation(PlaywrightDiagnostics.safeBodyText(page))) {
+                    log.info("Jinritoutiao upload cover editor closed taskId={} attempts={}", taskId, attempt - 1);
+                    return;
+                }
+            }
+            for (String text : List.of("完成", "确定", "确认")) {
+                try {
+                    String clicked = clickVisibleText(page, text);
+                    if (!"not-clicked".equals(clicked)) {
+                        log.info("Jinritoutiao upload cover editor confirm clicked taskId={} attempt={} text={} method={}",
+                                taskId, attempt, text, clicked);
+                        page.waitForTimeout(2000);
+                        dumpDiagnostics(page, taskId, "cover-confirm-click-" + attempt);
+                        break;
+                    }
+                } catch (RuntimeException exception) {
+                    last = exception;
+                }
+            }
+        }
+        String body = PlaywrightDiagnostics.safeBodyText(page);
+        if (coverEditorNeedsConfirmation(body)) {
+            dumpDiagnostics(page, taskId, "cover-confirm-timeout");
+            throw last == null
+                    ? new RuntimeException("Jinritoutiao cover editor did not close, body=" + TextSupport.truncate(body, 200))
+                    : last;
+        }
+    }
+
+    private boolean coverEditorNeedsConfirmation(String body) {
+        return TextSupport.containsAny(body,
+                "封面编辑",
+                "完成后无法继续编辑",
+                "是否确定完成",
+                "图片截取",
+                "本地上传"
+        );
     }
 
     private void waitForUploadComplete(Page page, String taskId) {
