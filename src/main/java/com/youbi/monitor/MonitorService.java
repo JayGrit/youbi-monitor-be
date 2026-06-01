@@ -728,22 +728,24 @@ public class MonitorService {
     public SubmitterAuthorType authorType(String author) {
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new SubmitterAuthorType("", "", true, "英文", "中文");
+            return new SubmitterAuthorType("", "", true, true, "英文", "中文");
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT type, need_dubbing, source_language, target_language
+                SELECT type, need_subtitle, need_dubbing, source_language, target_language
                 FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new SubmitterAuthorType(normalized, "", true, "英文", "中文");
+            return new SubmitterAuthorType(normalized, "", true, true, "英文", "中文");
         }
         Map<String, Object> row = rows.get(0);
+        boolean needSubtitle = boolValue(row.get("need_subtitle"), true);
         return new SubmitterAuthorType(
                 normalized,
                 stringValue(row.get("type")),
-                boolValue(row.get("need_dubbing"), true),
+                needSubtitle,
+                needSubtitle && boolValue(row.get("need_dubbing"), true),
                 defaultLanguage(row.get("source_language"), "英文"),
                 defaultLanguage(row.get("target_language"), "中文")
         );
@@ -751,13 +753,14 @@ public class MonitorService {
 
     public List<SubmitterAuthorType> authorTypes() {
         return jdbcTemplate.query("""
-                SELECT author, type, need_dubbing, source_language, target_language
+                SELECT author, type, need_subtitle, need_dubbing, source_language, target_language
                 FROM submitter_author
                 ORDER BY author
                 """, (rs, rowNum) -> new SubmitterAuthorType(
                 text(rs.getString("author")),
                 text(rs.getString("type")),
-                boolValue(rs.getObject("need_dubbing"), true),
+                boolValue(rs.getObject("need_subtitle"), true),
+                boolValue(rs.getObject("need_subtitle"), true) && boolValue(rs.getObject("need_dubbing"), true),
                 defaultLanguage(rs.getString("source_language"), "英文"),
                 defaultLanguage(rs.getString("target_language"), "中文")
         ));
@@ -766,6 +769,7 @@ public class MonitorService {
     public SubmitterAuthorType saveAuthorType(
             String author,
             String type,
+            Boolean needSubtitle,
             Boolean needDubbing,
             String sourceLanguage,
             String targetLanguage
@@ -780,11 +784,14 @@ public class MonitorService {
         if (normalizedType.isBlank()) {
             throw new IllegalArgumentException("type is required");
         }
+        boolean normalizedNeedSubtitle = !Boolean.FALSE.equals(needSubtitle);
+        boolean normalizedNeedDubbing = normalizedNeedSubtitle && !Boolean.FALSE.equals(needDubbing);
         jdbcTemplate.update("""
-                INSERT INTO submitter_author (author, type, need_dubbing, source_language, target_language)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, source_language, target_language)
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     type = VALUES(type),
+                    need_subtitle = VALUES(need_subtitle),
                     need_dubbing = VALUES(need_dubbing),
                     source_language = VALUES(source_language),
                     target_language = VALUES(target_language),
@@ -792,14 +799,16 @@ public class MonitorService {
                 """,
                 normalizedAuthor,
                 normalizedType,
-                Boolean.FALSE.equals(needDubbing) ? 0 : 1,
+                normalizedNeedSubtitle ? 1 : 0,
+                normalizedNeedDubbing ? 1 : 0,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage
         );
         return new SubmitterAuthorType(
                 normalizedAuthor,
                 normalizedType,
-                !Boolean.FALSE.equals(needDubbing),
+                normalizedNeedSubtitle,
+                normalizedNeedDubbing,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage
         );
@@ -1775,6 +1784,7 @@ public class MonitorService {
         }
         ensureColumn("yd_video_info", "source_duration_seconds", "DOUBLE NULL");
         ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
+        ensureColumn("yd_video_info", "need_subtitle", "TINYINT(1) NULL");
         ensureColumn("yd_video_info", "need_dubbing", "TINYINT(1) NULL");
         ensureColumn("yd_video_info", "final_video_url", "TEXT NULL");
         ensureColumn("yd_video_info", "final_video_path", "TEXT NULL");
@@ -1785,6 +1795,7 @@ public class MonitorService {
                 CREATE TABLE IF NOT EXISTS submitter_author (
                     author VARCHAR(255) NOT NULL PRIMARY KEY,
                     type VARCHAR(128) NOT NULL,
+                    need_subtitle TINYINT(1) NOT NULL DEFAULT 1,
                     need_dubbing TINYINT(1) NOT NULL DEFAULT 1,
                     source_language VARCHAR(64) NOT NULL DEFAULT '英文',
                     target_language VARCHAR(64) NOT NULL DEFAULT '中文',
@@ -1794,6 +1805,7 @@ public class MonitorService {
                     KEY idx_submitter_author_type_type (type)
                 )
                 """);
+        ensureColumn("submitter_author", "need_subtitle", "TINYINT(1) NOT NULL DEFAULT 1");
         ensureColumn("submitter_author", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
         ensureColumn("submitter_author", "source_language", "VARCHAR(64) NOT NULL DEFAULT '英文'");
         ensureColumn("submitter_author", "target_language", "VARCHAR(64) NOT NULL DEFAULT '中文'");
@@ -1952,6 +1964,7 @@ public class MonitorService {
     public record SubmitterAuthorType(
             String author,
             String type,
+            boolean needSubtitle,
             boolean needDubbing,
             String sourceLanguage,
             String targetLanguage
@@ -1961,6 +1974,7 @@ public class MonitorService {
     public record SubmitterAuthorTypeUpdateRequest(
             String author,
             String type,
+            Boolean needSubtitle,
             Boolean needDubbing,
             String sourceLanguage,
             String targetLanguage
