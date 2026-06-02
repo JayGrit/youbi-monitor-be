@@ -60,8 +60,7 @@ public class MonitorService {
             "yd_speaker_segment",
             "yd_translator_api_task",
             "whisper_word_timestamp",
-            "yd_asr_segment",
-            "yd_asr_result"
+            "yd_asr_segment"
     );
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
             "bilibili", "uploader_task_bilibili",
@@ -918,7 +917,6 @@ public class MonitorService {
         }
         switch (stageKey) {
             case "whisper" -> {
-                addLimitedTable(tables, "yd_asr_result", taskId, "task_id", "task_id");
                 addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "item_index, id");
                 addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_index, word_index, id");
             }
@@ -1585,7 +1583,7 @@ public class MonitorService {
                   AND COLUMN_NAME = 'task_id'
                   AND (TABLE_NAME LIKE 'yd\\_%' OR TABLE_NAME = 'downloader_submission')
                 ORDER BY CASE
-                    WHEN TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment', 'yd_asr_result') THEN 0
+                    WHEN TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment') THEN 0
                     WHEN TABLE_NAME = 'downloader_submission' THEN 2
                     ELSE 1
                   END,
