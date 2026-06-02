@@ -58,20 +58,21 @@ public class XiaohongshuAccountService {
 
     public List<XiaohongshuAccountStatus> accounts() {
         return jdbcTemplate.query(
-                "SELECT account_key, user_id, nickname, storage_state_json, updated_at, display_name, avatar_url FROM " + TABLE + " ORDER BY account_key",
+                """
+                SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
+                       ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
+                       ua.today_upload_count, ua.cooldown_waiting_count, ua.upload_running_count,
+                       ua.is_enabled,
+                       pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
+                FROM uploader_account ua
+                LEFT JOIN uploader_account_xiaohongshu pa ON pa.account_key = ua.account_key
+                WHERE ua.platform = 'xiaohongshu'
+                ORDER BY ua.account_key
+                """,
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
-                    UploaderAccountState accountState = syncAccountState(
-                            accountKey,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            updatedAt
-                    );
                     return new XiaohongshuAccountStatus(
                             "database",
                             accountKey,
@@ -80,16 +81,16 @@ public class XiaohongshuAccountService {
                             updatedAt,
                             rs.getString("user_id"),
                             rs.getString("nickname"),
-                            accountState.lastUploadAt(),
-                            accountState.nextUploadAllowedAt(),
-                            accountState.uploadCooldownMinSeconds(),
-                            accountState.uploadCooldownMaxSeconds(),
-                            accountState.todayUploadCount(),
-                            accountState.cooldownWaitingCount(),
-                            accountState.uploadRunningCount(),
-                            accountState.enabled(),
+                            toLocalDateTime(rs.getTimestamp("last_upload_at")),
+                            toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
+                            nullableInt(rs, "upload_cooldown_min_seconds"),
+                            nullableInt(rs, "upload_cooldown_max_seconds"),
+                            rs.getInt("today_upload_count"),
+                            rs.getInt("cooldown_waiting_count"),
+                            rs.getInt("upload_running_count"),
+                            rs.getBoolean("is_enabled"),
                             null,
-                            "已保存",
+                            json != null && !json.isBlank() ? "已保存" : "未登录",
                             Map.of(),
                             rs.getString("display_name"),
                             rs.getString("avatar_url")
@@ -333,6 +334,15 @@ public class XiaohongshuAccountService {
         return uploaderAccountService.state("xiaohongshu", accountKey)
                 .map(UploaderAccountState::enabled)
                 .orElse(true);
+    }
+
+    private static Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
+        return timestamp == null ? null : timestamp.toLocalDateTime();
     }
 
     private String extractQrImage(Page page) {
