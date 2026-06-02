@@ -1734,6 +1734,9 @@ public class MonitorService {
 
         jdbcTemplate.query(heartbeatSql(), rs -> {
             String serviceName = rs.getString("service_name");
+            if (!byService.containsKey(serviceName)) {
+                return;
+            }
             String label = labelForService(serviceName);
             byService.put(serviceName, new ServiceHeartbeat(serviceName, label, deviceHeartbeats(rs, now)));
         });
