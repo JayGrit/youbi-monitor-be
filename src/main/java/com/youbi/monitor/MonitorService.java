@@ -390,6 +390,85 @@ public class MonitorService {
         );
     }
 
+    public WhisperProcessingDetail whisperProcessing(String taskId) {
+        List<WhisperProcessingDetail.RawSegment> rawSegments = tableExists("whisper_raw_segment")
+                ? jdbcTemplate.query(
+                """
+                SELECT id, raw_index, text, start_time, end_time
+                FROM whisper_raw_segment
+                WHERE task_id = ?
+                ORDER BY raw_index, id
+                """,
+                (rs, rowNum) -> new WhisperProcessingDetail.RawSegment(
+                        rs.getLong("id"),
+                        rs.getInt("raw_index"),
+                        rs.getString("text"),
+                        rs.getInt("start_time"),
+                        rs.getInt("end_time")
+                ),
+                taskId
+        )
+                : List.of();
+        List<WhisperProcessingDetail.AlignedSegment> alignedSegments = tableExists("whisper_aligned_segment")
+                ? jdbcTemplate.query(
+                """
+                SELECT id, raw_segment_id, aligned_index, text, start_time, end_time
+                FROM whisper_aligned_segment
+                WHERE task_id = ?
+                ORDER BY aligned_index, id
+                """,
+                (rs, rowNum) -> new WhisperProcessingDetail.AlignedSegment(
+                        rs.getLong("id"),
+                        nullableLong(rs, "raw_segment_id"),
+                        rs.getInt("aligned_index"),
+                        rs.getString("text"),
+                        rs.getInt("start_time"),
+                        rs.getInt("end_time")
+                ),
+                taskId
+        )
+                : List.of();
+        List<WhisperProcessingDetail.PysbdSegment> pysbdSegments = tableExists("whisper_pysbd_segment")
+                ? jdbcTemplate.query(
+                """
+                SELECT id, pysbd_index, text, start_time, end_time
+                FROM whisper_pysbd_segment
+                WHERE task_id = ?
+                ORDER BY pysbd_index, id
+                """,
+                (rs, rowNum) -> new WhisperProcessingDetail.PysbdSegment(
+                        rs.getLong("id"),
+                        rs.getInt("pysbd_index"),
+                        rs.getString("text"),
+                        rs.getInt("start_time"),
+                        rs.getInt("end_time")
+                ),
+                taskId
+        )
+                : List.of();
+        List<WhisperProcessingDetail.SplitSegment> splitSegments = tableExists("whisper_split")
+                ? jdbcTemplate.query(
+                """
+                SELECT id, split_index, pysbd_segment_id, text, start_time, end_time, split_reason
+                FROM whisper_split
+                WHERE task_id = ?
+                ORDER BY split_index, id
+                """,
+                (rs, rowNum) -> new WhisperProcessingDetail.SplitSegment(
+                        rs.getLong("id"),
+                        rs.getInt("split_index"),
+                        rs.getLong("pysbd_segment_id"),
+                        rs.getString("text"),
+                        rs.getInt("start_time"),
+                        rs.getInt("end_time"),
+                        rs.getString("split_reason")
+                ),
+                taskId
+        )
+                : List.of();
+        return new WhisperProcessingDetail(rawSegments, alignedSegments, pysbdSegments, splitSegments);
+    }
+
     public SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(String taskId, long segmentId, String dstText) {
         String normalizedText = dstText == null ? "" : dstText;
         int updated = jdbcTemplate.update("""
@@ -2024,6 +2103,11 @@ public class MonitorService {
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
         Timestamp timestamp = rs.getTimestamp(column);
         return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
+    private static Long nullableLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
     }
 
     private static long elapsedSeconds(LocalDateTime startedAt, LocalDateTime completedAt, LocalDateTime now) {
