@@ -112,7 +112,7 @@ public class MonitorService {
             "downloader", List.of("source_url", "source_platform"),
             "demucs", List.of("audio_source_url", "audio_source_path"),
             "whisper", List.of("audio_vocals_url", "audio_vocals_path"),
-            "translator", List.of("asr_fixed_json_path", "asr_json_path", "target_language"),
+            "translator", List.of("asr_json_path", "target_language"),
             "speaker", List.of("audio_vocals_url", "translation_json_path", "target_language"),
             "combiner", List.of("video_source_url", "audio_bgm_url", "tts_segments_dir", "translation_json_path"),
             "uploader", List.of("final_video_url", "upload_title", "upload_desc", "upload_tag", "upload_cover_url")
@@ -120,7 +120,7 @@ public class MonitorService {
     private static final Map<String, List<String>> STAGE_OUTPUT_FIELDS = Map.of(
             "downloader", List.of("title", "source_duration_seconds", "source_description", "source_uploader", "source_webpage_url", "source_thumbnail_url", "metadata_url", "video_source_url", "audio_source_url"),
             "demucs", List.of("audio_vocals_url", "audio_bgm_url"),
-            "whisper", List.of("asr_json_path", "asr_fixed_json_path"),
+            "whisper", List.of("asr_json_path"),
             "translator", List.of("translation_json_path", "target_language"),
             "speaker", List.of("tts_segments_dir"),
             "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
@@ -218,7 +218,6 @@ public class MonitorService {
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
               FROM yd_asr_segment
-              WHERE segment_type = 'fixed'
               GROUP BY task_id
             ) fa ON fa.task_id = t.id
             LEFT JOIN (
@@ -375,14 +374,13 @@ public class MonitorService {
         }
         return jdbcTemplate.query(
                 """
-                SELECT task_id, segment_type, segment_index, word_index, text, start_time, end_time
+                SELECT task_id, segment_index, word_index, text, start_time, end_time
                 FROM whisper_word_timestamp
-                WHERE task_id = ? AND segment_type = 'raw'
+                WHERE task_id = ?
                 ORDER BY segment_index, word_index, id
                 """,
                 (rs, rowNum) -> new WhisperWordTimestamp(
                         rs.getString("task_id"),
-                        rs.getString("segment_type"),
                         rs.getInt("segment_index"),
                         rs.getInt("word_index"),
                         rs.getString("text"),
@@ -921,8 +919,8 @@ public class MonitorService {
         switch (stageKey) {
             case "whisper" -> {
                 addLimitedTable(tables, "yd_asr_result", taskId, "task_id", "task_id");
-                addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "segment_type, item_index, id");
-                addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_type, segment_index, word_index, id");
+                addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "item_index, id");
+                addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_index, word_index, id");
             }
             case "translator" -> {
                 addLimitedTable(tables, "yd_translator_api_task", taskId, "task_id", "id");
