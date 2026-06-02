@@ -44,6 +44,11 @@ public class MonitorController {
         return detail;
     }
 
+    @GetMapping("/api/video-tasks/{taskId}/whisper-word-timestamps")
+    public List<WhisperWordTimestamp> whisperWordTimestamps(@PathVariable String taskId) {
+        return monitorService.whisperWordTimestamps(taskId);
+    }
+
     @GetMapping("/api/video-tasks/{taskId}/uploader-diagnostics")
     public List<DiagnosticArtifactRecord> uploaderDiagnostics(@PathVariable String taskId) {
         return diagnosticArtifactService.list(taskId, null);

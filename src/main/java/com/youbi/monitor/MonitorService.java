@@ -59,6 +59,7 @@ public class MonitorService {
     private static final List<String> RESET_CHILD_TABLES = List.of(
             "yd_speaker_segment",
             "yd_translator_api_task",
+            "whisper_word_timestamp",
             "yd_asr_segment",
             "yd_asr_result"
     );
@@ -366,6 +367,30 @@ public class MonitorService {
             stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
         }
         return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
+    }
+
+    public List<WhisperWordTimestamp> whisperWordTimestamps(String taskId) {
+        if (!tableExists("whisper_word_timestamp")) {
+            return List.of();
+        }
+        return jdbcTemplate.query(
+                """
+                SELECT task_id, segment_type, segment_index, word_index, text, start_time, end_time
+                FROM whisper_word_timestamp
+                WHERE task_id = ? AND segment_type = 'raw'
+                ORDER BY segment_index, word_index, id
+                """,
+                (rs, rowNum) -> new WhisperWordTimestamp(
+                        rs.getString("task_id"),
+                        rs.getString("segment_type"),
+                        rs.getInt("segment_index"),
+                        rs.getInt("word_index"),
+                        rs.getString("text"),
+                        rs.getInt("start_time"),
+                        rs.getInt("end_time")
+                ),
+                taskId
+        );
     }
 
     public SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(String taskId, long segmentId, String dstText) {
@@ -897,6 +922,7 @@ public class MonitorService {
             case "whisper" -> {
                 addLimitedTable(tables, "yd_asr_result", taskId, "task_id", "task_id");
                 addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "segment_type, item_index, id");
+                addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_type, segment_index, word_index, id");
             }
             case "translator" -> {
                 addLimitedTable(tables, "yd_translator_api_task", taskId, "task_id", "id");
