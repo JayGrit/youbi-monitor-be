@@ -96,6 +96,7 @@ public class MonitorController {
                     request == null ? null : request.type(),
                     request == null ? null : request.needSubtitle(),
                     request == null ? null : request.needDubbing(),
+                    request == null ? null : request.needSeparation(),
                     request == null ? null : request.sourceLanguage(),
                     request == null ? null : request.targetLanguage()
             );

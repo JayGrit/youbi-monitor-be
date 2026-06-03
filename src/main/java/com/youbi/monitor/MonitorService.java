@@ -839,16 +839,16 @@ public class MonitorService {
     public SubmitterAuthorType authorType(String author) {
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new SubmitterAuthorType("", "", true, true, "英文", "中文");
+            return new SubmitterAuthorType("", "", true, true, true, "英文", "中文");
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
-                SELECT type, need_subtitle, need_dubbing, source_language, target_language
+                SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language
                 FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new SubmitterAuthorType(normalized, "", true, true, "英文", "中文");
+            return new SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文");
         }
         Map<String, Object> row = rows.get(0);
         boolean needSubtitle = boolValue(row.get("need_subtitle"), true);
@@ -857,6 +857,7 @@ public class MonitorService {
                 stringValue(row.get("type")),
                 needSubtitle,
                 needSubtitle && boolValue(row.get("need_dubbing"), true),
+                boolValue(row.get("need_separation"), true),
                 defaultLanguage(row.get("source_language"), "英文"),
                 defaultLanguage(row.get("target_language"), "中文")
         );
@@ -864,7 +865,7 @@ public class MonitorService {
 
     public List<SubmitterAuthorType> authorTypes() {
         return jdbcTemplate.query("""
-                SELECT author, type, need_subtitle, need_dubbing, source_language, target_language
+                SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language
                 FROM submitter_author
                 ORDER BY author
                 """, (rs, rowNum) -> new SubmitterAuthorType(
@@ -872,6 +873,7 @@ public class MonitorService {
                 text(rs.getString("type")),
                 boolValue(rs.getObject("need_subtitle"), true),
                 boolValue(rs.getObject("need_subtitle"), true) && boolValue(rs.getObject("need_dubbing"), true),
+                boolValue(rs.getObject("need_separation"), true),
                 defaultLanguage(rs.getString("source_language"), "英文"),
                 defaultLanguage(rs.getString("target_language"), "中文")
         ));
@@ -882,6 +884,7 @@ public class MonitorService {
             String type,
             Boolean needSubtitle,
             Boolean needDubbing,
+            Boolean needSeparation,
             String sourceLanguage,
             String targetLanguage
     ) {
@@ -897,13 +900,15 @@ public class MonitorService {
         }
         boolean normalizedNeedSubtitle = !Boolean.FALSE.equals(needSubtitle);
         boolean normalizedNeedDubbing = normalizedNeedSubtitle && !Boolean.FALSE.equals(needDubbing);
+        boolean normalizedNeedSeparation = !Boolean.FALSE.equals(needSeparation);
         jdbcTemplate.update("""
-                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, source_language, target_language)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     type = VALUES(type),
                     need_subtitle = VALUES(need_subtitle),
                     need_dubbing = VALUES(need_dubbing),
+                    need_separation = VALUES(need_separation),
                     source_language = VALUES(source_language),
                     target_language = VALUES(target_language),
                     updated_at = NOW()
@@ -912,6 +917,7 @@ public class MonitorService {
                 normalizedType,
                 normalizedNeedSubtitle ? 1 : 0,
                 normalizedNeedDubbing ? 1 : 0,
+                normalizedNeedSeparation ? 1 : 0,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage
         );
@@ -920,6 +926,7 @@ public class MonitorService {
                 normalizedType,
                 normalizedNeedSubtitle,
                 normalizedNeedDubbing,
+                normalizedNeedSeparation,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage
         );
@@ -1913,6 +1920,7 @@ public class MonitorService {
                     type VARCHAR(128) NOT NULL,
                     need_subtitle TINYINT(1) NOT NULL DEFAULT 1,
                     need_dubbing TINYINT(1) NOT NULL DEFAULT 1,
+                    need_separation TINYINT(1) NOT NULL DEFAULT 1,
                     source_language VARCHAR(64) NOT NULL DEFAULT '英文',
                     target_language VARCHAR(64) NOT NULL DEFAULT '中文',
                     note VARCHAR(255) NULL,
@@ -1923,6 +1931,7 @@ public class MonitorService {
                 """);
         ensureColumn("submitter_author", "need_subtitle", "TINYINT(1) NOT NULL DEFAULT 1");
         ensureColumn("submitter_author", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
+        ensureColumn("submitter_author", "need_separation", "TINYINT(1) NOT NULL DEFAULT 1");
         ensureColumn("submitter_author", "source_language", "VARCHAR(64) NOT NULL DEFAULT '英文'");
         ensureColumn("submitter_author", "target_language", "VARCHAR(64) NOT NULL DEFAULT '中文'");
     }
@@ -2082,6 +2091,7 @@ public class MonitorService {
             String type,
             boolean needSubtitle,
             boolean needDubbing,
+            boolean needSeparation,
             String sourceLanguage,
             String targetLanguage
     ) {
@@ -2092,6 +2102,7 @@ public class MonitorService {
             String type,
             Boolean needSubtitle,
             Boolean needDubbing,
+            Boolean needSeparation,
             String sourceLanguage,
             String targetLanguage
     ) {
