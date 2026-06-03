@@ -84,6 +84,7 @@ public class MonitorService {
             "source_url",
             "source_platform",
             "type",
+            "source_uploader",
             "need_subtitle",
             "need_dubbing",
             "need_separation",
@@ -1689,10 +1690,12 @@ public class MonitorService {
         List<String> resetColumns = resettableColumns("yd_video_info", PRESERVED_VIDEO_INFO_COLUMNS);
         if (resetColumns.isEmpty()) {
             restoreVideoInfoSource(taskId);
+            restoreVideoInfoProcessingOptions(taskId);
             return;
         }
         jdbcTemplate.update("UPDATE yd_video_info SET " + nullAssignments(resetColumns) + " WHERE task_id = ?", taskId);
         restoreVideoInfoSource(taskId);
+        restoreVideoInfoProcessingOptions(taskId);
     }
 
     private void restoreVideoInfoSource(String taskId) {
@@ -1705,6 +1708,34 @@ public class MonitorService {
                     source_url = COALESCE(yd_video_info.source_url, VALUES(source_url)),
                     source_platform = COALESCE(yd_video_info.source_platform, VALUES(source_platform))
                 """, taskId);
+    }
+
+    private void restoreVideoInfoProcessingOptions(String taskId) {
+        if (tableExists("downloader_submission")) {
+            jdbcTemplate.update("""
+                    UPDATE yd_video_info video_info
+                    JOIN downloader_submission submission ON submission.task_id = video_info.task_id
+                    SET video_info.type = COALESCE(video_info.type, submission.type),
+                        video_info.need_subtitle = COALESCE(video_info.need_subtitle, submission.need_subtitle),
+                        video_info.need_dubbing = COALESCE(video_info.need_dubbing, submission.need_dubbing),
+                        video_info.need_separation = COALESCE(video_info.need_separation, submission.need_separation)
+                    WHERE video_info.task_id = ?
+                    """, taskId);
+        }
+        if (tableExists("submitter_author")) {
+            jdbcTemplate.update("""
+                    UPDATE yd_video_info video_info
+                    JOIN submitter_author author
+                      ON author.author = video_info.source_uploader
+                     AND author.type = video_info.type
+                    SET video_info.need_subtitle = COALESCE(video_info.need_subtitle, author.need_subtitle),
+                        video_info.need_dubbing = COALESCE(video_info.need_dubbing, author.need_dubbing),
+                        video_info.need_separation = COALESCE(video_info.need_separation, author.need_separation),
+                        video_info.source_language = COALESCE(video_info.source_language, author.source_language),
+                        video_info.target_language = COALESCE(video_info.target_language, author.target_language)
+                    WHERE video_info.task_id = ?
+                    """, taskId);
+        }
     }
 
     private void resetStageRow(String taskId, RetryStage stage, String status) {
