@@ -470,15 +470,18 @@ public class BilibiliAccountService {
         jdbcTemplate.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_account_bilibili (
-                    account_key VARCHAR(64) NOT NULL PRIMARY KEY,
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    account_key VARCHAR(64) NOT NULL,
                     mid BIGINT NULL,
                     uname VARCHAR(128) NULL,
                     login_info_json MEDIUMTEXT NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_uploader_account_bilibili_account_key (account_key)
                 )
                 """
         );
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
     }

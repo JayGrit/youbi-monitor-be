@@ -226,17 +226,63 @@ def ensure_schema(cursor) -> None:
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS uploader_account_jinritoutiao (
-          account_key VARCHAR(64) NOT NULL PRIMARY KEY,
+          id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+          account_key VARCHAR(64) NOT NULL,
           user_id VARCHAR(128) NULL,
           nickname VARCHAR(128) NULL,
           storage_state_json MEDIUMTEXT NOT NULL,
           created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
           display_name VARCHAR(128) NULL,
-          avatar_url VARCHAR(1024) NULL
+          avatar_url VARCHAR(1024) NULL,
+          UNIQUE KEY uniq_uploader_account_jinritoutiao_account_key (account_key)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """
     )
+    ensure_surrogate_primary_key(cursor, "uploader_account_jinritoutiao")
+
+
+def ensure_surrogate_primary_key(cursor, table: str) -> None:
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'id'
+        """,
+        (table,),
+    )
+    if cursor.fetchone()[0] == 0:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN id BIGINT NOT NULL AUTO_INCREMENT UNIQUE FIRST")
+    cursor.execute(
+        """
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND CONSTRAINT_NAME = 'PRIMARY'
+        ORDER BY ORDINAL_POSITION
+        """,
+        (table,),
+    )
+    primary_columns = [row[0] for row in cursor.fetchall()]
+    cursor.execute(
+        """
+        SELECT INDEX_NAME
+        FROM INFORMATION_SCHEMA.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = 'account_key' AND NON_UNIQUE = 0 AND INDEX_NAME <> 'PRIMARY'
+        GROUP BY INDEX_NAME
+        LIMIT 1
+        """,
+        (table,),
+    )
+    has_unique_account_key = cursor.fetchone() is not None
+    unique_clause = "" if has_unique_account_key else f", ADD UNIQUE KEY uniq_{table}_account_key (account_key)"
+    if primary_columns == ["id"]:
+        if unique_clause:
+            cursor.execute(f"ALTER TABLE {table} ADD UNIQUE KEY uniq_{table}_account_key (account_key)")
+        return
+    if primary_columns:
+        cursor.execute(f"ALTER TABLE {table} DROP PRIMARY KEY, ADD PRIMARY KEY (id){unique_clause}")
+    else:
+        cursor.execute(f"ALTER TABLE {table} ADD PRIMARY KEY (id){unique_clause}")
 
 
 def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_id: str | None, nickname: str | None) -> None:

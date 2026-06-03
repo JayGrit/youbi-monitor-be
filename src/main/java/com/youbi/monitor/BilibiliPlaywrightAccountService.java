@@ -378,6 +378,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private void ensureSchema() {
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
         ensureColumn("playwright_mid", "BIGINT NULL");
         ensureColumn("playwright_uname", "VARCHAR(128) NULL");
         ensureColumn("playwright_storage_state_json", "MEDIUMTEXT NULL");
