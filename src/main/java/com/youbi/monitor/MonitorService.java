@@ -455,7 +455,8 @@ public class MonitorService {
         List<WhisperProcessingDetail.SplitSegment> splitSegments = tableExists("whisper_split")
                 ? jdbcTemplate.query(
                 """
-                SELECT id, split_index, pysbd_segment_id, text, start_time, end_time, split_reason
+                SELECT id, split_index, pysbd_segment_id, text, start_time, end_time,
+                       split_reason, split_method, split_punctuation, split_conjunction
                 FROM whisper_split
                 WHERE task_id = ?
                 ORDER BY split_index, id
@@ -467,7 +468,10 @@ public class MonitorService {
                         rs.getString("text"),
                         rs.getInt("start_time"),
                         rs.getInt("end_time"),
-                        rs.getString("split_reason")
+                        rs.getString("split_reason"),
+                        rs.getString("split_method"),
+                        rs.getString("split_punctuation"),
+                        rs.getString("split_conjunction")
                 ),
                 taskId
         )

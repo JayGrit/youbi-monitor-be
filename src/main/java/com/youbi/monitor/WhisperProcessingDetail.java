@@ -43,7 +43,10 @@ public record WhisperProcessingDetail(
             String text,
             int startTime,
             int endTime,
-            String splitReason
+            String splitReason,
+            String splitMethod,
+            String splitPunctuation,
+            String splitConjunction
     ) {
     }
 }
