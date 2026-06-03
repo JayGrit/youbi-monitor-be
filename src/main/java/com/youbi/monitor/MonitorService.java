@@ -84,6 +84,11 @@ public class MonitorService {
             "source_url",
             "source_platform",
             "type",
+            "need_subtitle",
+            "need_dubbing",
+            "need_separation",
+            "source_language",
+            "target_language",
             "created_at",
             "updated_at"
     );
@@ -1909,6 +1914,9 @@ public class MonitorService {
         ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
         ensureColumn("yd_video_info", "need_subtitle", "TINYINT(1) NULL");
         ensureColumn("yd_video_info", "need_dubbing", "TINYINT(1) NULL");
+        ensureColumn("yd_video_info", "need_separation", "TINYINT(1) NULL");
+        ensureColumn("yd_video_info", "source_language", "VARCHAR(64) NULL");
+        ensureColumn("yd_video_info", "target_language", "VARCHAR(64) NULL");
         ensureColumn("yd_video_info", "final_video_url", "TEXT NULL");
         ensureColumn("yd_video_info", "final_video_path", "TEXT NULL");
     }
