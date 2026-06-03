@@ -867,7 +867,7 @@ public class MonitorService {
         return jdbcTemplate.query("""
                 SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language
                 FROM submitter_author
-                ORDER BY author
+                ORDER BY CASE WHEN COALESCE(NULLIF(type, ''), '') = '' THEN 1 ELSE 0 END, type, author
                 """, (rs, rowNum) -> new SubmitterAuthorType(
                 text(rs.getString("author")),
                 text(rs.getString("type")),
