@@ -4,6 +4,7 @@ import com.youbi.monitor.dto.DeviceHeartbeat;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.StageNode;
 import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.model.UploadPlatformStatus;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
 import com.youbi.monitor.repository.MonitorRepository;
 import com.youbi.monitor.repository.RowMapper;
@@ -120,6 +121,12 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
               ) uploader_total_count,
               ue.child_error_message uploader_child_error,
+              u.bilibili_upload_status,
+              u.douyin_upload_status,
+              u.xiaohongshu_upload_status,
+              u.shipinhao_upload_status,
+              u.kuaishou_upload_status,
+              u.jinritoutiao_upload_status,
               u.bilibili_upload_uid,
               u.bilibili_upload_account_name,
               u.error_message uploader_error
@@ -422,7 +429,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                         countValue(rs, stage.key(), "failed_count"),
                         countValue(rs, stage.key(), "total_count"),
                         rs.getString(stage.errorColumn()),
-                        childErrorMessage(rs, stage.key())
+                        childErrorMessage(rs, stage.key()),
+                        platformStatuses(rs, stage.key())
                 ));
             }
 
@@ -470,6 +478,28 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 return null;
             }
             return rs.getString(stageKey + "_child_error");
+        }
+
+        private static List<UploadPlatformStatus> platformStatuses(ResultSet rs, String stageKey) throws SQLException {
+            if (!"uploader".equals(stageKey)) {
+                return List.of();
+            }
+            List<UploadPlatformStatus> statuses = new ArrayList<>();
+            addPlatformStatus(statuses, "bilibili", rs.getString("bilibili_upload_status"));
+            addPlatformStatus(statuses, "douyin", rs.getString("douyin_upload_status"));
+            addPlatformStatus(statuses, "xiaohongshu", rs.getString("xiaohongshu_upload_status"));
+            addPlatformStatus(statuses, "shipinhao", rs.getString("shipinhao_upload_status"));
+            addPlatformStatus(statuses, "kuaishou", rs.getString("kuaishou_upload_status"));
+            addPlatformStatus(statuses, "jinritoutiao", rs.getString("jinritoutiao_upload_status"));
+            return statuses;
+        }
+
+        private static void addPlatformStatus(List<UploadPlatformStatus> statuses, String platform, String rawStatus) {
+            String status = rawStatus == null ? "" : rawStatus.trim();
+            if (status.isBlank() || "no_need".equals(status)) {
+                return;
+            }
+            statuses.add(new UploadPlatformStatus(platform, status));
         }
 
     }

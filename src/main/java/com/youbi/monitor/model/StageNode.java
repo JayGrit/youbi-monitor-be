@@ -1,6 +1,7 @@
 package com.youbi.monitor.model;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record StageNode(
         String key,
@@ -13,6 +14,7 @@ public record StageNode(
         Integer failedCount,
         Integer totalCount,
         String errorMessage,
-        String childErrorMessage
+        String childErrorMessage,
+        List<UploadPlatformStatus> platformStatuses
 ) {
 }
