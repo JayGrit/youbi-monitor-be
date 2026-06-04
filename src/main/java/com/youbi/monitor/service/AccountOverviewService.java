@@ -32,8 +32,50 @@ public class AccountOverviewService {
     public Map<String, List<Map<String, Object>>> overview() {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
-        repository.query(
+        repository.query(accountSelectSql("") + """
+                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao'), ua.account_key
+                """,
+                rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
+        );
+        return result;
+    }
+
+    public Map<String, Object> updateNextUploadAllowedAt(String platform, String accountKey, LocalDateTime nextUploadAllowedAt) {
+        String normalizedPlatform = normalizePlatform(platform);
+        String normalizedAccountKey = accountKey == null ? "" : accountKey.trim();
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedAccountKey.isBlank()) {
+            throw new IllegalArgumentException("Invalid account");
+        }
+        int updated = repository.update(
                 """
+                UPDATE uploader_account
+                SET next_upload_allowed_at = ?, updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                nextUploadAllowedAt,
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        List<Map<String, Object>> rows = repository.query(
+                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                (rs, rowNum) -> mapAccount(rs),
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return rows.get(0);
+    }
+
+    private String accountSelectSql(String extraWhere) {
+        String failedCountSql = columnExists("uploader_account", "failed_upload_count")
+                ? "ua.failed_upload_count"
+                : "0 failed_upload_count";
+        return ("""
                 SELECT ua.platform,
                        ua.account_key,
                        ua.last_upload_at,
@@ -43,7 +85,9 @@ public class AccountOverviewService {
                        ua.today_upload_count,
                        ua.cooldown_waiting_count,
                        ua.upload_running_count,
+                       %s,
                        ua.is_enabled,
+                       ua.is_available,
                        b.mid,
                        b.uname,
                        CASE ua.platform
@@ -112,11 +156,8 @@ public class AccountOverviewService {
                 LEFT JOIN uploader_account_jinritoutiao j
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
-                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao'), ua.account_key
-                """,
-                rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
-        );
-        return result;
+                %s
+                """).formatted(failedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -145,7 +186,9 @@ public class AccountOverviewService {
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
         row.put("cooldownWaitingCount", rs.getInt("cooldown_waiting_count"));
         row.put("uploadRunningCount", rs.getInt("upload_running_count"));
+        row.put("failedUploadCount", rs.getInt("failed_upload_count"));
         row.put("enabled", rs.getBoolean("is_enabled"));
+        row.put("available", nullableBoolean(rs, "is_available"));
         row.put("valid", null);
         row.put("message", cookieExists ? "已保存" : "未登录");
         row.put("raw", Map.of());
@@ -166,5 +209,28 @@ public class AccountOverviewService {
     private static Long nullableLong(ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
+    }
+
+    private boolean columnExists(String table, String column) {
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                table,
+                column
+        );
+        return count != null && count > 0;
+    }
+
+    private static Boolean nullableBoolean(ResultSet rs, String column) throws java.sql.SQLException {
+        boolean value = rs.getBoolean(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static String normalizePlatform(String value) {
+        return value == null ? "" : value.trim().toLowerCase();
     }
 }
