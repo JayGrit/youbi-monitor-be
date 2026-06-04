@@ -52,17 +52,6 @@ mysql \
   -u "${MYSQL_USER}" \
   "-p${MYSQL_PASSWORD}" \
   "${MYSQL_DATABASE}" <<SQL
-CREATE TABLE IF NOT EXISTS uploader_account_alidrive (
-  account_key VARCHAR(64) NOT NULL PRIMARY KEY,
-  refresh_token TEXT NOT NULL,
-  user_id VARCHAR(128) NULL,
-  user_name VARCHAR(128) NULL,
-  nick_name VARCHAR(255) NULL,
-  default_drive_id VARCHAR(128) NULL,
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 INSERT INTO uploader_account_alidrive (account_key, refresh_token)
 VALUES ('${ACCOUNT_KEY_SQL}', '${TOKEN_SQL}')
 ON DUPLICATE KEY UPDATE

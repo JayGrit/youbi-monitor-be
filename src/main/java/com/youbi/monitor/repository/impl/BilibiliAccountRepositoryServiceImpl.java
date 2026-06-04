@@ -24,23 +24,6 @@ public class BilibiliAccountRepositoryServiceImpl implements IBilibiliAccountRep
 
     @Override
     public void ensureSchema() {
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_account_bilibili (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    account_key VARCHAR(64) NOT NULL,
-                    mid BIGINT NULL,
-                    uname VARCHAR(128) NULL,
-                    login_info_json MEDIUMTEXT NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_account_bilibili_account_key (account_key)
-                )
-                """
-        );
-        RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "display_name", "VARCHAR(128) NULL");
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "avatar_url", "VARCHAR(1024) NULL");
     }
 
     @Override

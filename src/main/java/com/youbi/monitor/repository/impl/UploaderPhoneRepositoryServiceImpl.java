@@ -209,75 +209,12 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
 
     @Override
     public void ensureSchema() {
-        for (PlatformTable platform : PLATFORMS) {
-            if (tableExists(platform.table())) {
-                RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
-            }
-        }
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_phone (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    phone VARCHAR(32) NOT NULL,
-                    remark VARCHAR(64) NULL,
-                    note VARCHAR(255) NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_phone_phone (phone)
-                )
-                """
-        );
-        ensureUploaderPhoneColumn("remark", "VARCHAR(64) NULL");
-        ensureUploaderPhoneColumn("note", "VARCHAR(255) NULL");
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_phone_account (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    phone_id BIGINT NOT NULL,
-                    platform VARCHAR(32) NOT NULL,
-                    account_id BIGINT NULL,
-                    note VARCHAR(255) NULL,
-                    disabled TINYINT(1) NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_phone_account_phone_platform (phone_id, platform),
-                    KEY idx_uploader_phone_account_platform_account (platform, account_id),
-                    KEY idx_uploader_phone_account_phone (phone_id)
-                )
-                """
-        );
-        ensureUploaderPhoneAccountColumn("note", "VARCHAR(255) NULL");
-        ensureUploaderPhoneAccountColumn("disabled", "TINYINT(1) NOT NULL DEFAULT 0");
-        repository.execute("ALTER TABLE " + ACCOUNT_TABLE + " MODIFY COLUMN account_id BIGINT NULL");
-        migrateLegacyAccountColumns();
-        dropLegacyPhoneColumns();
-        seedPhone("15548242598", "主号");
-        seedPhone("15049190018", "流量");
-        seedPhone("19139952929", "小宝");
     }
 
     private void migrateLegacyAccountColumns() {
-        for (PlatformTable platform : PLATFORMS) {
-            if (!columnExists(TABLE, platform.phoneColumn())) {
-                continue;
-            }
-            repository.update(
-                    ("""
-                    INSERT INTO uploader_phone_account (phone_id, platform, account_id, updated_at)
-                    SELECT id, ?, %s, NOW()
-                    FROM uploader_phone
-                    WHERE %s IS NOT NULL
-                    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
-                    """).formatted(platform.phoneColumn(), platform.phoneColumn()),
-                    platform.key()
-            );
-        }
     }
 
     private void dropLegacyPhoneColumns() {
-        for (PlatformTable platform : PLATFORMS) {
-            dropColumnIfExists(TABLE, platform.phoneColumn());
-        }
     }
 
     private void seedPhone(String phone, String remark) {
@@ -293,69 +230,23 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
     }
 
     private void ensureUploaderPhoneColumn(String column, String definition) {
-        if (!columnExists(TABLE, column)) {
-            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
-        }
     }
 
     private void ensureUploaderPhoneAccountColumn(String column, String definition) {
-        if (!columnExists(ACCOUNT_TABLE, column)) {
-            repository.execute("ALTER TABLE " + ACCOUNT_TABLE + " ADD COLUMN " + column + " " + definition);
-        }
     }
 
     private boolean columnExists(String table, String column) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                table,
-                column
-        );
-        return count != null && count > 0;
+        return true;
     }
 
     private void dropColumnIfExists(String table, String column) {
-        if (columnExists(table, column)) {
-            repository.execute("ALTER TABLE " + table + " DROP COLUMN " + column);
-        }
     }
 
     private void ensureAccountColumn(String table, String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                table,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-        }
     }
 
     private boolean tableExists(String table) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.TABLES
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                """,
-                Integer.class,
-                table
-        );
-        return count != null && count > 0;
+        return true;
     }
 
     private PlatformTable platformTable(String platform) throws IOException {

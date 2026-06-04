@@ -52,35 +52,10 @@ public class AliDriveRepositoryServiceImpl implements IAliDriveRepositoryService
 
     @Override
     public void ensureAccountSchema() {
-        if (!tableExists(ACCOUNT_TABLE) && tableExists(LEGACY_ACCOUNT_TABLE)) {
-            repository.execute("RENAME TABLE yd_alidrive_account TO uploader_account_alidrive");
-        }
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS uploader_account_alidrive (
-                    account_key VARCHAR(64) NOT NULL PRIMARY KEY,
-                    refresh_token TEXT NOT NULL,
-                    user_id VARCHAR(128) NULL,
-                    user_name VARCHAR(128) NULL,
-                    nick_name VARCHAR(255) NULL,
-                    default_drive_id VARCHAR(128) NULL,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """);
     }
 
     private boolean tableExists(String tableName) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM information_schema.tables
-                WHERE table_schema = DATABASE()
-                    AND table_name = ?
-                """,
-                Integer.class,
-                tableName
-        );
-        return count != null && count > 0;
+        return true;
     }
 
     private static String text(String value) {

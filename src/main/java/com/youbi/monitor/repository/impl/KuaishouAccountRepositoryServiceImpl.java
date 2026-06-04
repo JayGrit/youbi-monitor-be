@@ -25,23 +25,6 @@ public class KuaishouAccountRepositoryServiceImpl implements IKuaishouAccountRep
 
     @Override
     public void ensureSchema() {
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_account_kuaishou (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    account_key VARCHAR(64) NOT NULL,
-                    user_id VARCHAR(128) NULL,
-                    nickname VARCHAR(128) NULL,
-                    storage_state_json MEDIUMTEXT NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_account_kuaishou_account_key (account_key)
-                )
-                """
-        );
-        RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "display_name", "VARCHAR(128) NULL");
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "avatar_url", "VARCHAR(1024) NULL");
     }
 
     @Override

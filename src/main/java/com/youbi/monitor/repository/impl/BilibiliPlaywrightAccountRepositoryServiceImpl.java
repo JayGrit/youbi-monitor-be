@@ -25,11 +25,6 @@ public class BilibiliPlaywrightAccountRepositoryServiceImpl implements IBilibili
 
     @Override
     public void ensureSchema() {
-        RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "playwright_mid", "BIGINT NULL");
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "playwright_uname", "VARCHAR(128) NULL");
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "playwright_storage_state_json", "MEDIUMTEXT NULL");
-        RepositorySchemaSupport.ensureColumn(repository, TABLE, "playwright_updated_at", "DATETIME NULL");
     }
 
     @Override

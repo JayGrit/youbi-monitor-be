@@ -351,10 +351,6 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
 
     @Override
     public void ensureMonitorSchema() {
-        ensureUploaderSubmissionMonitorSchema();
-        ensureUploaderMonitorColumns();
-        ensureVideoInfoMonitorColumns();
-        ensureSubmitterAuthorTypeSchema();
     }
 
     @Override
@@ -1588,95 +1584,15 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
     }
 
     private void ensureUploaderMonitorColumns() {
-        ensureColumn("yd_uploader", "bilibili_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
-        ensureColumn("yd_uploader", "douyin_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
-        ensureColumn("yd_uploader", "xiaohongshu_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
-        ensureColumn("yd_uploader", "shipinhao_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
-        ensureColumn("yd_uploader", "kuaishou_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
-        ensureColumn("yd_uploader", "jinritoutiao_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
-        ensureColumn("yd_uploader", "bilibili_upload_uid", "VARCHAR(64) NULL");
-        ensureColumn("yd_uploader", "bilibili_upload_account_name", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "shipinhao_upload_account_key", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "shipinhao_upload_account_name", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "shipinhao_upload_result_json", "MEDIUMTEXT NULL");
-        ensureColumn("yd_uploader", "kuaishou_upload_account_key", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "kuaishou_upload_account_name", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "kuaishou_upload_result_json", "MEDIUMTEXT NULL");
-        ensureColumn("yd_uploader", "upload_cover_url", "TEXT NULL");
-        ensureColumn("yd_uploader", "final_video_alidrive_file_id", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "final_video_alidrive_remote_path", "TEXT NULL");
-        ensureColumn("yd_uploader", "alidrive_final_video_file_id", "VARCHAR(128) NULL");
-        ensureColumn("yd_uploader", "alidrive_final_video_remote_path", "TEXT NULL");
     }
 
     private void ensureUploaderSubmissionMonitorSchema() {
-        UPLOADER_TASK_TABLES.forEach((platform, table) -> {
-            repository.execute("""
-                    CREATE TABLE IF NOT EXISTS %s (
-                        id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                        task_id VARCHAR(64) NOT NULL,
-                        account_key VARCHAR(128) NOT NULL,
-                        status VARCHAR(32) NOT NULL DEFAULT 'ready',
-                        title VARCHAR(512) NULL,
-                        video_url TEXT NULL,
-                        cover_url TEXT NULL,
-                        description TEXT NULL,
-                        tags VARCHAR(512) NULL,
-                        result_json MEDIUMTEXT NULL,
-                        error_message TEXT NULL,
-                        started_at DATETIME NULL,
-                        completed_at DATETIME NULL,
-                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        UNIQUE KEY uniq_uploader_task (task_id, account_key),
-                        KEY idx_uploader_task_status (status, account_key),
-                        KEY idx_uploader_task_task (task_id, status)
-                    )
-                    """.formatted(table));
-            ensureColumn(table, "title", "VARCHAR(512) NULL");
-            ensureColumn(table, "video_url", "TEXT NULL");
-            ensureColumn(table, "cover_url", "TEXT NULL");
-            ensureColumn(table, "description", "TEXT NULL");
-            ensureColumn(table, "tags", "VARCHAR(512) NULL");
-        });
     }
 
     private void ensureVideoInfoMonitorColumns() {
-        if (!tableExists("yd_video_info")) {
-            return;
-        }
-        ensureColumn("yd_video_info", "source_duration_seconds", "DOUBLE NULL");
-        ensureColumn("yd_video_info", "type", "VARCHAR(128) NULL");
-        ensureColumn("yd_video_info", "need_subtitle", "TINYINT(1) NULL");
-        ensureColumn("yd_video_info", "need_dubbing", "TINYINT(1) NULL");
-        ensureColumn("yd_video_info", "need_separation", "TINYINT(1) NULL");
-        ensureColumn("yd_video_info", "source_language", "VARCHAR(64) NULL");
-        ensureColumn("yd_video_info", "target_language", "VARCHAR(64) NULL");
-        ensureColumn("yd_video_info", "final_video_url", "TEXT NULL");
-        ensureColumn("yd_video_info", "final_video_path", "TEXT NULL");
     }
 
     private void ensureSubmitterAuthorTypeSchema() {
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS submitter_author (
-                    author VARCHAR(255) NOT NULL PRIMARY KEY,
-                    type VARCHAR(128) NOT NULL,
-                    need_subtitle TINYINT(1) NOT NULL DEFAULT 1,
-                    need_dubbing TINYINT(1) NOT NULL DEFAULT 1,
-                    need_separation TINYINT(1) NOT NULL DEFAULT 1,
-                    source_language VARCHAR(64) NOT NULL DEFAULT '英文',
-                    target_language VARCHAR(64) NOT NULL DEFAULT '中文',
-                    note VARCHAR(255) NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    KEY idx_submitter_author_type_type (type)
-                )
-                """);
-        ensureColumn("submitter_author", "need_subtitle", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("submitter_author", "need_dubbing", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("submitter_author", "need_separation", "TINYINT(1) NOT NULL DEFAULT 1");
-        ensureColumn("submitter_author", "source_language", "VARCHAR(64) NOT NULL DEFAULT '英文'");
-        ensureColumn("submitter_author", "target_language", "VARCHAR(64) NOT NULL DEFAULT '中文'");
     }
 
     @Override
@@ -1690,19 +1606,9 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
     }
 
     private void ensureOperatorColumn(String table) {
-        ensureColumn(table, "operator", "VARCHAR(128) NULL");
     }
 
     private void ensureColumn(String table, String column, String definition) {
-        Integer count = repository.queryForObject("""
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
-                """, Integer.class, table, column);
-        if (count != null && count > 0) {
-            return;
-        }
-        repository.execute("ALTER TABLE " + quotedIdentifier(table) + " ADD COLUMN " + quotedIdentifier(column) + " " + definition);
     }
 
     private static ServiceHeartbeat emptyHeartbeat(StageDefinition stage) {

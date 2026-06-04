@@ -20,31 +20,6 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
 
     @Override
     public void ensureSchema() {
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS uploader_diagonostic (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    task_id VARCHAR(128) NOT NULL,
-                    run_id VARCHAR(128) NOT NULL,
-                    platform VARCHAR(32) NOT NULL,
-                    source VARCHAR(64) NOT NULL,
-                    account_key VARCHAR(128) NULL,
-                    step_index INT NOT NULL,
-                    step_name VARCHAR(128) NOT NULL,
-                    screenshot_url TEXT NOT NULL,
-                    html_url TEXT NULL,
-                    screenshot_size_bytes BIGINT NULL,
-                    html_size_bytes BIGINT NULL,
-                    screenshot_width INT NULL,
-                    screenshot_height INT NULL,
-                    status VARCHAR(32) NOT NULL DEFAULT 'uploaded',
-                    error_message TEXT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    KEY idx_uploader_diag_task_order (task_id, run_id, step_index, id),
-                    KEY idx_uploader_diag_platform_time (platform, created_at),
-                    KEY idx_uploader_diag_source_time (source, created_at)
-                )
-                """);
     }
 
     @Override

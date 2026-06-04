@@ -21,28 +21,6 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
 
     @Override
     public void ensureSchema() {
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS monitor_upload_task (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    upload_task_id VARCHAR(64) NOT NULL,
-                    platform VARCHAR(32) NOT NULL,
-                    upstream_task_id VARCHAR(64) NULL,
-                    account_key VARCHAR(128) NOT NULL,
-                    status VARCHAR(32) NOT NULL,
-                    request_json MEDIUMTEXT NULL,
-                    result_json MEDIUMTEXT NULL,
-                    error_code VARCHAR(64) NULL,
-                    error_message TEXT NULL,
-                    video_url TEXT NULL,
-                    started_at DATETIME NULL,
-                    completed_at DATETIME NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_monitor_upload_task (upload_task_id),
-                    KEY idx_monitor_upload_running (status),
-                    KEY idx_monitor_upload_platform (platform, upstream_task_id, account_key)
-                )
-                """);
     }
 
     @Override
