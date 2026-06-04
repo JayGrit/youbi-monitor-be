@@ -15,7 +15,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.math.ec.FixedPointCombMultiplier;
 import org.bouncycastle.util.encoders.Hex;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.AliDriveRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -52,7 +52,7 @@ public class AliDriveService {
     private static final String LEGACY_ACCOUNT_TABLE = "yd_alidrive_account";
 
     private final ObjectMapper objectMapper;
-    private final DatabaseClient jdbcTemplate;
+    private final AliDriveRepository repository;
     private final HttpClient httpClient;
     private final String accountKey;
     private final Path workDir;
@@ -72,7 +72,7 @@ public class AliDriveService {
 
     public AliDriveService(
             ObjectMapper objectMapper,
-            DatabaseClient jdbcTemplate,
+            AliDriveRepository repository,
             @Value("${youbi.alidrive.account-key}") String accountKey,
             @Value("${youbi.alidrive.refresh-token}") String refreshToken,
             @Value("${youbi.alidrive.work-dir}") String workDir
@@ -81,7 +81,7 @@ public class AliDriveService {
             Security.addProvider(new BouncyCastleProvider());
         }
         this.objectMapper = objectMapper;
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -513,7 +513,7 @@ public class AliDriveService {
         if (text(refreshToken).isBlank()) {
             return;
         }
-        jdbcTemplate.update("""
+        repository.update("""
                 INSERT INTO uploader_account_alidrive (
                     account_key, refresh_token, user_id, user_name, nick_name, default_drive_id
                 ) VALUES (?, ?, ?, ?, ?, ?)
@@ -528,7 +528,7 @@ public class AliDriveService {
     }
 
     private String loadRefreshTokenFromDb() {
-        List<String> tokens = jdbcTemplate.query(
+        List<String> tokens = repository.query(
                 "SELECT refresh_token FROM uploader_account_alidrive WHERE account_key = ? LIMIT 1",
                 (rs, rowNum) -> rs.getString("refresh_token"),
                 accountKey
@@ -538,9 +538,9 @@ public class AliDriveService {
 
     private void ensureSchema() {
         if (!tableExists(ACCOUNT_TABLE) && tableExists(LEGACY_ACCOUNT_TABLE)) {
-            jdbcTemplate.execute("RENAME TABLE yd_alidrive_account TO uploader_account_alidrive");
+            repository.execute("RENAME TABLE yd_alidrive_account TO uploader_account_alidrive");
         }
-        jdbcTemplate.execute("""
+        repository.execute("""
                 CREATE TABLE IF NOT EXISTS uploader_account_alidrive (
                     account_key VARCHAR(64) NOT NULL PRIMARY KEY,
                     refresh_token TEXT NOT NULL,
@@ -555,7 +555,7 @@ public class AliDriveService {
     }
 
     private boolean tableExists(String tableName) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                         SELECT COUNT(*)
                         FROM information_schema.tables

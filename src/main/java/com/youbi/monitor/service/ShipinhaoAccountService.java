@@ -8,7 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.ShipinhaoAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -27,20 +27,20 @@ public class ShipinhaoAccountService {
 
     private static final String TABLE = "uploader_account_shipinhao";
 
-    private final DatabaseClient jdbcTemplate;
+    private final ShipinhaoAccountRepository repository;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
     private final UploaderAccountService uploaderAccountService;
 
     public ShipinhaoAccountService(
-            DatabaseClient jdbcTemplate,
+            ShipinhaoAccountRepository repository,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,
             UploaderAccountService uploaderAccountService
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
@@ -49,7 +49,7 @@ public class ShipinhaoAccountService {
     }
 
     public List<ShipinhaoAccountStatus> accounts() {
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
@@ -135,11 +135,11 @@ public class ShipinhaoAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        Integer exists = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, newKey);
+        Integer exists = repository.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, newKey);
         if (exists != null && exists > 0) {
             throw new IOException("Shipinhao account key already exists: " + newKey);
         }
-        int updated = jdbcTemplate.update("UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?", newKey, oldKey);
+        int updated = repository.update("UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?", newKey, oldKey);
         if (updated != 1) {
             throw new IOException("Shipinhao account key not found: " + oldKey);
         }
@@ -188,7 +188,7 @@ public class ShipinhaoAccountService {
     void saveStorageState(String accountKey, String storageState) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         AccountProfile profile = profileFromStorageState(storageState);
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, is_available, updated_at)
                 VALUES (?, ?, ?, ?, 1, NOW())
@@ -205,7 +205,7 @@ public class ShipinhaoAccountService {
 
     void markUnavailable(String accountKey) {
         String normalized = normalizeAccountKey(accountKey);
-        jdbcTemplate.update(
+        repository.update(
                 "UPDATE " + TABLE + " SET is_available = 0, updated_at = NOW() WHERE account_key = ?",
                 normalized
         );
@@ -230,7 +230,7 @@ public class ShipinhaoAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = jdbcTemplate.query(
+        List<String> values = repository.query(
                 "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getString("storage_state_json"),
                 accountKey
@@ -242,7 +242,7 @@ public class ShipinhaoAccountService {
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = jdbcTemplate.query(
+        List<LocalDateTime> values = repository.query(
                 "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
                 accountKey
@@ -251,7 +251,7 @@ public class ShipinhaoAccountService {
     }
 
     private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = jdbcTemplate.query(
+        List<AccountProfile> values = repository.query(
                 "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> new AccountProfile(rs.getString("user_id"), rs.getString("nickname")),
                 accountKey
@@ -347,12 +347,12 @@ public class ShipinhaoAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer exists = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, accountKey);
+        Integer exists = repository.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, accountKey);
         return exists != null && exists > 0;
     }
 
     private void ensureSchema() {
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_account_shipinhao (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -366,14 +366,14 @@ public class ShipinhaoAccountService {
                 )
                 """
         );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
         ensureColumn("is_available", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private void ensureColumn(String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -386,7 +386,7 @@ public class ShipinhaoAccountService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 

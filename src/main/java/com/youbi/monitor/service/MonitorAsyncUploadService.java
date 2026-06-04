@@ -14,7 +14,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.EmptyResultDataAccessException;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.MonitorAsyncUploadRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -40,7 +40,7 @@ public class MonitorAsyncUploadService {
     private final ShipinhaoUploadService shipinhaoUploadService;
     private final KuaishouUploadService kuaishouUploadService;
     private final JinritoutiaoUploadService jinritoutiaoUploadService;
-    private final DatabaseClient jdbcTemplate;
+    private final MonitorAsyncUploadRepository repository;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "monitor-upload-task");
@@ -56,7 +56,7 @@ public class MonitorAsyncUploadService {
             ShipinhaoUploadService shipinhaoUploadService,
             KuaishouUploadService kuaishouUploadService,
             JinritoutiaoUploadService jinritoutiaoUploadService,
-            DatabaseClient jdbcTemplate,
+            MonitorAsyncUploadRepository repository,
             ObjectMapper objectMapper
     ) {
         this.bilibiliUploadService = bilibiliUploadService;
@@ -66,13 +66,13 @@ public class MonitorAsyncUploadService {
         this.shipinhaoUploadService = shipinhaoUploadService;
         this.kuaishouUploadService = kuaishouUploadService;
         this.jinritoutiaoUploadService = jinritoutiaoUploadService;
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.objectMapper = objectMapper;
     }
 
     @PostConstruct
     public void ensureSchema() {
-        jdbcTemplate.execute("""
+        repository.execute("""
                 CREATE TABLE IF NOT EXISTS monitor_upload_task (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     upload_task_id VARCHAR(64) NOT NULL,
@@ -99,7 +99,7 @@ public class MonitorAsyncUploadService {
     public synchronized MonitorUploadTaskResponse submit(String platform, Object request) {
         ensureSchema();
         failStaleRunningTasks();
-        long running = jdbcTemplate.queryForObject(
+        long running = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE status IN ('accepted', 'running')",
                 Long.class
         );
@@ -111,7 +111,7 @@ public class MonitorAsyncUploadService {
         }
 
         String uploadTaskId = UUID.randomUUID().toString();
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO monitor_upload_task (
                     upload_task_id, platform, upstream_task_id, account_key, status,
@@ -134,7 +134,7 @@ public class MonitorAsyncUploadService {
         ensureSchema();
         failStaleRunningTasks();
         try {
-            return jdbcTemplate.queryForObject(
+            return repository.queryForObject(
                     "SELECT * FROM " + TABLE + " WHERE upload_task_id = ?",
                     (rs, rowNum) -> {
                         Map<String, Object> result = parseJsonMap(rs.getString("result_json"));
@@ -175,7 +175,7 @@ public class MonitorAsyncUploadService {
 
     private void execute(String uploadTaskId, String platform, Object request) {
         long startedAt = System.currentTimeMillis();
-        int started = jdbcTemplate.update(
+        int started = repository.update(
                 "UPDATE " + TABLE + " SET status = 'running', started_at = COALESCE(started_at, NOW()), error_message = NULL WHERE upload_task_id = ? AND status = 'accepted'",
                 uploadTaskId
         );
@@ -193,7 +193,7 @@ public class MonitorAsyncUploadService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("result", resultMap);
-            int updated = jdbcTemplate.update(
+            int updated = repository.update(
                     "UPDATE " + TABLE + " SET status = 'success', result_json = ?, error_code = NULL, error_message = NULL, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
                     toJson(payload),
                     uploadTaskId
@@ -207,7 +207,7 @@ public class MonitorAsyncUploadService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("error", message);
-            int updated = jdbcTemplate.update(
+            int updated = repository.update(
                     "UPDATE " + TABLE + " SET status = 'failed', result_json = ?, error_code = ?, error_message = ?, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
                     toJson(payload),
                     classifyErrorCode(message),
@@ -292,7 +292,7 @@ public class MonitorAsyncUploadService {
     }
 
     private void failStaleRunningTasks() {
-        jdbcTemplate.update("""
+        repository.update("""
                 UPDATE monitor_upload_task
                 SET status = 'failed',
                     error_code = 'MONITOR_UPLOAD_TIMEOUT',

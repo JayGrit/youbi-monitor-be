@@ -13,7 +13,7 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.TimeoutError;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.XiaohongshuAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -39,7 +39,7 @@ public class XiaohongshuAccountService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final DatabaseClient jdbcTemplate;
+    private final XiaohongshuAccountRepository repository;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
@@ -47,13 +47,13 @@ public class XiaohongshuAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public XiaohongshuAccountService(
-            DatabaseClient jdbcTemplate,
+            XiaohongshuAccountRepository repository,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,
             UploaderAccountService uploaderAccountService
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
@@ -62,7 +62,7 @@ public class XiaohongshuAccountService {
     }
 
     public List<XiaohongshuAccountStatus> accounts() {
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
@@ -197,7 +197,7 @@ public class XiaohongshuAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        Integer exists = jdbcTemplate.queryForObject(
+        Integer exists = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
                 Integer.class,
                 newKey
@@ -205,7 +205,7 @@ public class XiaohongshuAccountService {
         if (exists != null && exists > 0) {
             throw new IOException("Xiaohongshu account key already exists: " + newKey);
         }
-        int updated = jdbcTemplate.update(
+        int updated = repository.update(
                 "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
                 newKey,
                 oldKey
@@ -262,7 +262,7 @@ public class XiaohongshuAccountService {
     void saveStorageState(String accountKey, String storageState) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         AccountProfile profile = profileFromStorageState(storageState);
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_account_xiaohongshu (account_key, user_id, nickname, storage_state_json, updated_at)
                 VALUES (?, ?, ?, ?, NOW())
@@ -407,7 +407,7 @@ public class XiaohongshuAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = jdbcTemplate.query(
+        List<String> values = repository.query(
                 "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getString("storage_state_json"),
                 accountKey
@@ -419,7 +419,7 @@ public class XiaohongshuAccountService {
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = jdbcTemplate.query(
+        List<LocalDateTime> values = repository.query(
                 "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
                 accountKey
@@ -428,7 +428,7 @@ public class XiaohongshuAccountService {
     }
 
     private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = jdbcTemplate.query(
+        List<AccountProfile> values = repository.query(
                 "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> new AccountProfile(rs.getString("user_id"), rs.getString("nickname")),
                 accountKey
@@ -440,7 +440,7 @@ public class XiaohongshuAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         String userId = text(profile.userId());
         if (!userId.isBlank()) {
-            List<String> existing = jdbcTemplate.query(
+            List<String> existing = repository.query(
                     "SELECT account_key FROM " + TABLE + " WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
                     (rs, rowNum) -> rs.getString("account_key"),
                     userId
@@ -458,7 +458,7 @@ public class XiaohongshuAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
                 Integer.class,
                 accountKey
@@ -489,7 +489,7 @@ public class XiaohongshuAccountService {
     }
 
     private void ensureSchema() {
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_account_xiaohongshu (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -503,13 +503,13 @@ public class XiaohongshuAccountService {
                 )
                 """
         );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
     }
 
     private void ensureColumn(String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -522,7 +522,7 @@ public class XiaohongshuAccountService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 

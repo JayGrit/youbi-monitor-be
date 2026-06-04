@@ -19,10 +19,10 @@ import java.util.List;
 import java.util.Map;
 
 @Component
-public class DatabaseClient {
+public class SqlRepository {
     private final SqlSessionTemplate sqlSessionTemplate;
 
-    public DatabaseClient(SqlSessionTemplate sqlSessionTemplate) {
+    public SqlRepository(SqlSessionTemplate sqlSessionTemplate) {
         this.sqlSessionTemplate = sqlSessionTemplate;
     }
 

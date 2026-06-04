@@ -1,7 +1,7 @@
 package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.UploaderAccountState;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.UploaderAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.sql.Timestamp;
@@ -22,10 +22,10 @@ public class UploaderAccountService {
             "jinritoutiao", "uploader_task_jinritoutiao"
     );
 
-    private final DatabaseClient jdbcTemplate;
+    private final UploaderAccountRepository repository;
 
-    public UploaderAccountService(DatabaseClient jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public UploaderAccountService(UploaderAccountRepository repository) {
+        this.repository = repository;
         ensureSchema();
     }
 
@@ -45,7 +45,7 @@ public class UploaderAccountService {
         boolean mergedEnabled = enabled == null
                 ? state(normalizedPlatform, normalizedKey).map(UploaderAccountState::enabled).orElse(true)
                 : enabled;
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_account (
                     platform, account_key, source_table, is_enabled, is_available,
@@ -80,7 +80,7 @@ public class UploaderAccountService {
     }
 
     public Optional<UploaderAccountState> state(String platform, String accountKey) {
-        List<UploaderAccountState> rows = jdbcTemplate.query(
+        List<UploaderAccountState> rows = repository.query(
                 """
                 SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
@@ -114,7 +114,7 @@ public class UploaderAccountService {
 
     public UploaderAccountState updateEnabled(String platform, String accountKey, boolean enabled) {
         ensureAccount(platform, accountKey);
-        jdbcTemplate.update(
+        repository.update(
                 "UPDATE uploader_account SET is_enabled = ?, is_available = ?, updated_at = NOW() WHERE platform = ? AND account_key = ?",
                 enabled,
                 enabled,
@@ -126,7 +126,7 @@ public class UploaderAccountService {
 
     public UploaderAccountState updateAvailable(String platform, String accountKey, boolean available) {
         ensureAccount(platform, accountKey);
-        jdbcTemplate.update(
+        repository.update(
                 "UPDATE uploader_account SET is_available = ?, updated_at = NOW() WHERE platform = ? AND account_key = ?",
                 available,
                 normalize(platform),
@@ -139,7 +139,7 @@ public class UploaderAccountService {
         ensureAccount(platform, accountKey);
         int min = minSeconds == null ? 3600 : minSeconds;
         int max = maxSeconds == null ? 7200 : maxSeconds;
-        jdbcTemplate.update(
+        repository.update(
                 """
                 UPDATE uploader_account
                 SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW()
@@ -154,7 +154,7 @@ public class UploaderAccountService {
     }
 
     public void renameAccount(String platform, String oldKey, String newKey) {
-        jdbcTemplate.update(
+        repository.update(
                 """
                 UPDATE uploader_account
                 SET account_key = ?, updated_at = NOW()
@@ -167,7 +167,7 @@ public class UploaderAccountService {
     }
 
     private void ensureAccount(String platform, String accountKey) {
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_account (platform, account_key, is_enabled, is_available, updated_at)
                 VALUES (?, ?, 1, 1, NOW())
@@ -179,7 +179,7 @@ public class UploaderAccountService {
     }
 
     private void refreshMetricsIfMissing(String platform, String accountKey) {
-        List<LocalDateTime> rows = jdbcTemplate.query(
+        List<LocalDateTime> rows = repository.query(
                 """
                 SELECT metrics_updated_at
                 FROM uploader_account
@@ -201,7 +201,7 @@ public class UploaderAccountService {
         if (taskTable == null || !tableExists(taskTable)) {
             return;
         }
-        jdbcTemplate.update(
+        repository.update(
                 ("""
                 UPDATE uploader_account ua
                 SET today_upload_count = (
@@ -261,7 +261,7 @@ public class UploaderAccountService {
     }
 
     private boolean tableExists(String table) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.TABLES
@@ -274,7 +274,7 @@ public class UploaderAccountService {
     }
 
     private void ensureSchema() {
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_account (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -315,7 +315,7 @@ public class UploaderAccountService {
     }
 
     private void ensureColumn(String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -326,7 +326,7 @@ public class UploaderAccountService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 

@@ -11,7 +11,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.BilibiliPlaywrightAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -36,7 +36,7 @@ public class BilibiliPlaywrightAccountService {
 
     private static final String TABLE = "uploader_account_bilibili";
 
-    private final DatabaseClient jdbcTemplate;
+    private final BilibiliPlaywrightAccountRepository repository;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final UploaderAccountService uploaderAccountService;
@@ -46,14 +46,14 @@ public class BilibiliPlaywrightAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public BilibiliPlaywrightAccountService(
-            DatabaseClient jdbcTemplate,
+            BilibiliPlaywrightAccountRepository repository,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             UploaderAccountService uploaderAccountService,
             SocialBrowserFactory browserFactory,
             @Value("${youbi.bilibili.playwright.cdp-url:}") String cdpUrl
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.uploaderAccountService = uploaderAccountService;
@@ -110,7 +110,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     public List<BilibiliPlaywrightAccountStatus> accounts() {
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at
                 FROM uploader_account_bilibili
@@ -212,7 +212,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private void saveStorageState(String accountKey, String storageState, AccountProfile profile) {
-        int updated = jdbcTemplate.update(
+        int updated = repository.update(
                 """
                 UPDATE uploader_account_bilibili
                 SET playwright_mid = ?, playwright_uname = ?, playwright_storage_state_json = ?, playwright_updated_at = NOW()
@@ -336,7 +336,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = jdbcTemplate.query(
+        List<String> values = repository.query(
                 "SELECT playwright_storage_state_json FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getString("playwright_storage_state_json"),
                 accountKey
@@ -348,7 +348,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = jdbcTemplate.query(
+        List<AccountProfile> values = repository.query(
                 "SELECT mid, uname, playwright_mid, playwright_uname FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> new AccountProfile(
                         rs.getObject("playwright_mid") == null ? (rs.getObject("mid") == null ? null : rs.getLong("mid")) : rs.getLong("playwright_mid"),
@@ -360,7 +360,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = jdbcTemplate.query(
+        List<LocalDateTime> values = repository.query(
                 "SELECT playwright_updated_at FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getTimestamp("playwright_updated_at") == null ? null : rs.getTimestamp("playwright_updated_at").toLocalDateTime(),
                 accountKey
@@ -383,7 +383,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private void ensureSchema() {
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
         ensureColumn("playwright_mid", "BIGINT NULL");
         ensureColumn("playwright_uname", "VARCHAR(128) NULL");
         ensureColumn("playwright_storage_state_json", "MEDIUMTEXT NULL");
@@ -391,7 +391,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private void ensureColumn(String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -404,7 +404,7 @@ public class BilibiliPlaywrightAccountService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 

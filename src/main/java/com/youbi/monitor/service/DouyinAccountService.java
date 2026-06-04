@@ -14,7 +14,7 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.DouyinAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -39,7 +39,7 @@ public class DouyinAccountService {
     static final String PUBLISH_VIDEO_URL = "https://creator.douyin.com/creator-micro/content/upload";
 
     private static final String TABLE = "uploader_account_douyin";
-    private final DatabaseClient jdbcTemplate;
+    private final DouyinAccountRepository repository;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
@@ -47,13 +47,13 @@ public class DouyinAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public DouyinAccountService(
-            DatabaseClient jdbcTemplate,
+            DouyinAccountRepository repository,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,
             UploaderAccountService uploaderAccountService
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
@@ -62,7 +62,7 @@ public class DouyinAccountService {
     }
 
     public List<DouyinAccountStatus> accounts() {
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
@@ -216,7 +216,7 @@ public class DouyinAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        Integer exists = jdbcTemplate.queryForObject(
+        Integer exists = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
                 Integer.class,
                 newKey
@@ -224,7 +224,7 @@ public class DouyinAccountService {
         if (exists != null && exists > 0) {
             throw new IOException("Douyin account key already exists: " + newKey);
         }
-        int updated = jdbcTemplate.update(
+        int updated = repository.update(
                 "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
                 newKey,
                 oldKey
@@ -274,7 +274,7 @@ public class DouyinAccountService {
     void saveStorageState(String accountKey, String storageState) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
         AccountProfile profile = profileFromStorageState(storageState);
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, updated_at)
                 VALUES (?, ?, ?, ?, NOW())
@@ -586,7 +586,7 @@ public class DouyinAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = jdbcTemplate.query(
+        List<String> values = repository.query(
                 "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getString("storage_state_json"),
                 accountKey
@@ -598,7 +598,7 @@ public class DouyinAccountService {
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = jdbcTemplate.query(
+        List<LocalDateTime> values = repository.query(
                 "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
                 accountKey
@@ -607,7 +607,7 @@ public class DouyinAccountService {
     }
 
     private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = jdbcTemplate.query(
+        List<AccountProfile> values = repository.query(
                 "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> new AccountProfile(rs.getString("user_id"), rs.getString("nickname")),
                 accountKey
@@ -619,7 +619,7 @@ public class DouyinAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         String userId = text(profile.userId());
         if (!userId.isBlank()) {
-            List<String> existing = jdbcTemplate.query(
+            List<String> existing = repository.query(
                     "SELECT account_key FROM " + TABLE + " WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
                     (rs, rowNum) -> rs.getString("account_key"),
                     userId
@@ -637,7 +637,7 @@ public class DouyinAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
                 Integer.class,
                 accountKey
@@ -675,7 +675,7 @@ public class DouyinAccountService {
     }
 
     private void ensureSchema() {
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_account_douyin (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -689,13 +689,13 @@ public class DouyinAccountService {
                 )
                 """
         );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
         ensureColumn("uploader_account_douyin", "display_name", "VARCHAR(128) NULL");
         ensureColumn("uploader_account_douyin", "avatar_url", "VARCHAR(1024) NULL");
     }
 
     private void ensureColumn(String table, String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -708,7 +708,7 @@ public class DouyinAccountService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
         }
     }
 

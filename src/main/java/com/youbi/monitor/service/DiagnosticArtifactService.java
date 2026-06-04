@@ -2,7 +2,7 @@ package com.youbi.monitor.service;
 
 import com.microsoft.playwright.Page;
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.DiagnosticArtifactRepository;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import jakarta.annotation.PostConstruct;
@@ -26,19 +26,19 @@ public class DiagnosticArtifactService {
     private static final String TABLE = "uploader_diagonostic";
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
 
-    private final DatabaseClient jdbcTemplate;
+    private final DiagnosticArtifactRepository repository;
     private final MinioClient minioClient;
     private final String minioBucket;
     private final String minioEndpoint;
 
     public DiagnosticArtifactService(
-            DatabaseClient jdbcTemplate,
+            DiagnosticArtifactRepository repository,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.minioEndpoint = trimTrailingSlash(TextSupport.text(minioEndpoint));
         this.minioBucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
         this.minioClient = MinioClient.builder()
@@ -49,7 +49,7 @@ public class DiagnosticArtifactService {
 
     @PostConstruct
     void ensureSchema() {
-        jdbcTemplate.execute("""
+        repository.execute("""
                 CREATE TABLE IF NOT EXISTS uploader_diagonostic (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     task_id VARCHAR(128) NOT NULL,
@@ -120,7 +120,7 @@ public class DiagnosticArtifactService {
             throw new IllegalArgumentException("Missing taskId");
         }
         if (normalizedRunId.isBlank()) {
-            return jdbcTemplate.query("""
+            return repository.query("""
                     SELECT id, task_id, run_id, platform, source, account_key, step_index, step_name,
                            screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
                            screenshot_width, screenshot_height, status, error_message, created_at
@@ -129,7 +129,7 @@ public class DiagnosticArtifactService {
                     ORDER BY created_at DESC, run_id DESC, step_index ASC, id ASC
                     """, (rs, rowNum) -> mapRecord(rs), normalizedTaskId);
         }
-        return jdbcTemplate.query("""
+        return repository.query("""
                 SELECT id, task_id, run_id, platform, source, account_key, step_index, step_name,
                        screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
                        screenshot_width, screenshot_height, status, error_message, created_at
@@ -142,7 +142,7 @@ public class DiagnosticArtifactService {
     private Long insert(String taskId, String runId, String platform, String source, String accountKey, int stepIndex, String stepName,
                         String screenshotUrl, String htmlUrl, Long screenshotSizeBytes, Long htmlSizeBytes,
                         Integer screenshotWidth, Integer screenshotHeight) {
-        return jdbcTemplate.insertAndReturnKey("""
+        return repository.insertAndReturnKey("""
                 INSERT INTO uploader_diagonostic
                 (task_id, run_id, platform, source, account_key, step_index, step_name,
                  screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,

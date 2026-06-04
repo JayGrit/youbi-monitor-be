@@ -1,7 +1,7 @@
 package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.UploaderPhoneAccountUpdateRequest;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.UploaderPhoneRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -22,10 +22,10 @@ public class UploaderPhoneService {
             new PlatformTable("jinritoutiao", "uploader_account_jinritoutiao", "jinritoutiao_account_id")
     );
 
-    private final DatabaseClient jdbcTemplate;
+    private final UploaderPhoneRepository repository;
 
-    public UploaderPhoneService(DatabaseClient jdbcTemplate) {
-        this.jdbcTemplate = jdbcTemplate;
+    public UploaderPhoneService(UploaderPhoneRepository repository) {
+        this.repository = repository;
         ensureSchema();
     }
 
@@ -48,13 +48,13 @@ public class UploaderPhoneService {
             throw new IOException("Uploader phone not found: " + phoneId);
         }
         if (accountId == null && !disabled && note.isBlank()) {
-            jdbcTemplate.update(
+            repository.update(
                     "DELETE FROM uploader_phone_account WHERE phone_id = ? AND platform = ?",
                     phoneId,
                     platformTable.key()
             );
         } else {
-            jdbcTemplate.update(
+            repository.update(
                     """
                     INSERT INTO uploader_phone_account (phone_id, platform, account_id, note, disabled, updated_at)
                     VALUES (?, ?, ?, ?, ?, NOW())
@@ -72,7 +72,7 @@ public class UploaderPhoneService {
 
     private List<UploaderPhoneRecord> phones() {
         Map<Long, Map<String, UploaderPhoneBinding>> bindingsByPhone = phoneAccountBindings();
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT id, phone
                      , remark
@@ -93,7 +93,7 @@ public class UploaderPhoneService {
 
     private UploaderPhoneRecord phone(long phoneId) throws IOException {
         Map<Long, Map<String, UploaderPhoneBinding>> bindingsByPhone = phoneAccountBindings();
-        List<UploaderPhoneRecord> rows = jdbcTemplate.query(
+        List<UploaderPhoneRecord> rows = repository.query(
                 """
                 SELECT id, phone
                      , remark
@@ -117,7 +117,7 @@ public class UploaderPhoneService {
 
     private Map<Long, Map<String, UploaderPhoneBinding>> phoneAccountBindings() {
         Map<Long, Map<String, UploaderPhoneBinding>> result = new HashMap<>();
-        jdbcTemplate.query(
+        repository.query(
                 """
                 SELECT phone_id, platform, account_id, note, disabled
                 FROM uploader_phone_account
@@ -155,14 +155,14 @@ public class UploaderPhoneService {
         if (!tableExists(platform.table())) {
             return List.of();
         }
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, platform.table());
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
         ensureAccountColumn(platform.table(), "display_name", "VARCHAR(128) NULL");
         ensureAccountColumn(platform.table(), "avatar_url", "VARCHAR(1024) NULL");
         String nameExpression = "COALESCE(NULLIF(nickname, ''), account_key)";
         if ("bilibili".equals(platform.key())) {
             nameExpression = "COALESCE(NULLIF(uname, ''), account_key)";
         }
-        return jdbcTemplate.query(
+        return repository.query(
                 ("""
                 SELECT id, account_key, %s AS display_name, display_name AS remark, avatar_url
                 FROM %s
@@ -182,8 +182,8 @@ public class UploaderPhoneService {
         if (!tableExists(platform.table())) {
             return false;
         }
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, platform.table());
-        Integer count = jdbcTemplate.queryForObject(
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
+        Integer count = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + platform.table() + " WHERE id = ?",
                 Integer.class,
                 accountId
@@ -192,7 +192,7 @@ public class UploaderPhoneService {
     }
 
     private boolean phoneExists(long phoneId) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 "SELECT COUNT(*) FROM uploader_phone WHERE id = ?",
                 Integer.class,
                 phoneId
@@ -203,10 +203,10 @@ public class UploaderPhoneService {
     private void ensureSchema() {
         for (PlatformTable platform : PLATFORMS) {
             if (tableExists(platform.table())) {
-                AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, platform.table());
+                AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
             }
         }
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_phone (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -221,7 +221,7 @@ public class UploaderPhoneService {
         );
         ensureUploaderPhoneColumn("remark", "VARCHAR(64) NULL");
         ensureUploaderPhoneColumn("note", "VARCHAR(255) NULL");
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_phone_account (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -240,7 +240,7 @@ public class UploaderPhoneService {
         );
         ensureUploaderPhoneAccountColumn("note", "VARCHAR(255) NULL");
         ensureUploaderPhoneAccountColumn("disabled", "TINYINT(1) NOT NULL DEFAULT 0");
-        jdbcTemplate.execute("ALTER TABLE " + ACCOUNT_TABLE + " MODIFY COLUMN account_id BIGINT NULL");
+        repository.execute("ALTER TABLE " + ACCOUNT_TABLE + " MODIFY COLUMN account_id BIGINT NULL");
         migrateLegacyAccountColumns();
         dropLegacyPhoneColumns();
         seedPhone("15548242598", "主号");
@@ -253,7 +253,7 @@ public class UploaderPhoneService {
             if (!columnExists(TABLE, platform.phoneColumn())) {
                 continue;
             }
-            jdbcTemplate.update(
+            repository.update(
                     ("""
                     INSERT INTO uploader_phone_account (phone_id, platform, account_id, updated_at)
                     SELECT id, ?, %s, NOW()
@@ -273,7 +273,7 @@ public class UploaderPhoneService {
     }
 
     private void seedPhone(String phone, String remark) {
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_phone (phone, remark, note, updated_at)
                 VALUES (?, ?, NULL, NOW())
@@ -286,18 +286,18 @@ public class UploaderPhoneService {
 
     private void ensureUploaderPhoneColumn(String column, String definition) {
         if (!columnExists(TABLE, column)) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 
     private void ensureUploaderPhoneAccountColumn(String column, String definition) {
         if (!columnExists(ACCOUNT_TABLE, column)) {
-            jdbcTemplate.execute("ALTER TABLE " + ACCOUNT_TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + ACCOUNT_TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 
     private boolean columnExists(String table, String column) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -314,12 +314,12 @@ public class UploaderPhoneService {
 
     private void dropColumnIfExists(String table, String column) {
         if (columnExists(table, column)) {
-            jdbcTemplate.execute("ALTER TABLE " + table + " DROP COLUMN " + column);
+            repository.execute("ALTER TABLE " + table + " DROP COLUMN " + column);
         }
     }
 
     private void ensureAccountColumn(String table, String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -332,12 +332,12 @@ public class UploaderPhoneService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
         }
     }
 
     private boolean tableExists(String table) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.TABLES

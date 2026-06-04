@@ -9,7 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.BilibiliAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -40,14 +40,14 @@ public class BilibiliAccountService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final DatabaseClient jdbcTemplate;
+    private final BilibiliAccountRepository repository;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final UploaderAccountService uploaderAccountService;
 
-    public BilibiliAccountService(DatabaseClient jdbcTemplate, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
-        this.jdbcTemplate = jdbcTemplate;
+    public BilibiliAccountService(BilibiliAccountRepository repository, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
+        this.repository = repository;
         this.sendAvailabilityService = sendAvailabilityService;
         this.uploaderAccountService = uploaderAccountService;
         this.httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
@@ -64,7 +64,7 @@ public class BilibiliAccountService {
     }
 
     public List<BilibiliAccountStatus> accounts() {
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
@@ -199,7 +199,7 @@ public class BilibiliAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        int exists = jdbcTemplate.queryForObject(
+        int exists = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
                 Integer.class,
                 newKey
@@ -207,7 +207,7 @@ public class BilibiliAccountService {
         if (exists > 0) {
             throw new IOException("Bilibili account key already exists: " + newKey);
         }
-        int updated = jdbcTemplate.update(
+        int updated = repository.update(
                 "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
                 newKey,
                 oldKey
@@ -268,7 +268,7 @@ public class BilibiliAccountService {
     private String automaticAccountKey(JsonNode loginInfo) {
         long mid = loginInfo.path("token_info").path("mid").asLong(0);
         if (mid > 0) {
-            List<String> existing = jdbcTemplate.query(
+            List<String> existing = repository.query(
                     "SELECT account_key FROM " + TABLE + " WHERE mid = ? ORDER BY updated_at DESC LIMIT 1",
                     (rs, rowNum) -> rs.getString("account_key"),
                     mid
@@ -286,7 +286,7 @@ public class BilibiliAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
                 Integer.class,
                 accountKey
@@ -424,7 +424,7 @@ public class BilibiliAccountService {
     }
 
     private Optional<JsonNode> loadLoginInfo(String accountKey) throws IOException {
-        List<String> values = jdbcTemplate.query(
+        List<String> values = repository.query(
                 "SELECT login_info_json FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getString("login_info_json"),
                 accountKey
@@ -436,7 +436,7 @@ public class BilibiliAccountService {
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = jdbcTemplate.query(
+        List<LocalDateTime> values = repository.query(
                 "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
                 (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
                 accountKey
@@ -457,7 +457,7 @@ public class BilibiliAccountService {
         } catch (Exception ignored) {
             // Account metadata is best effort; login_info_json is the source of truth.
         }
-        jdbcTemplate.update(
+        repository.update(
                 """
                 INSERT INTO uploader_account_bilibili (account_key, mid, uname, login_info_json, updated_at)
                 VALUES (?, ?, ?, ?, NOW())
@@ -472,7 +472,7 @@ public class BilibiliAccountService {
     }
 
     private void ensureSchema() {
-        jdbcTemplate.execute(
+        repository.execute(
                 """
                 CREATE TABLE IF NOT EXISTS uploader_account_bilibili (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -486,13 +486,13 @@ public class BilibiliAccountService {
                 )
                 """
         );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
+        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
     }
 
     private void ensureColumn(String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -505,7 +505,7 @@ public class BilibiliAccountService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 

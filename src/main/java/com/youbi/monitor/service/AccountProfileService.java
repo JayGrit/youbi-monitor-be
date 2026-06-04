@@ -5,7 +5,7 @@ import com.youbi.monitor.dto.AccountProfileUpdateResult;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.AccountProfileRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,19 +27,19 @@ public class AccountProfileService {
             "jinritoutiao", "uploader_account_jinritoutiao"
     );
 
-    private final DatabaseClient jdbcTemplate;
+    private final AccountProfileRepository repository;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
 
     public AccountProfileService(
-            DatabaseClient jdbcTemplate,
+            AccountProfileRepository repository,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.minioEndpoint = trimTrailingSlash(TextSupport.text(minioEndpoint));
         this.minioBucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
         this.minioClient = MinioClient.builder()
@@ -53,7 +53,7 @@ public class AccountProfileService {
         String normalized = normalizeAccountKey(accountKey);
         ensureColumns(table);
         String displayName = TextSupport.text(request == null ? "" : request.displayName());
-        int updated = jdbcTemplate.update(
+        int updated = repository.update(
                 "UPDATE " + table + " SET display_name = ?, updated_at = NOW() WHERE account_key = ?",
                 displayName.isBlank() ? null : TextSupport.truncate(displayName, 128),
                 normalized
@@ -90,7 +90,7 @@ public class AccountProfileService {
                     .build());
         }
         String avatarUrl = minioUrl(objectKey);
-        int updated = jdbcTemplate.update(
+        int updated = repository.update(
                 "UPDATE " + table + " SET avatar_url = ?, updated_at = NOW() WHERE account_key = ?",
                 avatarUrl,
                 normalized
@@ -102,7 +102,7 @@ public class AccountProfileService {
     }
 
     private AccountProfileUpdateResult profile(String table, String accountKey) {
-        return jdbcTemplate.queryForObject(
+        return repository.queryForObject(
                 "SELECT display_name, avatar_url FROM " + table + " WHERE account_key = ?",
                 (rs, rowNum) -> new AccountProfileUpdateResult(rs.getString("display_name"), rs.getString("avatar_url")),
                 accountKey
@@ -115,7 +115,7 @@ public class AccountProfileService {
     }
 
     private void ensureColumn(String table, String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject(
+        Integer count = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
@@ -128,7 +128,7 @@ public class AccountProfileService {
                 column
         );
         if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
         }
     }
 

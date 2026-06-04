@@ -22,7 +22,7 @@ import io.minio.RemoveObjectArgs;
 import io.minio.Result;
 import io.minio.messages.Item;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.MonitorRepository;
 import com.youbi.monitor.repository.RowMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -341,19 +341,19 @@ public class MonitorService {
             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
             """;
 
-    private final DatabaseClient jdbcTemplate;
+    private final MonitorRepository repository;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
 
     public MonitorService(
-            DatabaseClient jdbcTemplate,
+            MonitorRepository repository,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
-        this.jdbcTemplate = jdbcTemplate;
+        this.repository = repository;
         this.minioEndpoint = text(minioEndpoint);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
@@ -368,7 +368,7 @@ public class MonitorService {
 
     public MonitorResponse listTasks(int limit) {
         LocalDateTime now = LocalDateTime.now();
-        List<TaskMonitorItem> tasks = jdbcTemplate.query(MONITOR_SQL, new TaskRowMapper(now), limit);
+        List<TaskMonitorItem> tasks = repository.query(MONITOR_SQL, new TaskRowMapper(now), limit);
         List<ServiceHeartbeat> serviceHeartbeats = listServiceHeartbeats(now);
         return new MonitorResponse(tasks, serviceHeartbeats, now);
     }
@@ -393,7 +393,7 @@ public class MonitorService {
         if (!tableExists("whisper_word_timestamp")) {
             return List.of();
         }
-        return jdbcTemplate.query(
+        return repository.query(
                 """
                 SELECT task_id, segment_index, word_index, text, start_time, end_time
                 FROM whisper_word_timestamp
@@ -414,7 +414,7 @@ public class MonitorService {
 
     public WhisperProcessingDetail whisperProcessing(String taskId) {
         List<WhisperProcessingDetail.RawSegment> rawSegments = tableExists("whisper_raw_segment")
-                ? jdbcTemplate.query(
+                ? repository.query(
                 """
                 SELECT id, raw_index, text, start_time, end_time
                 FROM whisper_raw_segment
@@ -432,7 +432,7 @@ public class MonitorService {
         )
                 : List.of();
         List<WhisperProcessingDetail.AlignedSegment> alignedSegments = tableExists("whisper_aligned_segment")
-                ? jdbcTemplate.query(
+                ? repository.query(
                 """
                 SELECT id, raw_segment_id, aligned_index, text, start_time, end_time
                 FROM whisper_aligned_segment
@@ -451,7 +451,7 @@ public class MonitorService {
         )
                 : List.of();
         List<WhisperProcessingDetail.PysbdSegment> pysbdSegments = tableExists("whisper_pysbd_segment")
-                ? jdbcTemplate.query(
+                ? repository.query(
                 """
                 SELECT id, pysbd_index, text, start_time, end_time
                 FROM whisper_pysbd_segment
@@ -469,7 +469,7 @@ public class MonitorService {
         )
                 : List.of();
         List<WhisperProcessingDetail.SplitSegment> splitSegments = tableExists("whisper_split")
-                ? jdbcTemplate.query(
+                ? repository.query(
                 """
                 SELECT id, split_index, pysbd_segment_id, text, start_time, end_time,
                        split_reason, split_method, split_punctuation, split_conjunction
@@ -497,7 +497,7 @@ public class MonitorService {
 
     public SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(String taskId, long segmentId, String dstText) {
         String normalizedText = dstText == null ? "" : dstText;
-        int updated = jdbcTemplate.update("""
+        int updated = repository.update("""
                 UPDATE yd_speaker_segment
                 SET dst_text = ?
                 WHERE task_id = ? AND id = ?
@@ -505,7 +505,7 @@ public class MonitorService {
         if (updated == 0) {
             return null;
         }
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+        List<Map<String, Object>> rows = repository.queryForList("""
                 SELECT *
                 FROM yd_speaker_segment
                 WHERE task_id = ? AND id = ?
@@ -530,7 +530,7 @@ public class MonitorService {
                 ? "LEFT JOIN " + quotedIdentifier(accountTable) + " account ON account.account_key = submission.account_key"
                 : "";
         String accountExistsSql = accountTableExists ? "account.account_key IS NOT NULL" : "FALSE";
-        List<FailedUploadSubmission> rows = jdbcTemplate.query("""
+        List<FailedUploadSubmission> rows = repository.query("""
                 SELECT
                   submission.id,
                   submission.task_id,
@@ -592,7 +592,7 @@ public class MonitorService {
         }
 
         String placeholders = placeholders(normalizedIds.size());
-        List<String> taskIds = jdbcTemplate.queryForList("""
+        List<String> taskIds = repository.queryForList("""
                 SELECT DISTINCT submission.task_id
                 FROM %s submission
                 JOIN %s account ON account.account_key = submission.account_key
@@ -603,7 +603,7 @@ public class MonitorService {
             return new UploadSubmissionRetryResult(normalized, 0, 0, 0);
         }
 
-        int retried = jdbcTemplate.update("""
+        int retried = repository.update("""
                 UPDATE %s submission
                 JOIN %s account ON account.account_key = submission.account_key
                 SET submission.status = 'ready',
@@ -616,7 +616,7 @@ public class MonitorService {
 
         String taskPlaceholders = placeholders(taskIds.size());
         Object[] taskArgs = taskIds.toArray();
-        int uploaderUpdated = jdbcTemplate.update("""
+        int uploaderUpdated = repository.update("""
                 UPDATE yd_uploader
                 SET status = 'running',
                     started_at = COALESCE(started_at, NOW()),
@@ -625,7 +625,7 @@ public class MonitorService {
                     `operator` = NULL
                 WHERE task_id IN (%s)
                 """.formatted(taskPlaceholders), taskArgs);
-        int taskUpdated = jdbcTemplate.update("""
+        int taskUpdated = repository.update("""
                 UPDATE yd_task
                 SET status = 'running',
                     current_stage = 'uploader',
@@ -654,7 +654,7 @@ public class MonitorService {
             throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
         }
 
-        List<UploadBackfillCandidate> rows = jdbcTemplate.query("""
+        List<UploadBackfillCandidate> rows = repository.query("""
                 SELECT
                   task.id task_id,
                   COALESCE(NULLIF(target.title, ''), NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), task.id) title,
@@ -765,7 +765,7 @@ public class MonitorService {
         }
         queryArgs[queryArgs.length - 1] = normalizedType;
 
-        List<UploadBackfillInsertRow> rows = jdbcTemplate.query("""
+        List<UploadBackfillInsertRow> rows = repository.query("""
                 SELECT
                   task.id task_id,
                   COALESCE(NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), task.id) title,
@@ -818,7 +818,7 @@ public class MonitorService {
 
         int registered = 0;
         for (UploadBackfillInsertRow row : rows) {
-            registered += jdbcTemplate.update("""
+            registered += repository.update("""
                     INSERT INTO %s (
                         task_id, account_key, status, title, video_url, cover_url, description, tags
                     )
@@ -837,7 +837,7 @@ public class MonitorService {
         List<String> registeredTaskIds = rows.stream().map(UploadBackfillInsertRow::taskId).distinct().toList();
         Object[] registeredArgs = registeredTaskIds.toArray();
         String registeredPlaceholders = placeholders(registeredTaskIds.size());
-        int uploaderUpdated = jdbcTemplate.update("""
+        int uploaderUpdated = repository.update("""
                 UPDATE yd_uploader
                 SET status = 'running',
                     started_at = COALESCE(started_at, NOW()),
@@ -846,7 +846,7 @@ public class MonitorService {
                     `operator` = NULL
                 WHERE task_id IN (%s)
                 """.formatted(registeredPlaceholders), registeredArgs);
-        int taskUpdated = jdbcTemplate.update("""
+        int taskUpdated = repository.update("""
                 UPDATE yd_task
                 SET status = 'running',
                     current_stage = 'uploader',
@@ -872,7 +872,7 @@ public class MonitorService {
         if (normalized.isBlank()) {
             return new SubmitterAuthorType("", "", true, true, true, "英文", "中文");
         }
-        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+        List<Map<String, Object>> rows = repository.queryForList("""
                 SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language
                 FROM submitter_author
                 WHERE author = ?
@@ -895,7 +895,7 @@ public class MonitorService {
     }
 
     public List<SubmitterAuthorType> authorTypes() {
-        return jdbcTemplate.query("""
+        return repository.query("""
                 SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language
                 FROM submitter_author
                 ORDER BY CASE WHEN COALESCE(NULLIF(type, ''), '') = '' THEN 1 ELSE 0 END, type, author
@@ -932,7 +932,7 @@ public class MonitorService {
         boolean normalizedNeedSubtitle = !Boolean.FALSE.equals(needSubtitle);
         boolean normalizedNeedDubbing = normalizedNeedSubtitle && !Boolean.FALSE.equals(needDubbing);
         boolean normalizedNeedSeparation = !Boolean.FALSE.equals(needSeparation);
-        jdbcTemplate.update("""
+        repository.update("""
                 INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
@@ -968,10 +968,10 @@ public class MonitorService {
         if (normalizedAuthor.isBlank()) {
             throw new IllegalArgumentException("author is required");
         }
-        int deletedAuthorRows = jdbcTemplate.update("DELETE FROM submitter_author WHERE author = ?", normalizedAuthor);
+        int deletedAuthorRows = repository.update("DELETE FROM submitter_author WHERE author = ?", normalizedAuthor);
         int deletedVideoRows = 0;
         if (tableExists("submitter_video")) {
-            deletedVideoRows = jdbcTemplate.update("""
+            deletedVideoRows = repository.update("""
                     DELETE FROM submitter_video
                     WHERE uploader = ? OR import_author = ? OR channel_id = ?
                     """, normalizedAuthor, normalizedAuthor, normalizedAuthor);
@@ -1097,7 +1097,7 @@ public class MonitorService {
     }
 
     private List<Map<String, Object>> rows(String table, String idColumn, String id, String orderBy, int limit) {
-        return jdbcTemplate.query(
+        return repository.query(
                 "SELECT * FROM " + quotedIdentifier(table)
                         + " WHERE " + quotedIdentifier(idColumn) + " = ?"
                         + orderClause(table, orderBy)
@@ -1127,7 +1127,7 @@ public class MonitorService {
         if (!tableExists(table)) {
             return List.of();
         }
-        return jdbcTemplate.queryForList("""
+        return repository.queryForList("""
                 SELECT COLUMN_NAME
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
@@ -1365,7 +1365,7 @@ public class MonitorService {
         resetFailedStage(taskId, failedStage);
         resetDownstreamStages(taskId, failedStage);
         resetStageChildren(taskId, failedStage);
-        jdbcTemplate.update("""
+        repository.update("""
                 UPDATE yd_task
                 SET status = 'ready',
                     current_stage = ?,
@@ -1378,7 +1378,7 @@ public class MonitorService {
 
     @Transactional
     public TaskRestartResult restartTask(String taskId) throws IOException {
-        List<String> statuses = jdbcTemplate.queryForList(
+        List<String> statuses = repository.queryForList(
                 "SELECT status FROM yd_task WHERE id = ?",
                 String.class,
                 taskId
@@ -1397,7 +1397,7 @@ public class MonitorService {
 
     @Transactional
     public TaskDeleteResult deleteTask(String taskId) throws IOException {
-        List<String> statuses = jdbcTemplate.queryForList(
+        List<String> statuses = repository.queryForList(
                 "SELECT status FROM yd_task WHERE id = ?",
                 String.class,
                 taskId
@@ -1416,7 +1416,7 @@ public class MonitorService {
 
     @Transactional
     public TaskStopResult stopTask(String taskId) {
-        List<String> statuses = jdbcTemplate.queryForList(
+        List<String> statuses = repository.queryForList(
                 "SELECT status FROM yd_task WHERE id = ?",
                 String.class,
                 taskId
@@ -1433,7 +1433,7 @@ public class MonitorService {
                 continue;
             }
             ensureOperatorColumn(stage.table());
-            int updated = jdbcTemplate.update("""
+            int updated = repository.update("""
                     UPDATE %s
                     SET status = 'failed',
                         completed_at = NOW(),
@@ -1451,7 +1451,7 @@ public class MonitorService {
 
         if (tableExists("yd_translator_api_task")) {
             ensureOperatorColumn("yd_translator_api_task");
-            stoppedStages += jdbcTemplate.update("""
+            stoppedStages += repository.update("""
                     UPDATE yd_translator_api_task
                     SET status = 'failed',
                         completed_at = NOW(),
@@ -1462,7 +1462,7 @@ public class MonitorService {
         }
         if (tableExists("yd_speaker_segment")) {
             ensureOperatorColumn("yd_speaker_segment");
-            stoppedStages += jdbcTemplate.update("""
+            stoppedStages += repository.update("""
                     UPDATE yd_speaker_segment
                     SET status = 'failed',
                         completed_at = NOW(),
@@ -1476,7 +1476,7 @@ public class MonitorService {
             return new TaskStopResult(statuses.get(0), 0, false);
         }
 
-        jdbcTemplate.update("""
+        repository.update("""
                 UPDATE yd_task
                 SET status = 'failed',
                     current_stage = COALESCE(NULLIF(?, ''), current_stage),
@@ -1490,7 +1490,7 @@ public class MonitorService {
 
     private RetryStage findFailedStage(String taskId) {
         for (RetryStage stage : RETRY_STAGES) {
-            Integer count = jdbcTemplate.queryForObject(
+            Integer count = repository.queryForObject(
                     "SELECT COUNT(*) FROM " + stage.table() + " WHERE task_id = ? AND status = 'failed'",
                     Integer.class,
                     taskId
@@ -1500,7 +1500,7 @@ public class MonitorService {
             }
         }
 
-        List<String> currentStages = jdbcTemplate.queryForList("""
+        List<String> currentStages = repository.queryForList("""
                 SELECT current_stage
                 FROM yd_task
                 WHERE id = ? AND status = 'failed'
@@ -1519,7 +1519,7 @@ public class MonitorService {
 
     private void resetFailedStage(String taskId, RetryStage stage) {
         ensureOperatorColumn(stage.table());
-        jdbcTemplate.update("""
+        repository.update("""
                 UPDATE %s
                 SET status = 'ready',
                     started_at = NULL,
@@ -1535,7 +1535,7 @@ public class MonitorService {
         for (int i = failedIndex + 1; i < RETRY_STAGES.size(); i++) {
             RetryStage stage = RETRY_STAGES.get(i);
             ensureOperatorColumn(stage.table());
-            jdbcTemplate.update("""
+            repository.update("""
                     UPDATE %s
                     SET status = 'pending',
                         started_at = NULL,
@@ -1551,7 +1551,7 @@ public class MonitorService {
         if ("translator".equals(failedStage.key())) {
             if (tableExists("yd_translator_api_task")) {
                 ensureOperatorColumn("yd_translator_api_task");
-                jdbcTemplate.update("""
+                repository.update("""
                         UPDATE yd_translator_api_task
                         SET status = 'pending',
                             attempt_count = 0,
@@ -1564,14 +1564,14 @@ public class MonitorService {
                         """, taskId);
             }
             if (tableExists("yd_speaker_segment")) {
-                jdbcTemplate.update("DELETE FROM yd_speaker_segment WHERE task_id = ?", taskId);
+                repository.update("DELETE FROM yd_speaker_segment WHERE task_id = ?", taskId);
             }
             return;
         }
 
         if ("speaker".equals(failedStage.key()) && tableExists("yd_speaker_segment")) {
             ensureOperatorColumn("yd_speaker_segment");
-            jdbcTemplate.update("""
+            repository.update("""
                     UPDATE yd_speaker_segment
                     SET status = 'ready',
                         attempt_count = 0,
@@ -1588,7 +1588,7 @@ public class MonitorService {
                 if (!tableExists(table)) {
                     return;
                 }
-                jdbcTemplate.update("""
+                repository.update("""
                         UPDATE %s submission
                         JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
                         LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
@@ -1613,7 +1613,7 @@ public class MonitorService {
             if (!tableExists(stage.table())) {
                 continue;
             }
-            Integer count = jdbcTemplate.queryForObject(
+            Integer count = repository.queryForObject(
                     "SELECT COUNT(*) FROM " + quotedIdentifier(stage.table()) + " WHERE task_id = ? AND status = 'running'",
                     Integer.class,
                     taskId
@@ -1623,7 +1623,7 @@ public class MonitorService {
             }
         }
         if (tableExists("yd_speaker_segment")) {
-            Integer count = jdbcTemplate.queryForObject(
+            Integer count = repository.queryForObject(
                     "SELECT COUNT(*) FROM yd_speaker_segment WHERE task_id = ? AND status = 'running'",
                     Integer.class,
                     taskId
@@ -1663,7 +1663,7 @@ public class MonitorService {
     private void resetTaskRowsForDownloader(String taskId) {
         for (String table : RESET_CHILD_TABLES) {
             if (tableExists(table)) {
-                jdbcTemplate.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
+                repository.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
             }
         }
 
@@ -1672,7 +1672,7 @@ public class MonitorService {
             resetStageRow(taskId, stage, "downloader".equals(stage.key()) ? "ready" : "pending");
         }
 
-        jdbcTemplate.update("""
+        repository.update("""
                 UPDATE yd_task
                 SET status = 'ready',
                     current_stage = 'downloader',
@@ -1687,14 +1687,14 @@ public class MonitorService {
     private int deleteTaskRows(String taskId) {
         int deleted = 0;
         for (String table : taskScopedTables()) {
-            deleted += jdbcTemplate.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
+            deleted += repository.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
         }
-        deleted += jdbcTemplate.update("DELETE FROM yd_task WHERE id = ?", taskId);
+        deleted += repository.update("DELETE FROM yd_task WHERE id = ?", taskId);
         return deleted;
     }
 
     private List<String> taskScopedTables() {
-        return jdbcTemplate.queryForList("""
+        return repository.queryForList("""
                 SELECT TABLE_NAME
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE()
@@ -1719,13 +1719,13 @@ public class MonitorService {
             restoreVideoInfoProcessingOptions(taskId);
             return;
         }
-        jdbcTemplate.update("UPDATE yd_video_info SET " + nullAssignments(resetColumns) + " WHERE task_id = ?", taskId);
+        repository.update("UPDATE yd_video_info SET " + nullAssignments(resetColumns) + " WHERE task_id = ?", taskId);
         restoreVideoInfoSource(taskId);
         restoreVideoInfoProcessingOptions(taskId);
     }
 
     private void restoreVideoInfoSource(String taskId) {
-        jdbcTemplate.update("""
+        repository.update("""
                 INSERT INTO yd_video_info (task_id, source_url, source_platform)
                 SELECT id, source_url, source_platform
                 FROM yd_task
@@ -1738,7 +1738,7 @@ public class MonitorService {
 
     private void restoreVideoInfoProcessingOptions(String taskId) {
         if (tableExists("downloader_submission")) {
-            jdbcTemplate.update("""
+            repository.update("""
                     UPDATE yd_video_info video_info
                     JOIN downloader_submission submission ON submission.task_id = video_info.task_id
                     SET video_info.type = COALESCE(video_info.type, submission.type),
@@ -1749,7 +1749,7 @@ public class MonitorService {
                     """, taskId);
         }
         if (tableExists("submitter_author")) {
-            jdbcTemplate.update("""
+            repository.update("""
                     UPDATE yd_video_info video_info
                     JOIN submitter_author author
                       ON author.author = video_info.source_uploader
@@ -1771,7 +1771,7 @@ public class MonitorService {
         ensureOperatorColumn(stage.table());
         List<String> resetColumns = resettableColumns(stage.table(), SYSTEM_STAGE_COLUMNS);
         String extraAssignments = resetColumns.isEmpty() ? "" : ",\n                    " + nullAssignments(resetColumns);
-        jdbcTemplate.update("""
+        repository.update("""
                 UPDATE %s
                 SET status = ?,
                     started_at = NULL,
@@ -1783,7 +1783,7 @@ public class MonitorService {
     }
 
     private List<String> resettableColumns(String table, List<String> preservedColumns) {
-        return jdbcTemplate.queryForList("""
+        return repository.queryForList("""
                         SELECT COLUMN_NAME
                         FROM INFORMATION_SCHEMA.COLUMNS
                         WHERE TABLE_SCHEMA = DATABASE()
@@ -1880,7 +1880,7 @@ public class MonitorService {
             return new ArrayList<>(byService.values());
         }
 
-        jdbcTemplate.query(heartbeatSql(), rs -> {
+        repository.query(heartbeatSql(), rs -> {
             String serviceName = rs.getString("service_name");
             if (!byService.containsKey(serviceName)) {
                 return;
@@ -1892,12 +1892,12 @@ public class MonitorService {
     }
 
     private boolean heartbeatTableExists() {
-        Integer count = jdbcTemplate.queryForObject(HEARTBEAT_TABLE_EXISTS_SQL, Integer.class, HEARTBEAT_TABLE);
+        Integer count = repository.queryForObject(HEARTBEAT_TABLE_EXISTS_SQL, Integer.class, HEARTBEAT_TABLE);
         return count != null && count > 0;
     }
 
     private String heartbeatSql() {
-        List<String> columns = jdbcTemplate.queryForList(HEARTBEAT_COLUMNS_SQL, String.class, HEARTBEAT_TABLE);
+        List<String> columns = repository.queryForList(HEARTBEAT_COLUMNS_SQL, String.class, HEARTBEAT_TABLE);
         StringBuilder sql = new StringBuilder("SELECT service_name");
         for (String device : HEARTBEAT_DEVICES) {
             sql.append(",\n  ");
@@ -1933,7 +1933,7 @@ public class MonitorService {
 
     private void ensureUploaderSubmissionMonitorSchema() {
         UPLOADER_TASK_TABLES.forEach((platform, table) -> {
-            jdbcTemplate.execute("""
+            repository.execute("""
                     CREATE TABLE IF NOT EXISTS %s (
                         id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                         task_id VARCHAR(64) NOT NULL,
@@ -1979,7 +1979,7 @@ public class MonitorService {
     }
 
     private void ensureSubmitterAuthorTypeSchema() {
-        jdbcTemplate.execute("""
+        repository.execute("""
                 CREATE TABLE IF NOT EXISTS submitter_author (
                     author VARCHAR(255) NOT NULL PRIMARY KEY,
                     type VARCHAR(128) NOT NULL,
@@ -2002,7 +2002,7 @@ public class MonitorService {
     }
 
     private boolean tableExists(String table) {
-        Integer count = jdbcTemplate.queryForObject("""
+        Integer count = repository.queryForObject("""
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.TABLES
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
@@ -2015,7 +2015,7 @@ public class MonitorService {
     }
 
     private void ensureColumn(String table, String column, String definition) {
-        Integer count = jdbcTemplate.queryForObject("""
+        Integer count = repository.queryForObject("""
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
@@ -2023,7 +2023,7 @@ public class MonitorService {
         if (count != null && count > 0) {
             return;
         }
-        jdbcTemplate.execute("ALTER TABLE " + quotedIdentifier(table) + " ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+        repository.execute("ALTER TABLE " + quotedIdentifier(table) + " ADD COLUMN " + quotedIdentifier(column) + " " + definition);
     }
 
     private static ServiceHeartbeat emptyHeartbeat(StageDefinition stage) {
