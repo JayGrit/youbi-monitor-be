@@ -28,7 +28,7 @@ then
   "${PIP}" install playwright mysql-connector-python
 fi
 
-echo "准备从数据库读取今日头条登录态并打开本地临时 Chrome。"
+echo "准备从数据库读取快手登录态并打开本地临时 Chrome。"
 echo "每个账号会使用独立临时 profile，避免同域名登录态互相覆盖。"
 echo
 

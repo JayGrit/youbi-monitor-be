@@ -12,4 +12,4 @@ from open_from_db_common import main  # noqa: E402
 
 
 if __name__ == "__main__":
-    raise SystemExit(main("jinritoutiao"))
+    raise SystemExit(main("kuaishou"))
