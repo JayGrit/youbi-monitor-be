@@ -112,10 +112,7 @@ public class ShipinhaoUploadService {
         openCreateFromHome(page, taskId, accountKey);
         dumpDiagnostics(page, taskId, "create-page-ready");
 
-        Locator fileInput = page.locator("input[type='file'][accept*='video']").first();
-        fileInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
-        fileInput.setInputFiles(videoPath);
-        waitForVideoFileAccepted(page, taskId);
+        selectVideoFile(page, videoPath, taskId);
         dumpDiagnostics(page, taskId, "after-set-video-file");
 
         fillDescription(page, request, taskId);
@@ -153,9 +150,12 @@ public class ShipinhaoUploadService {
                     accountService.markUnavailable(accountKey);
                     throw new IllegalStateException("Shipinhao account login state expired: " + accountKey, exception);
                 }
-                throw exception;
+                log.warn("Shipinhao upload publish button not found on home, navigate create page directly taskId={} url={}",
+                        taskId, page.url());
             }
-            button.click();
+            if (button.count() > 0) {
+                button.click();
+            }
         }
         try {
             page.waitForURL("**/post/create**", new Page.WaitForURLOptions().setTimeout(20000));
@@ -311,8 +311,7 @@ public class ShipinhaoUploadService {
                     dumpDiagnostics(page, taskId, "submit-missing-video-" + attempts);
                     log.warn("Shipinhao upload submit reported missing video taskId={} attempt={} body={}",
                             taskId, attempts, TextSupport.truncate(body, 300));
-                    page.waitForTimeout(5000);
-                    continue;
+                    throw new RuntimeException("Shipinhao video file was not accepted by page before submit");
                 }
                 last = new RuntimeException("Shipinhao submit did not finish, currentUrl=" + page.url());
             } catch (RuntimeException exception) {
@@ -326,8 +325,37 @@ public class ShipinhaoUploadService {
         throw last == null ? new RuntimeException("Shipinhao submit did not finish") : last;
     }
 
-    private void waitForVideoFileAccepted(Page page, String taskId) {
-        long deadline = System.currentTimeMillis() + Duration.ofSeconds(30).toMillis();
+    private void selectVideoFile(Page page, Path videoPath, String taskId) {
+        Locator inputs = page.locator("input[type='file'][accept*='video'], input[type='file'][accept*='mp4'], input[type='file'][accept='']");
+        inputs.first().waitFor(new Locator.WaitForOptions()
+                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
+                .setTimeout(30000));
+        int count = inputs.count();
+        RuntimeException lastException = null;
+        for (int index = 0; index < count; index += 1) {
+            Locator input = inputs.nth(index);
+            try {
+                String accept = TextSupport.text(input.getAttribute("accept"));
+                log.info("Shipinhao upload set video input taskId={} index={} accept={}", taskId, index, accept);
+                input.setInputFiles(videoPath);
+                if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(20))) {
+                    return;
+                }
+                dumpDiagnostics(page, taskId, "video-file-not-accepted-" + (index + 1));
+            } catch (RuntimeException exception) {
+                lastException = exception;
+                log.warn("Shipinhao upload video input rejected taskId={} index={} message={}", taskId, index, exception.getMessage());
+            }
+        }
+        dumpDiagnostics(page, taskId, "video-file-not-accepted");
+        if (lastException != null) {
+            throw new RuntimeException("Shipinhao video file was not accepted by any upload input", lastException);
+        }
+        throw new RuntimeException("Shipinhao video file was not accepted by page");
+    }
+
+    private boolean waitForVideoFileAccepted(Page page, String taskId, Duration timeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
         int checks = 0;
         while (System.currentTimeMillis() < deadline) {
             checks += 1;
@@ -336,14 +364,14 @@ public class ShipinhaoUploadService {
                 if (state.fileSelected() || state.mediaVisible()) {
                     log.info("Shipinhao upload video file accepted taskId={} checks={} fileSelected={} mediaVisible={}",
                             taskId, checks, state.fileSelected(), state.mediaVisible());
-                    return;
+                    return true;
                 }
             } catch (Exception ignored) {
             }
             page.waitForTimeout(1000);
         }
-        dumpDiagnostics(page, taskId, "video-file-not-accepted");
-        log.warn("Shipinhao upload selected video was not detected by early DOM check taskId={}, continue to metadata/upload readiness checks", taskId);
+        log.warn("Shipinhao upload selected video was not detected taskId={} checks={}", taskId, checks);
+        return false;
     }
 
     private UploadReadiness uploadReadiness(Page page) {
