@@ -35,7 +35,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(u.upload_title, ''), NULLIF(ut.upload_title, ''), NULLIF(t.title, '')) title,
+              COALESCE(NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
               t.source_url,
               vi.source_webpage_url,
               vi.source_thumbnail_url,
@@ -120,7 +120,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
               ) uploader_total_count,
-              ue.child_error_message uploader_child_error,
               u.bilibili_upload_status,
               u.douyin_upload_status,
               u.xiaohongshu_upload_status,
@@ -139,23 +138,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN yd_combiner m ON m.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
             LEFT JOIN yd_video_info vi ON vi.task_id = t.id
-            LEFT JOIN (
-              SELECT task_id, MIN(title) upload_title
-              FROM (
-                SELECT task_id, title FROM uploader_task_bilibili WHERE title IS NOT NULL AND title <> ''
-                UNION ALL
-                SELECT task_id, title FROM uploader_task_douyin WHERE title IS NOT NULL AND title <> ''
-                UNION ALL
-                SELECT task_id, title FROM uploader_task_xiaohongshu WHERE title IS NOT NULL AND title <> ''
-                UNION ALL
-                SELECT task_id, title FROM uploader_task_shipinhao WHERE title IS NOT NULL AND title <> ''
-                UNION ALL
-                SELECT task_id, title FROM uploader_task_kuaishou WHERE title IS NOT NULL AND title <> ''
-                UNION ALL
-                SELECT task_id, title FROM uploader_task_jinritoutiao WHERE title IS NOT NULL AND title <> ''
-              ) upload_titles
-              GROUP BY task_id
-            ) ut ON ut.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
               FROM yd_asr_segment
@@ -223,33 +205,10 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               WHERE status = 'failed'
               GROUP BY task_id
             ) se ON se.task_id = t.id
-            LEFT JOIN (
-              SELECT
-                task_id,
-                GROUP_CONCAT(
-                  CONCAT(platform, '/', account_key, ': ', COALESCE(NULLIF(error_message, ''), status))
-                  ORDER BY platform, account_key
-                  SEPARATOR 0x0A
-                ) child_error_message
-              FROM (
-                SELECT task_id, account_key, status, error_message, 'bilibili' platform FROM uploader_task_bilibili
-                UNION ALL
-                SELECT task_id, account_key, status, error_message, 'douyin' platform FROM uploader_task_douyin
-                UNION ALL
-                SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_task_xiaohongshu
-                UNION ALL
-                SELECT task_id, account_key, status, error_message, 'shipinhao' platform FROM uploader_task_shipinhao
-                UNION ALL
-                SELECT task_id, account_key, status, error_message, 'kuaishou' platform FROM uploader_task_kuaishou
-                UNION ALL
-                SELECT task_id, account_key, status, error_message, 'jinritoutiao' platform FROM uploader_task_jinritoutiao
-              ) upload_task
-              WHERE status = 'failed'
-              GROUP BY task_id
-            ) ue ON ue.task_id = t.id
             ORDER BY t.created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """;
+    private static final String MONITOR_COUNT_SQL = "SELECT COUNT(*) FROM yd_task";
     private static final String HEARTBEAT_TABLE = "yd_service_heartbeat";
     private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
             SELECT COUNT(*)
@@ -272,8 +231,14 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit) {
-        return repository.query(MONITOR_SQL, new TaskRowMapper(now), limit);
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset) {
+        return repository.query(MONITOR_SQL, new TaskRowMapper(now), limit, offset);
+    }
+
+    @Override
+    public long countTaskMonitorItems() {
+        Long count = repository.queryForObject(MONITOR_COUNT_SQL, Long.class);
+        return count == null ? 0 : count;
     }
 
     @Override
@@ -492,7 +457,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         }
 
         private static String childErrorMessage(ResultSet rs, String stageKey) throws SQLException {
-            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey) && !"uploader".equals(stageKey)) {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey)) {
                 return null;
             }
             return rs.getString(stageKey + "_child_error");

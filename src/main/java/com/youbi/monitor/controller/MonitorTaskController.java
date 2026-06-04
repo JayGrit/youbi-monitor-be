@@ -28,9 +28,13 @@ public class MonitorTaskController {
     }
 
     @GetMapping("/api/video-tasks/monitor")
-    public MonitorResponse monitor(@RequestParam(defaultValue = "0") int limit) {
-        int boundedLimit = limit <= 0 ? Integer.MAX_VALUE : Math.max(1, limit);
-        return monitorService.listTasks(boundedLimit);
+    public MonitorResponse monitor(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int limit
+    ) {
+        int boundedPage = Math.max(1, page);
+        int boundedLimit = Math.min(100, Math.max(1, limit));
+        return monitorService.listTasks(boundedPage, boundedLimit);
     }
 
     @GetMapping("/api/video-tasks/{taskId}/flow")

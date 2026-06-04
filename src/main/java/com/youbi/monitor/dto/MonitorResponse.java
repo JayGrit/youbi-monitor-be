@@ -7,6 +7,9 @@ import java.util.List;
 public record MonitorResponse(
         List<TaskMonitorItem> tasks,
         List<ServiceHeartbeat> serviceHeartbeats,
-        LocalDateTime serverTime
+        LocalDateTime serverTime,
+        int page,
+        int pageSize,
+        long totalCount
 ) {
 }
