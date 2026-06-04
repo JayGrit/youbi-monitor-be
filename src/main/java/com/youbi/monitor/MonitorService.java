@@ -649,7 +649,8 @@ public class MonitorService {
                   target.id target_submission_id,
                   target.status target_status,
                   platform_account.account_key IS NOT NULL account_exists,
-                  COALESCE(account.is_enabled, 0) account_enabled
+                  COALESCE(account.is_enabled, 0) account_enabled,
+                  COALESCE(account.is_available, 0) account_available
                 FROM yd_task task
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
                 JOIN yd_uploader uploader ON uploader.task_id = task.id
@@ -669,13 +670,15 @@ public class MonitorService {
                   target.id,
                   target.status,
                   account_exists,
-                  account_enabled
+                  account_enabled,
+                  account_available
                 ORDER BY completed_at DESC
                 LIMIT 500
                 """.formatted(finalVideoRefSql(), successfulUploadUnion(normalized), quotedIdentifier(table), quotedIdentifier(accountTable), UNIFIED_UPLOADER_ACCOUNT_TABLE),
                 (rs, rowNum) -> {
                     boolean accountExists = rs.getBoolean("account_exists");
                     boolean accountEnabled = rs.getBoolean("account_enabled");
+                    boolean accountAvailable = rs.getBoolean("account_available");
                     String finalVideoRef = rs.getString("final_video_ref");
                     long targetSubmissionId = rs.getLong("target_submission_id");
                     boolean hasTargetSubmission = !rs.wasNull();
@@ -684,6 +687,8 @@ public class MonitorService {
                         blockedReason = "目标账号不存在";
                     } else if (!accountEnabled) {
                         blockedReason = "目标账号已禁用";
+                    } else if (!accountAvailable) {
+                        blockedReason = "目标账号登录态不可用";
                     } else if (text(finalVideoRef).isBlank()) {
                         blockedReason = "缺少 final_video_url";
                     } else if (hasTargetSubmission) {
@@ -756,7 +761,7 @@ public class MonitorService {
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
                 JOIN yd_uploader uploader ON uploader.task_id = task.id
                 JOIN %s platform_account ON platform_account.account_key = ?
-                JOIN %s account ON account.platform = ? AND account.account_key = platform_account.account_key AND account.is_enabled = 1
+                JOIN %s account ON account.platform = ? AND account.account_key = platform_account.account_key AND account.is_enabled = 1 AND account.is_available = 1
                 JOIN (
                   %s
                 ) sent ON sent.task_id = task.id

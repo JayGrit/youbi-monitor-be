@@ -123,6 +123,17 @@ public class UploaderAccountService {
         return state(platform, accountKey).orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
     }
 
+    public UploaderAccountState updateAvailable(String platform, String accountKey, boolean available) {
+        ensureAccount(platform, accountKey);
+        jdbcTemplate.update(
+                "UPDATE uploader_account SET is_available = ?, updated_at = NOW() WHERE platform = ? AND account_key = ?",
+                available,
+                normalize(platform),
+                normalize(accountKey)
+        );
+        return state(platform, accountKey).orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
+    }
+
     public UploaderAccountState updateCooldown(String platform, String accountKey, Integer minSeconds, Integer maxSeconds) {
         ensureAccount(platform, accountKey);
         int min = minSeconds == null ? 3600 : minSeconds;

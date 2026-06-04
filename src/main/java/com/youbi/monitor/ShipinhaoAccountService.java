@@ -187,9 +187,9 @@ public class ShipinhaoAccountService {
         AccountProfile profile = profileFromStorageState(storageState);
         jdbcTemplate.update(
                 """
-                INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, updated_at)
-                VALUES (?, ?, ?, ?, NOW())
-                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
+                INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, is_available, updated_at)
+                VALUES (?, ?, ?, ?, 1, NOW())
+                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), is_available = 1, updated_at = NOW()
                 """,
                 normalized,
                 firstText(profile.userId(), loadProfile(normalized).userId()),
@@ -197,6 +197,16 @@ public class ShipinhaoAccountService {
                 storageState
         );
         syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
+        uploaderAccountService.updateAvailable("shipinhao", normalized, true);
+    }
+
+    void markUnavailable(String accountKey) {
+        String normalized = normalizeAccountKey(accountKey);
+        jdbcTemplate.update(
+                "UPDATE " + TABLE + " SET is_available = 0, updated_at = NOW() WHERE account_key = ?",
+                normalized
+        );
+        uploaderAccountService.updateAvailable("shipinhao", normalized, false);
     }
 
     private boolean isStorageStateValid(String storageState) {
@@ -356,6 +366,7 @@ public class ShipinhaoAccountService {
         AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, TABLE);
         ensureColumn("display_name", "VARCHAR(128) NULL");
         ensureColumn("avatar_url", "VARCHAR(1024) NULL");
+        ensureColumn("is_available", "TINYINT(1) NOT NULL DEFAULT 1");
     }
 
     private void ensureColumn(String column, String definition) {

@@ -83,7 +83,7 @@ public class ShipinhaoUploadService {
                 BrowserContext context = accountService.newContext(browser, storageState);
                 try {
                     Page page = context.newPage();
-                    uploadVideoContent(page, request, videoPath, taskId);
+                    uploadVideoContent(page, request, videoPath, taskId, accountKey);
                     accountService.saveStorageState(accountKey, context.storageState());
                 } finally {
                     context.close();
@@ -108,8 +108,8 @@ public class ShipinhaoUploadService {
         }
     }
 
-    private void uploadVideoContent(Page page, ShipinhaoUploadRequest request, Path videoPath, String taskId) {
-        openCreateFromHome(page, taskId);
+    private void uploadVideoContent(Page page, ShipinhaoUploadRequest request, Path videoPath, String taskId, String accountKey) {
+        openCreateFromHome(page, taskId, accountKey);
         dumpDiagnostics(page, taskId, "create-page-ready");
 
         Locator fileInput = page.locator("input[type='file'][accept*='video']").first();
@@ -134,15 +134,27 @@ public class ShipinhaoUploadService {
         dumpDiagnostics(page, taskId, "submit-result");
     }
 
-    private void openCreateFromHome(Page page, String taskId) {
+    private void openCreateFromHome(Page page, String taskId, String accountKey) {
         page.navigate(ShipinhaoAccountService.HOME_URL);
         page.waitForTimeout(5000);
         dumpDiagnostics(page, taskId, "home");
+        if (isLoginPage(page)) {
+            accountService.markUnavailable(accountKey);
+            throw new IllegalStateException("Shipinhao account login state expired: " + accountKey);
+        }
         String clicked = clickVisibleText(page, "发表视频");
         log.info("Shipinhao upload home publish click taskId={} method={}", taskId, clicked);
         if ("not-clicked".equals(clicked)) {
             Locator button = page.locator("button.weui-desktop-btn_primary").filter(new Locator.FilterOptions().setHasText("发表视频")).first();
-            button.waitFor(new Locator.WaitForOptions().setTimeout(10000));
+            try {
+                button.waitFor(new Locator.WaitForOptions().setTimeout(10000));
+            } catch (TimeoutError exception) {
+                if (isLoginPage(page)) {
+                    accountService.markUnavailable(accountKey);
+                    throw new IllegalStateException("Shipinhao account login state expired: " + accountKey, exception);
+                }
+                throw exception;
+            }
             button.click();
         }
         try {
@@ -155,6 +167,20 @@ public class ShipinhaoUploadService {
             page.waitForURL("**/post/create**", new Page.WaitForURLOptions().setTimeout(30000));
         }
         page.waitForTimeout(3000);
+    }
+
+    private boolean isLoginPage(Page page) {
+        String url = TextSupport.text(page.url());
+        String body = PlaywrightDiagnostics.safeBodyText(page);
+        boolean hasLoginFrame = false;
+        try {
+            hasLoginFrame = page.locator("iframe[src*='login-for-iframe']").count() > 0;
+        } catch (Exception ignored) {
+        }
+        return url.contains("/login.html")
+                || url.contains("/platform/login")
+                || hasLoginFrame
+                || TextSupport.containsAny(body, "扫码登录", "微信扫码登录", "login-for-iframe");
     }
 
     private void fillDescription(Page page, ShipinhaoUploadRequest request, String taskId) {
