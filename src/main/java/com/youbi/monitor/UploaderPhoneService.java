@@ -36,6 +36,7 @@ public class UploaderPhoneService {
         PlatformTable platformTable = platformTable(platform);
         Long accountId = request == null ? null : request.accountId();
         String note = request == null ? "" : TextSupport.text(request.note());
+        boolean disabled = request != null && Boolean.TRUE.equals(request.disabled());
         if (accountId != null && accountId <= 0) {
             accountId = null;
         }
@@ -50,7 +51,7 @@ public class UploaderPhoneService {
                 note.isBlank() ? null : note,
                 phoneId
         );
-        if (accountId == null) {
+        if (accountId == null && !disabled) {
             jdbcTemplate.update(
                     "DELETE FROM uploader_phone_account WHERE phone_id = ? AND platform = ?",
                     phoneId,
@@ -59,20 +60,21 @@ public class UploaderPhoneService {
         } else {
             jdbcTemplate.update(
                     """
-                    INSERT INTO uploader_phone_account (phone_id, platform, account_id, updated_at)
-                    VALUES (?, ?, ?, NOW())
-                    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
+                    INSERT INTO uploader_phone_account (phone_id, platform, account_id, disabled, updated_at)
+                    VALUES (?, ?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), disabled = VALUES(disabled), updated_at = NOW()
                     """,
                     phoneId,
                     platformTable.key(),
-                    accountId
+                    accountId,
+                    disabled
             );
         }
         return phone(phoneId);
     }
 
     private List<UploaderPhoneRecord> phones() {
-        Map<Long, Map<String, Long>> accountsByPhone = phoneAccountBindings();
+        Map<Long, Map<String, UploaderPhoneBinding>> bindingsByPhone = phoneAccountBindings();
         return jdbcTemplate.query(
                 """
                 SELECT id, phone
@@ -86,13 +88,14 @@ public class UploaderPhoneService {
                         rs.getString("phone"),
                         rs.getString("remark"),
                         rs.getString("note"),
-                        accountsByPhone.getOrDefault(rs.getLong("id"), Map.of())
+                        accountsOnly(bindingsByPhone.getOrDefault(rs.getLong("id"), Map.of())),
+                        bindingsByPhone.getOrDefault(rs.getLong("id"), Map.of())
                 )
         );
     }
 
     private UploaderPhoneRecord phone(long phoneId) throws IOException {
-        Map<Long, Map<String, Long>> accountsByPhone = phoneAccountBindings();
+        Map<Long, Map<String, UploaderPhoneBinding>> bindingsByPhone = phoneAccountBindings();
         List<UploaderPhoneRecord> rows = jdbcTemplate.query(
                 """
                 SELECT id, phone
@@ -107,26 +110,40 @@ public class UploaderPhoneService {
                         rs.getString("phone"),
                         rs.getString("remark"),
                         rs.getString("note"),
-                        accountsByPhone.getOrDefault(rs.getLong("id"), Map.of())
+                        accountsOnly(bindingsByPhone.getOrDefault(rs.getLong("id"), Map.of())),
+                        bindingsByPhone.getOrDefault(rs.getLong("id"), Map.of())
                 ),
                 phoneId
         );
         return rows.stream().findFirst().orElseThrow(() -> new IOException("Uploader phone not found: " + phoneId));
     }
 
-    private Map<Long, Map<String, Long>> phoneAccountBindings() {
-        Map<Long, Map<String, Long>> result = new HashMap<>();
+    private Map<Long, Map<String, UploaderPhoneBinding>> phoneAccountBindings() {
+        Map<Long, Map<String, UploaderPhoneBinding>> result = new HashMap<>();
         jdbcTemplate.query(
                 """
-                SELECT phone_id, platform, account_id
+                SELECT phone_id, platform, account_id, disabled
                 FROM uploader_phone_account
                 ORDER BY phone_id, platform
                 """,
                 rs -> {
                     result.computeIfAbsent(rs.getLong("phone_id"), ignored -> new HashMap<>())
-                            .put(rs.getString("platform"), rs.getLong("account_id"));
+                            .put(rs.getString("platform"), new UploaderPhoneBinding(
+                                    rs.getObject("account_id", Long.class),
+                                    rs.getBoolean("disabled")
+                            ));
                 }
         );
+        return result;
+    }
+
+    private Map<String, Long> accountsOnly(Map<String, UploaderPhoneBinding> bindings) {
+        Map<String, Long> result = new HashMap<>();
+        bindings.forEach((platform, binding) -> {
+            if (binding.accountId() != null) {
+                result.put(platform, binding.accountId());
+            }
+        });
         return result;
     }
 
@@ -212,7 +229,8 @@ public class UploaderPhoneService {
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     phone_id BIGINT NOT NULL,
                     platform VARCHAR(32) NOT NULL,
-                    account_id BIGINT NOT NULL,
+                    account_id BIGINT NULL,
+                    disabled TINYINT(1) NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                     UNIQUE KEY uniq_uploader_phone_account_phone_platform (phone_id, platform),
@@ -221,6 +239,8 @@ public class UploaderPhoneService {
                 )
                 """
         );
+        ensureUploaderPhoneAccountColumn("disabled", "TINYINT(1) NOT NULL DEFAULT 0");
+        jdbcTemplate.execute("ALTER TABLE " + ACCOUNT_TABLE + " MODIFY COLUMN account_id BIGINT NULL");
         migrateLegacyAccountColumns();
         dropLegacyPhoneColumns();
         seedPhone("15548242598", "主号");
@@ -267,6 +287,12 @@ public class UploaderPhoneService {
     private void ensureUploaderPhoneColumn(String column, String definition) {
         if (!columnExists(TABLE, column)) {
             jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
+        }
+    }
+
+    private void ensureUploaderPhoneAccountColumn(String column, String definition) {
+        if (!columnExists(ACCOUNT_TABLE, column)) {
+            jdbcTemplate.execute("ALTER TABLE " + ACCOUNT_TABLE + " ADD COLUMN " + column + " " + definition);
         }
     }
 
@@ -347,7 +373,14 @@ record UploaderPhoneRecord(
         String phone,
         String remark,
         String note,
-        Map<String, Long> accounts
+        Map<String, Long> accounts,
+        Map<String, UploaderPhoneBinding> bindings
+) {
+}
+
+record UploaderPhoneBinding(
+        Long accountId,
+        Boolean disabled
 ) {
 }
 
@@ -368,6 +401,7 @@ record UploaderPhoneAccountOption(
 
 record UploaderPhoneAccountUpdateRequest(
         Long accountId,
-        String note
+        String note,
+        Boolean disabled
 ) {
 }
