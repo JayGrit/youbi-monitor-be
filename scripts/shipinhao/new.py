@@ -199,7 +199,7 @@ def ensure_surrogate_primary_key(cursor, table: str) -> None:
         """,
         (table,),
     )
-    if cursor.fetchone()[0] == 0:
+    if first_column(cursor.fetchone()) == 0:
         cursor.execute(f"ALTER TABLE {table} ADD COLUMN id BIGINT NOT NULL AUTO_INCREMENT UNIQUE FIRST")
     cursor.execute(
         """
@@ -210,7 +210,7 @@ def ensure_surrogate_primary_key(cursor, table: str) -> None:
         """,
         (table,),
     )
-    primary_columns = [row[0] for row in cursor.fetchall()]
+    primary_columns = [first_column(row) for row in cursor.fetchall()]
     cursor.execute(
         """
         SELECT INDEX_NAME
@@ -231,6 +231,12 @@ def ensure_surrogate_primary_key(cursor, table: str) -> None:
         cursor.execute(f"ALTER TABLE {table} DROP PRIMARY KEY, ADD PRIMARY KEY (id){unique_clause}")
     else:
         cursor.execute(f"ALTER TABLE {table} ADD PRIMARY KEY (id){unique_clause}")
+
+
+def first_column(row: Any) -> Any:
+    if isinstance(row, dict):
+        return next(iter(row.values()))
+    return row[0]
 
 
 def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_id: str | None, nickname: str | None) -> None:
