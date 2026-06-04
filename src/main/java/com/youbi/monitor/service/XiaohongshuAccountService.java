@@ -13,7 +13,7 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.TimeoutError;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -39,7 +39,7 @@ public class XiaohongshuAccountService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
@@ -47,7 +47,7 @@ public class XiaohongshuAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public XiaohongshuAccountService(
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,

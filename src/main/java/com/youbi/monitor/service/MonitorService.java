@@ -22,8 +22,8 @@ import io.minio.RemoveObjectArgs;
 import io.minio.Result;
 import io.minio.messages.Item;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
+import com.youbi.monitor.repository.DatabaseClient;
+import com.youbi.monitor.repository.RowMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -341,13 +341,13 @@ public class MonitorService {
             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
             """;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
 
     public MonitorService(
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,

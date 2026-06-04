@@ -11,7 +11,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -36,7 +36,7 @@ public class BilibiliPlaywrightAccountService {
 
     private static final String TABLE = "uploader_account_bilibili";
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final UploaderAccountService uploaderAccountService;
@@ -46,7 +46,7 @@ public class BilibiliPlaywrightAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public BilibiliPlaywrightAccountService(
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             UploaderAccountService uploaderAccountService,

@@ -9,7 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -40,13 +40,13 @@ public class BilibiliAccountService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final UploaderAccountService uploaderAccountService;
 
-    public BilibiliAccountService(JdbcTemplate jdbcTemplate, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
+    public BilibiliAccountService(DatabaseClient jdbcTemplate, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
         this.jdbcTemplate = jdbcTemplate;
         this.sendAvailabilityService = sendAvailabilityService;
         this.uploaderAccountService = uploaderAccountService;

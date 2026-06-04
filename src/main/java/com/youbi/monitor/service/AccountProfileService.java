@@ -5,7 +5,7 @@ import com.youbi.monitor.dto.AccountProfileUpdateResult;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,13 +27,13 @@ public class AccountProfileService {
             "jinritoutiao", "uploader_account_jinritoutiao"
     );
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
 
     public AccountProfileService(
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,

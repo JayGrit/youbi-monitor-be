@@ -1,7 +1,7 @@
 package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.UploaderAccountState;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.sql.Timestamp;
@@ -22,9 +22,9 @@ public class UploaderAccountService {
             "jinritoutiao", "uploader_task_jinritoutiao"
     );
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
 
-    public UploaderAccountService(JdbcTemplate jdbcTemplate) {
+    public UploaderAccountService(DatabaseClient jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         ensureSchema();
     }

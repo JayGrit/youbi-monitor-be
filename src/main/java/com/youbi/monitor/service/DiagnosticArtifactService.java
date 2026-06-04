@@ -1,24 +1,20 @@
 package com.youbi.monitor.service;
 
-import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.microsoft.playwright.Page;
+import com.youbi.monitor.model.DiagnosticArtifactRecord;
+import com.youbi.monitor.repository.DatabaseClient;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
-import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -30,13 +26,13 @@ public class DiagnosticArtifactService {
     private static final String TABLE = "uploader_diagonostic";
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final MinioClient minioClient;
     private final String minioBucket;
     private final String minioEndpoint;
 
     public DiagnosticArtifactService(
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -146,32 +142,27 @@ public class DiagnosticArtifactService {
     private Long insert(String taskId, String runId, String platform, String source, String accountKey, int stepIndex, String stepName,
                         String screenshotUrl, String htmlUrl, Long screenshotSizeBytes, Long htmlSizeBytes,
                         Integer screenshotWidth, Integer screenshotHeight) {
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement("""
-                    INSERT INTO uploader_diagonostic
-                    (task_id, run_id, platform, source, account_key, step_index, step_name,
-                     screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
-                     screenshot_width, screenshot_height, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded')
-                    """, Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, taskId);
-            ps.setString(2, runId);
-            ps.setString(3, platform);
-            ps.setString(4, source);
-            ps.setString(5, emptyToNull(accountKey));
-            ps.setInt(6, stepIndex);
-            ps.setString(7, stepName);
-            ps.setString(8, screenshotUrl);
-            ps.setString(9, htmlUrl);
-            ps.setObject(10, screenshotSizeBytes);
-            ps.setObject(11, htmlSizeBytes);
-            ps.setObject(12, screenshotWidth);
-            ps.setObject(13, screenshotHeight);
-            return ps;
-        }, keyHolder);
-        Number key = keyHolder.getKey();
-        return key == null ? null : key.longValue();
+        return jdbcTemplate.insertAndReturnKey("""
+                INSERT INTO uploader_diagonostic
+                (task_id, run_id, platform, source, account_key, step_index, step_name,
+                 screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
+                 screenshot_width, screenshot_height, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded')
+                """,
+                taskId,
+                runId,
+                platform,
+                source,
+                emptyToNull(accountKey),
+                stepIndex,
+                stepName,
+                screenshotUrl,
+                htmlUrl,
+                screenshotSizeBytes,
+                htmlSizeBytes,
+                screenshotWidth,
+                screenshotHeight
+        );
     }
 
     private DiagnosticArtifactRecord mapRecord(java.sql.ResultSet rs) throws java.sql.SQLException {

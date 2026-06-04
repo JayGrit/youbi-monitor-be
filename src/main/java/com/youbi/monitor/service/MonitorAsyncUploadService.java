@@ -14,7 +14,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.EmptyResultDataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -40,7 +40,7 @@ public class MonitorAsyncUploadService {
     private final ShipinhaoUploadService shipinhaoUploadService;
     private final KuaishouUploadService kuaishouUploadService;
     private final JinritoutiaoUploadService jinritoutiaoUploadService;
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "monitor-upload-task");
@@ -56,7 +56,7 @@ public class MonitorAsyncUploadService {
             ShipinhaoUploadService shipinhaoUploadService,
             KuaishouUploadService kuaishouUploadService,
             JinritoutiaoUploadService jinritoutiaoUploadService,
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             ObjectMapper objectMapper
     ) {
         this.bilibiliUploadService = bilibiliUploadService;

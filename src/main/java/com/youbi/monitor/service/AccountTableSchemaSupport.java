@@ -1,6 +1,6 @@
 package com.youbi.monitor.service;
 
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 
 import java.util.List;
 
@@ -8,7 +8,7 @@ final class AccountTableSchemaSupport {
     private AccountTableSchemaSupport() {
     }
 
-    static void ensureSurrogatePrimaryKey(JdbcTemplate jdbcTemplate, String table) {
+    static void ensureSurrogatePrimaryKey(DatabaseClient jdbcTemplate, String table) {
         if (!tableExists(jdbcTemplate, table)) {
             return;
         }
@@ -42,7 +42,7 @@ final class AccountTableSchemaSupport {
         jdbcTemplate.execute("ALTER TABLE " + table + " DROP PRIMARY KEY, ADD PRIMARY KEY (id)" + uniqueClause);
     }
 
-    private static boolean tableExists(JdbcTemplate jdbcTemplate, String table) {
+    private static boolean tableExists(DatabaseClient jdbcTemplate, String table) {
         Integer count = jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -56,7 +56,7 @@ final class AccountTableSchemaSupport {
         return count != null && count > 0;
     }
 
-    private static void ensureIdColumn(JdbcTemplate jdbcTemplate, String table) {
+    private static void ensureIdColumn(DatabaseClient jdbcTemplate, String table) {
         Integer count = jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -73,7 +73,7 @@ final class AccountTableSchemaSupport {
         }
     }
 
-    private static String uniqueAccountKeyIndex(JdbcTemplate jdbcTemplate, String table) {
+    private static String uniqueAccountKeyIndex(DatabaseClient jdbcTemplate, String table) {
         List<String> indexes = jdbcTemplate.query(
                 """
                 SELECT INDEX_NAME

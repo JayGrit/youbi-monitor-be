@@ -15,7 +15,7 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.math.ec.FixedPointCombMultiplier;
 import org.bouncycastle.util.encoders.Hex;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -52,7 +52,7 @@ public class AliDriveService {
     private static final String LEGACY_ACCOUNT_TABLE = "yd_alidrive_account";
 
     private final ObjectMapper objectMapper;
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
     private final HttpClient httpClient;
     private final String accountKey;
     private final Path workDir;
@@ -72,7 +72,7 @@ public class AliDriveService {
 
     public AliDriveService(
             ObjectMapper objectMapper,
-            JdbcTemplate jdbcTemplate,
+            DatabaseClient jdbcTemplate,
             @Value("${youbi.alidrive.account-key}") String accountKey,
             @Value("${youbi.alidrive.refresh-token}") String refreshToken,
             @Value("${youbi.alidrive.work-dir}") String workDir

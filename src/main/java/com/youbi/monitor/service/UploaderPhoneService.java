@@ -1,7 +1,7 @@
 package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.UploaderPhoneAccountUpdateRequest;
-import org.springframework.jdbc.core.JdbcTemplate;
+import com.youbi.monitor.repository.DatabaseClient;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -22,9 +22,9 @@ public class UploaderPhoneService {
             new PlatformTable("jinritoutiao", "uploader_account_jinritoutiao", "jinritoutiao_account_id")
     );
 
-    private final JdbcTemplate jdbcTemplate;
+    private final DatabaseClient jdbcTemplate;
 
-    public UploaderPhoneService(JdbcTemplate jdbcTemplate) {
+    public UploaderPhoneService(DatabaseClient jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
         ensureSchema();
     }
