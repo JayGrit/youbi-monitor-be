@@ -2,7 +2,7 @@ package com.youbi.monitor.service;
 
 import com.microsoft.playwright.Page;
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
-import com.youbi.monitor.repository.DiagnosticArtifactRepository;
+import com.youbi.monitor.repository.IDiagnosticArtifactRepositoryService;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import jakarta.annotation.PostConstruct;
@@ -16,7 +16,6 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 
@@ -26,19 +25,19 @@ public class DiagnosticArtifactService {
     private static final String TABLE = "uploader_diagonostic";
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
 
-    private final DiagnosticArtifactRepository repository;
+    private final IDiagnosticArtifactRepositoryService repositoryService;
     private final MinioClient minioClient;
     private final String minioBucket;
     private final String minioEndpoint;
 
     public DiagnosticArtifactService(
-            DiagnosticArtifactRepository repository,
+            IDiagnosticArtifactRepositoryService repositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.minioEndpoint = trimTrailingSlash(TextSupport.text(minioEndpoint));
         this.minioBucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
         this.minioClient = MinioClient.builder()
@@ -49,31 +48,7 @@ public class DiagnosticArtifactService {
 
     @PostConstruct
     void ensureSchema() {
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS uploader_diagonostic (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    task_id VARCHAR(128) NOT NULL,
-                    run_id VARCHAR(128) NOT NULL,
-                    platform VARCHAR(32) NOT NULL,
-                    source VARCHAR(64) NOT NULL,
-                    account_key VARCHAR(128) NULL,
-                    step_index INT NOT NULL,
-                    step_name VARCHAR(128) NOT NULL,
-                    screenshot_url TEXT NOT NULL,
-                    html_url TEXT NULL,
-                    screenshot_size_bytes BIGINT NULL,
-                    html_size_bytes BIGINT NULL,
-                    screenshot_width INT NULL,
-                    screenshot_height INT NULL,
-                    status VARCHAR(32) NOT NULL DEFAULT 'uploaded',
-                    error_message TEXT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    KEY idx_uploader_diag_task_order (task_id, run_id, step_index, id),
-                    KEY idx_uploader_diag_platform_time (platform, created_at),
-                    KEY idx_uploader_diag_source_time (source, created_at)
-                )
-                """);
+        repositoryService.ensureSchema();
     }
 
     DiagnosticArtifactRecord archive(DiagnosticArtifactRequest request) {
@@ -120,35 +95,15 @@ public class DiagnosticArtifactService {
             throw new IllegalArgumentException("Missing taskId");
         }
         if (normalizedRunId.isBlank()) {
-            return repository.query("""
-                    SELECT id, task_id, run_id, platform, source, account_key, step_index, step_name,
-                           screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
-                           screenshot_width, screenshot_height, status, error_message, created_at
-                    FROM uploader_diagonostic
-                    WHERE task_id = ?
-                    ORDER BY created_at DESC, run_id DESC, step_index ASC, id ASC
-                    """, (rs, rowNum) -> mapRecord(rs), normalizedTaskId);
+            return repositoryService.listByTaskId(normalizedTaskId);
         }
-        return repository.query("""
-                SELECT id, task_id, run_id, platform, source, account_key, step_index, step_name,
-                       screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
-                       screenshot_width, screenshot_height, status, error_message, created_at
-                FROM uploader_diagonostic
-                WHERE task_id = ? AND run_id = ?
-                ORDER BY step_index ASC, id ASC
-                """, (rs, rowNum) -> mapRecord(rs), normalizedTaskId, normalizedRunId);
+        return repositoryService.listByTaskIdAndRunId(normalizedTaskId, normalizedRunId);
     }
 
     private Long insert(String taskId, String runId, String platform, String source, String accountKey, int stepIndex, String stepName,
                         String screenshotUrl, String htmlUrl, Long screenshotSizeBytes, Long htmlSizeBytes,
                         Integer screenshotWidth, Integer screenshotHeight) {
-        return repository.insertAndReturnKey("""
-                INSERT INTO uploader_diagonostic
-                (task_id, run_id, platform, source, account_key, step_index, step_name,
-                 screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
-                 screenshot_width, screenshot_height, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded')
-                """,
+        return repositoryService.insertUploadedArtifact(
                 taskId,
                 runId,
                 platform,
@@ -162,28 +117,6 @@ public class DiagnosticArtifactService {
                 htmlSizeBytes,
                 screenshotWidth,
                 screenshotHeight
-        );
-    }
-
-    private DiagnosticArtifactRecord mapRecord(java.sql.ResultSet rs) throws java.sql.SQLException {
-        return new DiagnosticArtifactRecord(
-                rs.getLong("id"),
-                rs.getString("task_id"),
-                rs.getString("run_id"),
-                rs.getString("platform"),
-                rs.getString("source"),
-                rs.getString("account_key"),
-                rs.getInt("step_index"),
-                rs.getString("step_name"),
-                rs.getString("screenshot_url"),
-                rs.getString("html_url"),
-                nullableLong(rs, "screenshot_size_bytes"),
-                nullableLong(rs, "html_size_bytes"),
-                nullableInt(rs, "screenshot_width"),
-                nullableInt(rs, "screenshot_height"),
-                rs.getString("status"),
-                rs.getString("error_message"),
-                rs.getObject("created_at", LocalDateTime.class)
         );
     }
 
@@ -227,16 +160,6 @@ public class DiagnosticArtifactService {
         } catch (Exception exception) {
             return new ImageSize(null, null);
         }
-    }
-
-    private Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        long value = rs.getLong(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
     }
 
     private String emptyToNull(String value) {

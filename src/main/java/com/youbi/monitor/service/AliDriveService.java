@@ -6,6 +6,7 @@ import com.youbi.monitor.dto.AliDriveUploadRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.youbi.monitor.repository.IAliDriveRepositoryService;
 import org.bouncycastle.asn1.x9.X9ECParameters;
 import org.bouncycastle.crypto.digests.SHA1Digest;
 import org.bouncycastle.crypto.params.ECDomainParameters;
@@ -15,7 +16,6 @@ import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.math.ec.FixedPointCombMultiplier;
 import org.bouncycastle.util.encoders.Hex;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.AliDriveRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -48,11 +48,8 @@ public class AliDriveService {
     private static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
     private static final String APP_ID = "5dde4e1bdf9e4966b387ba58f4b3fdc3";
     private static final int CHUNK_SIZE = 10 * 1024 * 1024;
-    private static final String ACCOUNT_TABLE = "uploader_account_alidrive";
-    private static final String LEGACY_ACCOUNT_TABLE = "yd_alidrive_account";
-
     private final ObjectMapper objectMapper;
-    private final AliDriveRepository repository;
+    private final IAliDriveRepositoryService repositoryService;
     private final HttpClient httpClient;
     private final String accountKey;
     private final Path workDir;
@@ -72,7 +69,7 @@ public class AliDriveService {
 
     public AliDriveService(
             ObjectMapper objectMapper,
-            AliDriveRepository repository,
+            IAliDriveRepositoryService repositoryService,
             @Value("${youbi.alidrive.account-key}") String accountKey,
             @Value("${youbi.alidrive.refresh-token}") String refreshToken,
             @Value("${youbi.alidrive.work-dir}") String workDir
@@ -81,7 +78,7 @@ public class AliDriveService {
             Security.addProvider(new BouncyCastleProvider());
         }
         this.objectMapper = objectMapper;
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.NORMAL)
@@ -513,59 +510,15 @@ public class AliDriveService {
         if (text(refreshToken).isBlank()) {
             return;
         }
-        repository.update("""
-                INSERT INTO uploader_account_alidrive (
-                    account_key, refresh_token, user_id, user_name, nick_name, default_drive_id
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE
-                    refresh_token = VALUES(refresh_token),
-                    user_id = VALUES(user_id),
-                    user_name = VALUES(user_name),
-                    nick_name = VALUES(nick_name),
-                    default_drive_id = VALUES(default_drive_id),
-                    updated_at = CURRENT_TIMESTAMP
-                """, accountKey, refreshToken, userId, userName, nickName, defaultDriveId);
+        repositoryService.persistAccountToken(accountKey, refreshToken, userId, userName, nickName, defaultDriveId);
     }
 
     private String loadRefreshTokenFromDb() {
-        List<String> tokens = repository.query(
-                "SELECT refresh_token FROM uploader_account_alidrive WHERE account_key = ? LIMIT 1",
-                (rs, rowNum) -> rs.getString("refresh_token"),
-                accountKey
-        );
-        return tokens.isEmpty() ? "" : text(tokens.get(0));
+        return repositoryService.loadRefreshToken(accountKey);
     }
 
     private void ensureSchema() {
-        if (!tableExists(ACCOUNT_TABLE) && tableExists(LEGACY_ACCOUNT_TABLE)) {
-            repository.execute("RENAME TABLE yd_alidrive_account TO uploader_account_alidrive");
-        }
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS uploader_account_alidrive (
-                    account_key VARCHAR(64) NOT NULL PRIMARY KEY,
-                    refresh_token TEXT NOT NULL,
-                    user_id VARCHAR(128) NULL,
-                    user_name VARCHAR(128) NULL,
-                    nick_name VARCHAR(255) NULL,
-                    default_drive_id VARCHAR(128) NULL,
-                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                """);
-    }
-
-    private boolean tableExists(String tableName) {
-        Integer count = repository.queryForObject(
-                """
-                        SELECT COUNT(*)
-                        FROM information_schema.tables
-                        WHERE table_schema = DATABASE()
-                            AND table_name = ?
-                        """,
-                Integer.class,
-                tableName
-        );
-        return count != null && count > 0;
+        repositoryService.ensureAccountSchema();
     }
 
     private static String normalizeRemotePath(String path) {

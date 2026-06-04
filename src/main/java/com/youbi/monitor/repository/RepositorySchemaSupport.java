@@ -1,14 +1,12 @@
-package com.youbi.monitor.service;
-
-import com.youbi.monitor.repository.SqlRepository;
+package com.youbi.monitor.repository;
 
 import java.util.List;
 
-final class AccountTableSchemaSupport {
-    private AccountTableSchemaSupport() {
+public final class RepositorySchemaSupport {
+    private RepositorySchemaSupport() {
     }
 
-    static void ensureSurrogatePrimaryKey(SqlRepository repository, String table) {
+    public static void ensureSurrogatePrimaryKey(SqlRepository repository, String table) {
         if (!tableExists(repository, table)) {
             return;
         }
@@ -40,6 +38,24 @@ final class AccountTableSchemaSupport {
             return;
         }
         repository.execute("ALTER TABLE " + table + " DROP PRIMARY KEY, ADD PRIMARY KEY (id)" + uniqueClause);
+    }
+
+    public static void ensureColumn(SqlRepository repository, String table, String column, String definition) {
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                table,
+                column
+        );
+        if (count == null || count == 0) {
+            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+        }
     }
 
     private static boolean tableExists(SqlRepository repository, String table) {

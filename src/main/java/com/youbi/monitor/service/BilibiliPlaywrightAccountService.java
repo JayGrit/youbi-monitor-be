@@ -11,7 +11,8 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.BilibiliPlaywrightAccountRepository;
+import com.youbi.monitor.model.BilibiliAccountProfile;
+import com.youbi.monitor.repository.IBilibiliPlaywrightAccountRepositoryService;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -36,7 +37,7 @@ public class BilibiliPlaywrightAccountService {
 
     private static final String TABLE = "uploader_account_bilibili";
 
-    private final BilibiliPlaywrightAccountRepository repository;
+    private final IBilibiliPlaywrightAccountRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final UploaderAccountService uploaderAccountService;
@@ -46,14 +47,14 @@ public class BilibiliPlaywrightAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public BilibiliPlaywrightAccountService(
-            BilibiliPlaywrightAccountRepository repository,
+            IBilibiliPlaywrightAccountRepositoryService repositoryService,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             UploaderAccountService uploaderAccountService,
             SocialBrowserFactory browserFactory,
             @Value("${youbi.bilibili.playwright.cdp-url:}") String cdpUrl
     ) {
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.uploaderAccountService = uploaderAccountService;
@@ -97,7 +98,7 @@ public class BilibiliPlaywrightAccountService {
         }
 
         String storageState = session.context().storageState();
-        AccountProfile profile = profileFromCookieState(storageState).orElse(new AccountProfile(null, null));
+        BilibiliAccountProfile profile = profileFromCookieState(storageState).orElse(new BilibiliAccountProfile(null, null));
         boolean loggedIn = profile.mid() != null || hasBilibiliLoginCookie(storageState);
         if (!loggedIn) {
             return new BilibiliPlaywrightLoginPollResult(false, "waiting", "等待手动登录", emptyStatus(session.accountKey(), "等待登录"));
@@ -110,35 +111,18 @@ public class BilibiliPlaywrightAccountService {
     }
 
     public List<BilibiliPlaywrightAccountStatus> accounts() {
-        return repository.query(
-                """
-                SELECT account_key, mid, uname, playwright_mid, playwright_uname, playwright_storage_state_json, playwright_updated_at
-                FROM uploader_account_bilibili
-                ORDER BY account_key
-                """,
-                (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
-                    String storageState = rs.getString("playwright_storage_state_json");
-                    AccountSendAvailability sendAvailability = sendAvailability(accountKey);
-                    return new BilibiliPlaywrightAccountStatus(
-                            "database",
-                            accountKey,
-                            storageState != null && !storageState.isBlank(),
-                            storageState == null ? 0 : storageState.getBytes(StandardCharsets.UTF_8).length,
-                            rs.getTimestamp("playwright_updated_at") == null ? null : rs.getTimestamp("playwright_updated_at").toLocalDateTime(),
-                            rs.getObject("playwright_mid") == null ? (rs.getObject("mid") == null ? null : rs.getLong("mid")) : rs.getLong("playwright_mid"),
-                            blankToNull(rs.getString("playwright_uname")) == null ? rs.getString("uname") : rs.getString("playwright_uname"),
-                            sendAvailability.lastUploadAt(),
-                            sendAvailability.nextUploadAllowedAt(),
-                            sendAvailability.todayUploadCount(),
-                            sendAvailability.cooldownWaitingCount(),
-                            sendAvailability.uploadRunningCount(),
-                            accountEnabled(accountKey),
-                            null,
-                            "已保存",
-                            Map.of()
+        return repositoryService.listAccounts(
+                accountKey -> {
+                    AccountSendAvailability availability = sendAvailability(accountKey);
+                    return new IBilibiliPlaywrightAccountRepositoryService.AccountAvailability(
+                            availability.lastUploadAt(),
+                            availability.nextUploadAllowedAt(),
+                            availability.todayUploadCount(),
+                            availability.cooldownWaitingCount(),
+                            availability.uploadRunningCount()
                     );
-                }
+                },
+                this::accountEnabled
         );
     }
 
@@ -148,7 +132,7 @@ public class BilibiliPlaywrightAccountService {
         if (storageState.isEmpty()) {
             return emptyStatus(normalized, "未登录");
         }
-        AccountProfile profile = loadProfile(normalized);
+        BilibiliAccountProfile profile = loadProfile(normalized);
         boolean valid = isStorageStateValid(storageState.get());
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         return new BilibiliPlaywrightAccountStatus(
@@ -208,36 +192,25 @@ public class BilibiliPlaywrightAccountService {
     }
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
-        saveStorageState(normalizeAccountKey(accountKey), storageState, profileFromCookieState(storageState).orElse(new AccountProfile(null, null)));
+        saveStorageState(normalizeAccountKey(accountKey), storageState, profileFromCookieState(storageState).orElse(new BilibiliAccountProfile(null, null)));
     }
 
-    private void saveStorageState(String accountKey, String storageState, AccountProfile profile) {
-        int updated = repository.update(
-                """
-                UPDATE uploader_account_bilibili
-                SET playwright_mid = ?, playwright_uname = ?, playwright_storage_state_json = ?, playwright_updated_at = NOW()
-                WHERE account_key = ?
-                """,
-                profile.mid(),
-                profile.uname(),
-                storageState,
-                accountKey
-        );
-        if (updated == 0) {
+    private void saveStorageState(String accountKey, String storageState, BilibiliAccountProfile profile) {
+        if (!repositoryService.updateStorageState(accountKey, profile.mid(), profile.uname(), storageState)) {
             throw new IllegalArgumentException("Bilibili account key not found: " + accountKey);
         }
     }
 
     private boolean isStorageStateValid(String storageState) {
         try {
-            Optional<AccountProfile> profile = profileFromCookieState(storageState);
-            return profile.map(AccountProfile::mid).orElse(null) != null || hasBilibiliLoginCookie(storageState);
+            Optional<BilibiliAccountProfile> profile = profileFromCookieState(storageState);
+            return profile.map(BilibiliAccountProfile::mid).orElse(null) != null || hasBilibiliLoginCookie(storageState);
         } catch (Exception ignored) {
             return false;
         }
     }
 
-    private Optional<AccountProfile> profileFromCookieState(String storageState) throws IOException {
+    private Optional<BilibiliAccountProfile> profileFromCookieState(String storageState) throws IOException {
         String cookie = cookieHeader(storageState);
         if (cookie.isBlank()) {
             return Optional.empty();
@@ -261,7 +234,7 @@ public class BilibiliPlaywrightAccountService {
             JsonNode data = root.path("data");
             Long mid = data.path("mid").canConvertToLong() ? data.path("mid").asLong() : null;
             String uname = data.path("name").asText("");
-            return Optional.of(new AccountProfile(mid, blankToNull(uname)));
+            return Optional.of(new BilibiliAccountProfile(mid, blankToNull(uname)));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted checking Bilibili profile", exception);
@@ -336,36 +309,15 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = repository.query(
-                "SELECT playwright_storage_state_json FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getString("playwright_storage_state_json"),
-                accountKey
-        );
-        if (values.isEmpty() || values.get(0) == null || values.get(0).isBlank()) {
-            return Optional.empty();
-        }
-        return Optional.of(values.get(0));
+        return repositoryService.findStorageState(accountKey);
     }
 
-    private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = repository.query(
-                "SELECT mid, uname, playwright_mid, playwright_uname FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new AccountProfile(
-                        rs.getObject("playwright_mid") == null ? (rs.getObject("mid") == null ? null : rs.getLong("mid")) : rs.getLong("playwright_mid"),
-                        blankToNull(rs.getString("playwright_uname")) == null ? rs.getString("uname") : rs.getString("playwright_uname")
-                ),
-                accountKey
-        );
-        return values.stream().findFirst().orElse(new AccountProfile(null, null));
+    private BilibiliAccountProfile loadProfile(String accountKey) {
+        return repositoryService.findProfile(accountKey);
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = repository.query(
-                "SELECT playwright_updated_at FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getTimestamp("playwright_updated_at") == null ? null : rs.getTimestamp("playwright_updated_at").toLocalDateTime(),
-                accountKey
-        );
-        return values.stream().findFirst();
+        return repositoryService.findUpdatedAt(accountKey);
     }
 
     private BilibiliPlaywrightAccountStatus emptyStatus(String accountKey, String message) {
@@ -383,29 +335,7 @@ public class BilibiliPlaywrightAccountService {
     }
 
     private void ensureSchema() {
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        ensureColumn("playwright_mid", "BIGINT NULL");
-        ensureColumn("playwright_uname", "VARCHAR(128) NULL");
-        ensureColumn("playwright_storage_state_json", "MEDIUMTEXT NULL");
-        ensureColumn("playwright_updated_at", "DATETIME NULL");
-    }
-
-    private void ensureColumn(String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                TABLE,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
-        }
+        repositoryService.ensureSchema();
     }
 
     private void closeSession(String authCode) {
@@ -442,9 +372,6 @@ public class BilibiliPlaywrightAccountService {
 
     private record LoginSession(String accountKey, String authCode, Browser browser,
                                 BrowserContext context, Page page, Instant expiresAt) {
-    }
-
-    private record AccountProfile(Long mid, String uname) {
     }
 
     static class BrowserHandle implements AutoCloseable {

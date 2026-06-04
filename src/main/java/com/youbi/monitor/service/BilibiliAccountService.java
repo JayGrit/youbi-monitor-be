@@ -9,7 +9,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
-import com.youbi.monitor.repository.BilibiliAccountRepository;
+import com.youbi.monitor.repository.IBilibiliAccountRepositoryService;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -40,14 +40,14 @@ public class BilibiliAccountService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final BilibiliAccountRepository repository;
+    private final IBilibiliAccountRepositoryService repositoryService;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final UploaderAccountService uploaderAccountService;
 
-    public BilibiliAccountService(BilibiliAccountRepository repository, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
-        this.repository = repository;
+    public BilibiliAccountService(IBilibiliAccountRepositoryService repositoryService, AccountSendAvailabilityService sendAvailabilityService, UploaderAccountService uploaderAccountService) {
+        this.repositoryService = repositoryService;
         this.sendAvailabilityService = sendAvailabilityService;
         this.uploaderAccountService = uploaderAccountService;
         this.httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build();
@@ -64,49 +64,8 @@ public class BilibiliAccountService {
     }
 
     public List<BilibiliAccountStatus> accounts() {
-        return repository.query(
-                """
-                SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
-                       ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
-                       ua.today_upload_count, ua.cooldown_waiting_count, ua.upload_running_count,
-                       ua.is_enabled,
-                       pa.mid, pa.uname, pa.login_info_json, pa.updated_at, pa.display_name, pa.avatar_url
-                FROM uploader_account ua
-                LEFT JOIN uploader_account_bilibili pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'bilibili'
-                ORDER BY ua.account_key
-                """,
-                (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
-                    String json = rs.getString("login_info_json");
-                    Long mid = rs.getObject("mid") == null ? null : rs.getLong("mid");
-                    LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
-                    return new BilibiliAccountStatus(
-                            "database",
-                            accountKey,
-                            json != null && !json.isBlank(),
-                            json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
-                            updatedAt,
-                            mid,
-                            rs.getString("uname"),
-                            null,
-                            null,
-                            toLocalDateTime(rs.getTimestamp("last_upload_at")),
-                            toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            rs.getInt("today_upload_count"),
-                            rs.getInt("cooldown_waiting_count"),
-                            rs.getInt("upload_running_count"),
-                            rs.getBoolean("is_enabled"),
-                            null,
-                            json != null && !json.isBlank() ? "已保存" : "未登录",
-                            Map.of(),
-                            rs.getString("display_name"),
-                            rs.getString("avatar_url")
-                    );
-                }
-        );
+        uploaderAccountService.refreshPlatformMetrics("bilibili");
+        return repositoryService.listAccounts();
     }
 
     public JsonNode loginInfo(String accountKey) throws IOException {
@@ -199,20 +158,10 @@ public class BilibiliAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        int exists = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                Integer.class,
-                newKey
-        );
-        if (exists > 0) {
+        if (repositoryService.existsAccountKey(newKey)) {
             throw new IOException("Bilibili account key already exists: " + newKey);
         }
-        int updated = repository.update(
-                "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
-                newKey,
-                oldKey
-        );
-        if (updated != 1) {
+        if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Bilibili account key not found: " + oldKey);
         }
         uploaderAccountService.renameAccount("bilibili", oldKey, newKey);
@@ -268,13 +217,9 @@ public class BilibiliAccountService {
     private String automaticAccountKey(JsonNode loginInfo) {
         long mid = loginInfo.path("token_info").path("mid").asLong(0);
         if (mid > 0) {
-            List<String> existing = repository.query(
-                    "SELECT account_key FROM " + TABLE + " WHERE mid = ? ORDER BY updated_at DESC LIMIT 1",
-                    (rs, rowNum) -> rs.getString("account_key"),
-                    mid
-            );
-            if (!existing.isEmpty()) {
-                return existing.get(0);
+            Optional<String> existing = repositoryService.findLatestAccountKeyByMid(mid);
+            if (existing.isPresent()) {
+                return existing.get();
             }
         }
         String base = mid > 0 ? "uid_" + mid : "account";
@@ -286,12 +231,7 @@ public class BilibiliAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer count = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                Integer.class,
-                accountKey
-        );
-        return count != null && count > 0;
+        return repositoryService.existsAccountKey(accountKey);
     }
 
     private BilibiliAccountStatus status(String accountKey, Optional<JsonNode> knownLoginInfo) throws IOException {
@@ -393,15 +333,6 @@ public class BilibiliAccountService {
         );
     }
 
-    private static Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private static LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toLocalDateTime();
-    }
-
     private JsonNode getMyInfo(JsonNode loginInfo) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.bilibili.com/x/space/myinfo"))
                 .header("User-Agent", "Mozilla/5.0")
@@ -424,24 +355,15 @@ public class BilibiliAccountService {
     }
 
     private Optional<JsonNode> loadLoginInfo(String accountKey) throws IOException {
-        List<String> values = repository.query(
-                "SELECT login_info_json FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getString("login_info_json"),
-                accountKey
-        );
-        if (values.isEmpty() || values.get(0) == null || values.get(0).isBlank()) {
+        Optional<String> value = repositoryService.findLoginInfoJson(accountKey);
+        if (value.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(objectMapper.readTree(values.get(0)));
+        return Optional.of(objectMapper.readTree(value.get()));
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = repository.query(
-                "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
-                accountKey
-        );
-        return values.stream().findFirst();
+        return repositoryService.findUpdatedAt(accountKey);
     }
 
     private void saveLoginInfo(String accountKey, JsonNode loginInfo) throws IOException {
@@ -457,12 +379,7 @@ public class BilibiliAccountService {
         } catch (Exception ignored) {
             // Account metadata is best effort; login_info_json is the source of truth.
         }
-        repository.update(
-                """
-                INSERT INTO uploader_account_bilibili (account_key, mid, uname, login_info_json, updated_at)
-                VALUES (?, ?, ?, ?, NOW())
-                ON DUPLICATE KEY UPDATE mid = VALUES(mid), uname = VALUES(uname), login_info_json = VALUES(login_info_json), updated_at = NOW()
-                """,
+        repositoryService.saveLoginInfo(
                 accountKey,
                 mid,
                 uname,
@@ -472,41 +389,7 @@ public class BilibiliAccountService {
     }
 
     private void ensureSchema() {
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_account_bilibili (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    account_key VARCHAR(64) NOT NULL,
-                    mid BIGINT NULL,
-                    uname VARCHAR(128) NULL,
-                    login_info_json MEDIUMTEXT NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_account_bilibili_account_key (account_key)
-                )
-                """
-        );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        ensureColumn("display_name", "VARCHAR(128) NULL");
-        ensureColumn("avatar_url", "VARCHAR(1024) NULL");
-    }
-
-    private void ensureColumn(String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                TABLE,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
-        }
+        repositoryService.ensureSchema();
     }
 
     private Map<String, String> signedParams(Map<String, String> params, String appKey, String appSecret) throws IOException {

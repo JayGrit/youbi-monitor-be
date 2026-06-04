@@ -14,7 +14,8 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.options.AriaRole;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.youbi.monitor.repository.DouyinAccountRepository;
+import com.youbi.monitor.model.SocialAccountProfile;
+import com.youbi.monitor.repository.IDouyinAccountRepositoryService;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -39,7 +40,7 @@ public class DouyinAccountService {
     static final String PUBLISH_VIDEO_URL = "https://creator.douyin.com/creator-micro/content/upload";
 
     private static final String TABLE = "uploader_account_douyin";
-    private final DouyinAccountRepository repository;
+    private final IDouyinAccountRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
@@ -47,13 +48,13 @@ public class DouyinAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public DouyinAccountService(
-            DouyinAccountRepository repository,
+            IDouyinAccountRepositoryService repositoryService,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,
             UploaderAccountService uploaderAccountService
     ) {
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
@@ -62,46 +63,7 @@ public class DouyinAccountService {
     }
 
     public List<DouyinAccountStatus> accounts() {
-        return repository.query(
-                """
-                SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
-                       ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
-                       ua.today_upload_count, ua.cooldown_waiting_count, ua.upload_running_count,
-                       ua.is_enabled,
-                       pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
-                FROM uploader_account ua
-                LEFT JOIN uploader_account_douyin pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'douyin'
-                ORDER BY ua.account_key
-                """,
-                (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
-                    String json = rs.getString("storage_state_json");
-                    LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
-                    return new DouyinAccountStatus(
-                            "database",
-                            accountKey,
-                            json != null && !json.isBlank(),
-                            json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
-                            updatedAt,
-                            rs.getString("user_id"),
-                            rs.getString("nickname"),
-                            toLocalDateTime(rs.getTimestamp("last_upload_at")),
-                            toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            rs.getInt("today_upload_count"),
-                            rs.getInt("cooldown_waiting_count"),
-                            rs.getInt("upload_running_count"),
-                            rs.getBoolean("is_enabled"),
-                            null,
-                            json != null && !json.isBlank() ? "已保存" : "未登录",
-                            Map.of(),
-                            rs.getString("display_name"),
-                            rs.getString("avatar_url")
-                    );
-                }
-        );
+        return repositoryService.listAccounts();
     }
 
     public DouyinAccountStatus status(String accountKey) throws IOException {
@@ -109,7 +71,7 @@ public class DouyinAccountService {
         Optional<String> storageState = loadStorageState(normalized);
         AccountSendAvailability sendAvailability = sendAvailability(normalized);
         int[] cooldown = cooldownConfig(normalized);
-        AccountProfile profile = loadProfile(normalized);
+        SocialAccountProfile profile = loadProfile(normalized);
         if (storageState.isEmpty()) {
             return new DouyinAccountStatus("database", normalized, false, 0, null, profile.userId(), profile.nickname(), sendAvailability.lastUploadAt(), sendAvailability.nextUploadAllowedAt(), cooldown[0], cooldown[1], sendAvailability.todayUploadCount(), sendAvailability.cooldownWaitingCount(), sendAvailability.uploadRunningCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
@@ -216,20 +178,10 @@ public class DouyinAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        Integer exists = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                Integer.class,
-                newKey
-        );
-        if (exists != null && exists > 0) {
+        if (repositoryService.existsAccountKey(newKey)) {
             throw new IOException("Douyin account key already exists: " + newKey);
         }
-        int updated = repository.update(
-                "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
-                newKey,
-                oldKey
-        );
-        if (updated != 1) {
+        if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Douyin account key not found: " + oldKey);
         }
         uploaderAccountService.renameAccount("douyin", oldKey, newKey);
@@ -273,13 +225,8 @@ public class DouyinAccountService {
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
-        AccountProfile profile = profileFromStorageState(storageState);
-        repository.update(
-                """
-                INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, updated_at)
-                VALUES (?, ?, ?, ?, NOW())
-                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
-                """,
+        SocialAccountProfile profile = profileFromStorageState(storageState);
+        repositoryService.saveStorageState(
                 normalized,
                 truncate(profile.userId(), 128),
                 truncate(profile.nickname(), 128),
@@ -370,15 +317,6 @@ public class DouyinAccountService {
         return uploaderAccountService.state("douyin", accountKey)
                 .map(UploaderAccountState::enabled)
                 .orElse(true);
-    }
-
-    private static Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private static LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toLocalDateTime();
     }
 
     private String extractQrImage(Page page) {
@@ -586,46 +524,24 @@ public class DouyinAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = repository.query(
-                "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getString("storage_state_json"),
-                accountKey
-        );
-        if (values.isEmpty() || values.get(0) == null || values.get(0).isBlank()) {
-            return Optional.empty();
-        }
-        return Optional.of(values.get(0));
+        return repositoryService.findStorageState(accountKey);
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = repository.query(
-                "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
-                accountKey
-        );
-        return values.stream().findFirst();
+        return repositoryService.findUpdatedAt(accountKey);
     }
 
-    private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = repository.query(
-                "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new AccountProfile(rs.getString("user_id"), rs.getString("nickname")),
-                accountKey
-        );
-        return values.stream().findFirst().orElse(new AccountProfile(null, null));
+    private SocialAccountProfile loadProfile(String accountKey) {
+        return repositoryService.findProfile(accountKey);
     }
 
     private String automaticAccountKey(String storageState) throws IOException {
-        AccountProfile profile = profileFromStorageState(storageState);
+        SocialAccountProfile profile = profileFromStorageState(storageState);
         String userId = text(profile.userId());
         if (!userId.isBlank()) {
-            List<String> existing = repository.query(
-                    "SELECT account_key FROM " + TABLE + " WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
-                    (rs, rowNum) -> rs.getString("account_key"),
-                    userId
-            );
-            if (!existing.isEmpty()) {
-                return existing.get(0);
+            Optional<String> existing = repositoryService.findLatestAccountKeyByUserId(userId);
+            if (existing.isPresent()) {
+                return existing.get();
             }
         }
         String base = userId.isBlank() ? "account" : "uid_" + userId.replaceAll("[^A-Za-z0-9_.-]+", "_");
@@ -637,15 +553,10 @@ public class DouyinAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer count = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                Integer.class,
-                accountKey
-        );
-        return count != null && count > 0;
+        return repositoryService.existsAccountKey(accountKey);
     }
 
-    private AccountProfile profileFromStorageState(String storageState) throws IOException {
+    private SocialAccountProfile profileFromStorageState(String storageState) throws IOException {
         JsonNode root = objectMapper.readTree(storageState);
         String userId = "";
         String nickname = "";
@@ -671,45 +582,11 @@ public class DouyinAccountService {
                 }
             }
         }
-        return new AccountProfile(blankToNull(userId), blankToNull(nickname));
+        return new SocialAccountProfile(blankToNull(userId), blankToNull(nickname));
     }
 
     private void ensureSchema() {
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_account_douyin (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    account_key VARCHAR(64) NOT NULL,
-                    user_id VARCHAR(128) NULL,
-                    nickname VARCHAR(128) NULL,
-                    storage_state_json MEDIUMTEXT NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_account_douyin_account_key (account_key)
-                )
-                """
-        );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        ensureColumn("uploader_account_douyin", "display_name", "VARCHAR(128) NULL");
-        ensureColumn("uploader_account_douyin", "avatar_url", "VARCHAR(1024) NULL");
-    }
-
-    private void ensureColumn(String table, String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                table,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-        }
+        repositoryService.ensureSchema();
     }
 
     private void closeSession(String authCode) {
@@ -778,9 +655,6 @@ public class DouyinAccountService {
 
     private record LoginSession(String accountKey, String authCode, Browser browser,
                                 BrowserContext context, Page page, String originalUrl, Instant expiresAt) {
-    }
-
-    private record AccountProfile(String userId, String nickname) {
     }
 
 }

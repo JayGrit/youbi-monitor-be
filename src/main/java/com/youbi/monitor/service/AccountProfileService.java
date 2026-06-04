@@ -2,10 +2,10 @@ package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.AccountProfileUpdateRequest;
 import com.youbi.monitor.dto.AccountProfileUpdateResult;
+import com.youbi.monitor.repository.IAccountProfileRepositoryService;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import org.springframework.beans.factory.annotation.Value;
-import com.youbi.monitor.repository.AccountProfileRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,19 +27,19 @@ public class AccountProfileService {
             "jinritoutiao", "uploader_account_jinritoutiao"
     );
 
-    private final AccountProfileRepository repository;
+    private final IAccountProfileRepositoryService repositoryService;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
 
     public AccountProfileService(
-            AccountProfileRepository repository,
+            IAccountProfileRepositoryService repositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.minioEndpoint = trimTrailingSlash(TextSupport.text(minioEndpoint));
         this.minioBucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
         this.minioClient = MinioClient.builder()
@@ -51,23 +51,19 @@ public class AccountProfileService {
     public AccountProfileUpdateResult updateProfile(String platform, String accountKey, AccountProfileUpdateRequest request) throws IOException {
         String table = table(platform);
         String normalized = normalizeAccountKey(accountKey);
-        ensureColumns(table);
+        repositoryService.ensureProfileColumns(table);
         String displayName = TextSupport.text(request == null ? "" : request.displayName());
-        int updated = repository.update(
-                "UPDATE " + table + " SET display_name = ?, updated_at = NOW() WHERE account_key = ?",
-                displayName.isBlank() ? null : TextSupport.truncate(displayName, 128),
-                normalized
-        );
+        int updated = repositoryService.updateDisplayName(table, normalized, displayName.isBlank() ? null : TextSupport.truncate(displayName, 128));
         if (updated != 1) {
             throw new IOException("Account key not found: " + normalized);
         }
-        return profile(table, normalized);
+        return repositoryService.findProfile(table, normalized);
     }
 
     public AccountProfileUpdateResult uploadAvatar(String platform, String accountKey, MultipartFile file) throws Exception {
         String table = table(platform);
         String normalized = normalizeAccountKey(accountKey);
-        ensureColumns(table);
+        repositoryService.ensureProfileColumns(table);
         if (file == null || file.isEmpty()) {
             throw new IOException("Avatar file is empty");
         }
@@ -90,46 +86,11 @@ public class AccountProfileService {
                     .build());
         }
         String avatarUrl = minioUrl(objectKey);
-        int updated = repository.update(
-                "UPDATE " + table + " SET avatar_url = ?, updated_at = NOW() WHERE account_key = ?",
-                avatarUrl,
-                normalized
-        );
+        int updated = repositoryService.updateAvatarUrl(table, normalized, avatarUrl);
         if (updated != 1) {
             throw new IOException("Account key not found: " + normalized);
         }
-        return profile(table, normalized);
-    }
-
-    private AccountProfileUpdateResult profile(String table, String accountKey) {
-        return repository.queryForObject(
-                "SELECT display_name, avatar_url FROM " + table + " WHERE account_key = ?",
-                (rs, rowNum) -> new AccountProfileUpdateResult(rs.getString("display_name"), rs.getString("avatar_url")),
-                accountKey
-        );
-    }
-
-    private void ensureColumns(String table) {
-        ensureColumn(table, "display_name", "VARCHAR(128) NULL");
-        ensureColumn(table, "avatar_url", "VARCHAR(1024) NULL");
-    }
-
-    private void ensureColumn(String table, String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                table,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-        }
+        return repositoryService.findProfile(table, normalized);
     }
 
     private String table(String platform) throws IOException {

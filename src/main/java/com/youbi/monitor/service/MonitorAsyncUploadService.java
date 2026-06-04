@@ -10,11 +10,11 @@ import com.youbi.monitor.dto.ShipinhaoUploadRequest;
 import com.youbi.monitor.dto.XiaohongshuUploadRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.youbi.monitor.model.MonitorUploadTaskRow;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.EmptyResultDataAccessException;
-import com.youbi.monitor.repository.MonitorAsyncUploadRepository;
+import com.youbi.monitor.repository.IMonitorAsyncUploadRepositoryService;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -40,7 +40,7 @@ public class MonitorAsyncUploadService {
     private final ShipinhaoUploadService shipinhaoUploadService;
     private final KuaishouUploadService kuaishouUploadService;
     private final JinritoutiaoUploadService jinritoutiaoUploadService;
-    private final MonitorAsyncUploadRepository repository;
+    private final IMonitorAsyncUploadRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "monitor-upload-task");
@@ -56,7 +56,7 @@ public class MonitorAsyncUploadService {
             ShipinhaoUploadService shipinhaoUploadService,
             KuaishouUploadService kuaishouUploadService,
             JinritoutiaoUploadService jinritoutiaoUploadService,
-            MonitorAsyncUploadRepository repository,
+            IMonitorAsyncUploadRepositoryService repositoryService,
             ObjectMapper objectMapper
     ) {
         this.bilibiliUploadService = bilibiliUploadService;
@@ -66,43 +66,19 @@ public class MonitorAsyncUploadService {
         this.shipinhaoUploadService = shipinhaoUploadService;
         this.kuaishouUploadService = kuaishouUploadService;
         this.jinritoutiaoUploadService = jinritoutiaoUploadService;
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
     }
 
     @PostConstruct
     public void ensureSchema() {
-        repository.execute("""
-                CREATE TABLE IF NOT EXISTS monitor_upload_task (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    upload_task_id VARCHAR(64) NOT NULL,
-                    platform VARCHAR(32) NOT NULL,
-                    upstream_task_id VARCHAR(64) NULL,
-                    account_key VARCHAR(128) NOT NULL,
-                    status VARCHAR(32) NOT NULL,
-                    request_json MEDIUMTEXT NULL,
-                    result_json MEDIUMTEXT NULL,
-                    error_code VARCHAR(64) NULL,
-                    error_message TEXT NULL,
-                    video_url TEXT NULL,
-                    started_at DATETIME NULL,
-                    completed_at DATETIME NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_monitor_upload_task (upload_task_id),
-                    KEY idx_monitor_upload_running (status),
-                    KEY idx_monitor_upload_platform (platform, upstream_task_id, account_key)
-                )
-                """);
+        repositoryService.ensureSchema();
     }
 
     public synchronized MonitorUploadTaskResponse submit(String platform, Object request) {
         ensureSchema();
         failStaleRunningTasks();
-        long running = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE status IN ('accepted', 'running')",
-                Long.class
-        );
+        long running = repositoryService.countActiveTasks();
         String normalizedPlatform = text(platform).toLowerCase();
         if (running > 0) {
             return new MonitorUploadTaskResponse(false, null, normalizedPlatform, taskId(request), accountKey(request),
@@ -111,14 +87,7 @@ public class MonitorAsyncUploadService {
         }
 
         String uploadTaskId = UUID.randomUUID().toString();
-        repository.update(
-                """
-                INSERT INTO monitor_upload_task (
-                    upload_task_id, platform, upstream_task_id, account_key, status,
-                    request_json, video_url, started_at
-                )
-                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', ?, ?, NOW())
-                """,
+        repositoryService.insertAcceptedTask(
                 uploadTaskId,
                 normalizedPlatform,
                 taskId(request),
@@ -133,53 +102,15 @@ public class MonitorAsyncUploadService {
     public MonitorUploadTaskResponse status(String uploadTaskId) {
         ensureSchema();
         failStaleRunningTasks();
-        try {
-            return repository.queryForObject(
-                    "SELECT * FROM " + TABLE + " WHERE upload_task_id = ?",
-                    (rs, rowNum) -> {
-                        Map<String, Object> result = parseJsonMap(rs.getString("result_json"));
-                        Map<String, Object> upload = uploadResult(result);
-                        String status = rs.getString("status");
-                        boolean success = "success".equals(status);
-                        LocalDateTime startedAt = rs.getTimestamp("started_at") == null ? null : rs.getTimestamp("started_at").toLocalDateTime();
-                        LocalDateTime completedAt = rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toLocalDateTime();
-                        return new MonitorUploadTaskResponse(
-                                true,
-                                rs.getString("upload_task_id"),
-                                rs.getString("platform"),
-                                rs.getString("upstream_task_id"),
-                                rs.getString("account_key"),
-                                status,
-                                success,
-                                null,
-                                rs.getString("error_code"),
-                                firstText(rs.getString("error_message"), stringValue(upload.get("message")), status),
-                                durationMs(result, startedAt, completedAt),
-                                rs.getString("video_url"),
-                                stringValue(upload.get("bvid")),
-                                longValue(upload.get("aid")),
-                                longValue(upload.get("accountUid")),
-                                firstText(stringValue(upload.get("accountName")), stringValue(upload.get("accountKey"))),
-                                rawResult(upload, result),
-                                startedAt,
-                                completedAt
-                        );
-                    },
-                    uploadTaskId
-            );
-        } catch (EmptyResultDataAccessException exception) {
-            return new MonitorUploadTaskResponse(false, uploadTaskId, null, null, null, "missing", false,
-                    "上传任务不存在", "TASK_NOT_FOUND", "上传任务不存在", null, null, null, null, null, null, Map.of(), null, null);
-        }
+        return repositoryService.findByUploadTaskId(uploadTaskId)
+                .map(this::response)
+                .orElseGet(() -> new MonitorUploadTaskResponse(false, uploadTaskId, null, null, null, "missing", false,
+                        "上传任务不存在", "TASK_NOT_FOUND", "上传任务不存在", null, null, null, null, null, null, Map.of(), null, null));
     }
 
     private void execute(String uploadTaskId, String platform, Object request) {
         long startedAt = System.currentTimeMillis();
-        int started = repository.update(
-                "UPDATE " + TABLE + " SET status = 'running', started_at = COALESCE(started_at, NOW()), error_message = NULL WHERE upload_task_id = ? AND status = 'accepted'",
-                uploadTaskId
-        );
-        if (started == 0) {
+        if (!repositoryService.markRunning(uploadTaskId)) {
             log.warn("Async upload skipped because task is no longer accepted uploadTaskId={} platform={} taskId={}",
                     uploadTaskId, platform, taskId(request));
             return;
@@ -193,12 +124,7 @@ public class MonitorAsyncUploadService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("result", resultMap);
-            int updated = repository.update(
-                    "UPDATE " + TABLE + " SET status = 'success', result_json = ?, error_code = NULL, error_message = NULL, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
-                    toJson(payload),
-                    uploadTaskId
-            );
-            if (updated == 0) {
+            if (!repositoryService.markSuccess(uploadTaskId, toJson(payload))) {
                 log.warn("Async upload finished after task status changed uploadTaskId={} platform={} taskId={}",
                         uploadTaskId, platform, taskId(request));
             }
@@ -207,14 +133,13 @@ public class MonitorAsyncUploadService {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
             payload.put("error", message);
-            int updated = repository.update(
-                    "UPDATE " + TABLE + " SET status = 'failed', result_json = ?, error_code = ?, error_message = ?, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
+            boolean updated = repositoryService.markFailed(
+                    uploadTaskId,
                     toJson(payload),
                     classifyErrorCode(message),
-                    message,
-                    uploadTaskId
+                    message
             );
-            if (updated == 0) {
+            if (!updated) {
                 log.warn("Async upload failed after task status changed uploadTaskId={} platform={} taskId={} message={}",
                         uploadTaskId, platform, taskId(request), message);
                 return;
@@ -292,18 +217,35 @@ public class MonitorAsyncUploadService {
     }
 
     private void failStaleRunningTasks() {
-        repository.update("""
-                UPDATE monitor_upload_task
-                SET status = 'failed',
-                    error_code = 'MONITOR_UPLOAD_TIMEOUT',
-                    error_message = ?,
-                    completed_at = NOW()
-                WHERE status IN ('accepted', 'running')
-                  AND started_at IS NOT NULL
-                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) > ?
-                """,
-                "monitor upload task timed out after " + UPLOAD_TASK_TIMEOUT_SECONDS + "s",
-                UPLOAD_TASK_TIMEOUT_SECONDS);
+        repositoryService.failStaleRunningTasks("monitor upload task timed out after " + UPLOAD_TASK_TIMEOUT_SECONDS + "s", UPLOAD_TASK_TIMEOUT_SECONDS);
+    }
+
+    private MonitorUploadTaskResponse response(MonitorUploadTaskRow row) {
+        Map<String, Object> result = parseJsonMap(row.resultJson());
+        Map<String, Object> upload = uploadResult(result);
+        String status = row.status();
+        boolean success = "success".equals(status);
+        return new MonitorUploadTaskResponse(
+                true,
+                row.uploadTaskId(),
+                row.platform(),
+                row.upstreamTaskId(),
+                row.accountKey(),
+                status,
+                success,
+                null,
+                row.errorCode(),
+                firstText(row.errorMessage(), stringValue(upload.get("message")), status),
+                durationMs(result, row.startedAt(), row.completedAt()),
+                row.videoUrl(),
+                stringValue(upload.get("bvid")),
+                longValue(upload.get("aid")),
+                longValue(upload.get("accountUid")),
+                firstText(stringValue(upload.get("accountName")), stringValue(upload.get("accountKey"))),
+                rawResult(upload, result),
+                row.startedAt(),
+                row.completedAt()
+        );
     }
 
     private String classifyErrorCode(String message) {

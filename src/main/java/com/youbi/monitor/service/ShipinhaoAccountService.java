@@ -3,12 +3,13 @@ package com.youbi.monitor.service;
 import com.youbi.monitor.dto.AccountSendAvailability;
 import com.youbi.monitor.dto.ShipinhaoAccountStatus;
 import com.youbi.monitor.dto.UploaderAccountState;
+import com.youbi.monitor.model.SocialAccountProfile;
+import com.youbi.monitor.repository.IShipinhaoAccountRepositoryService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
-import com.youbi.monitor.repository.ShipinhaoAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -27,20 +28,20 @@ public class ShipinhaoAccountService {
 
     private static final String TABLE = "uploader_account_shipinhao";
 
-    private final ShipinhaoAccountRepository repository;
+    private final IShipinhaoAccountRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
     private final UploaderAccountService uploaderAccountService;
 
     public ShipinhaoAccountService(
-            ShipinhaoAccountRepository repository,
+            IShipinhaoAccountRepositoryService repositoryService,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,
             UploaderAccountService uploaderAccountService
     ) {
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
@@ -49,46 +50,7 @@ public class ShipinhaoAccountService {
     }
 
     public List<ShipinhaoAccountStatus> accounts() {
-        return repository.query(
-                """
-                SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
-                       ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
-                       ua.today_upload_count, ua.cooldown_waiting_count, ua.upload_running_count,
-                       ua.is_enabled,
-                       pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
-                FROM uploader_account ua
-                LEFT JOIN uploader_account_shipinhao pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'shipinhao'
-                ORDER BY ua.account_key
-                """,
-                (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
-                    String json = rs.getString("storage_state_json");
-                    LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
-                    return new ShipinhaoAccountStatus(
-                            "database",
-                            accountKey,
-                            json != null && !json.isBlank(),
-                            json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
-                            updatedAt,
-                            rs.getString("user_id"),
-                            rs.getString("nickname"),
-                            toLocalDateTime(rs.getTimestamp("last_upload_at")),
-                            toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            rs.getInt("today_upload_count"),
-                            rs.getInt("cooldown_waiting_count"),
-                            rs.getInt("upload_running_count"),
-                            rs.getBoolean("is_enabled"),
-                            null,
-                            json != null && !json.isBlank() ? "已保存" : "未登录",
-                            Map.of(),
-                            rs.getString("display_name"),
-                            rs.getString("avatar_url")
-                    );
-                }
-        );
+        return repositoryService.listAccounts();
     }
 
     public ShipinhaoAccountStatus status(String accountKey) throws IOException {
@@ -100,7 +62,7 @@ public class ShipinhaoAccountService {
             return new ShipinhaoAccountStatus("database", normalized, false, 0, null, null, null, availability.lastUploadAt(), availability.nextUploadAllowedAt(), cooldown[0], cooldown[1], availability.todayUploadCount(), availability.cooldownWaitingCount(), availability.uploadRunningCount(), accountEnabled(normalized), false, "未登录", Map.of());
         }
         boolean valid = isStorageStateValid(storageState.get());
-        AccountProfile profile = loadProfile(normalized);
+        SocialAccountProfile profile = loadProfile(normalized);
         return new ShipinhaoAccountStatus(
                 "database",
                 normalized,
@@ -135,12 +97,10 @@ public class ShipinhaoAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        Integer exists = repository.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, newKey);
-        if (exists != null && exists > 0) {
+        if (repositoryService.existsAccountKey(newKey)) {
             throw new IOException("Shipinhao account key already exists: " + newKey);
         }
-        int updated = repository.update("UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?", newKey, oldKey);
-        if (updated != 1) {
+        if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Shipinhao account key not found: " + oldKey);
         }
         uploaderAccountService.renameAccount("shipinhao", oldKey, newKey);
@@ -187,13 +147,8 @@ public class ShipinhaoAccountService {
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
-        AccountProfile profile = profileFromStorageState(storageState);
-        repository.update(
-                """
-                INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, is_available, updated_at)
-                VALUES (?, ?, ?, ?, 1, NOW())
-                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), is_available = 1, updated_at = NOW()
-                """,
+        SocialAccountProfile profile = profileFromStorageState(storageState);
+        repositoryService.saveStorageState(
                 normalized,
                 firstText(profile.userId(), loadProfile(normalized).userId()),
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
@@ -205,10 +160,7 @@ public class ShipinhaoAccountService {
 
     void markUnavailable(String accountKey) {
         String normalized = normalizeAccountKey(accountKey);
-        repository.update(
-                "UPDATE " + TABLE + " SET is_available = 0, updated_at = NOW() WHERE account_key = ?",
-                normalized
-        );
+        repositoryService.markUnavailable(normalized);
         uploaderAccountService.updateAvailable("shipinhao", normalized, false);
     }
 
@@ -230,36 +182,18 @@ public class ShipinhaoAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = repository.query(
-                "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getString("storage_state_json"),
-                accountKey
-        );
-        if (values.isEmpty() || values.get(0) == null || values.get(0).isBlank()) {
-            return Optional.empty();
-        }
-        return Optional.of(values.get(0));
+        return repositoryService.findStorageState(accountKey);
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = repository.query(
-                "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
-                accountKey
-        );
-        return values.stream().findFirst();
+        return repositoryService.findUpdatedAt(accountKey);
     }
 
-    private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = repository.query(
-                "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new AccountProfile(rs.getString("user_id"), rs.getString("nickname")),
-                accountKey
-        );
-        return values.stream().findFirst().orElse(new AccountProfile(null, null));
+    private SocialAccountProfile loadProfile(String accountKey) {
+        return repositoryService.findProfile(accountKey);
     }
 
-    private AccountProfile profileFromStorageState(String storageState) throws IOException {
+    private SocialAccountProfile profileFromStorageState(String storageState) throws IOException {
         JsonNode root = objectMapper.readTree(storageState);
         String userId = "";
         String nickname = "";
@@ -284,7 +218,7 @@ public class ShipinhaoAccountService {
                 }
             }
         }
-        return new AccountProfile(blankToNull(userId), blankToNull(nickname));
+        return new SocialAccountProfile(blankToNull(userId), blankToNull(nickname));
     }
 
     private int[] cooldownConfig(String accountKey) {
@@ -337,57 +271,12 @@ public class ShipinhaoAccountService {
         );
     }
 
-    private static Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private static LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toLocalDateTime();
-    }
-
     private boolean accountKeyExists(String accountKey) {
-        Integer exists = repository.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, accountKey);
-        return exists != null && exists > 0;
+        return repositoryService.existsAccountKey(accountKey);
     }
 
     private void ensureSchema() {
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_account_shipinhao (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    account_key VARCHAR(64) NOT NULL,
-                    user_id VARCHAR(128) NULL,
-                    nickname VARCHAR(128) NULL,
-                    storage_state_json MEDIUMTEXT NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_account_shipinhao_account_key (account_key)
-                )
-                """
-        );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        ensureColumn("display_name", "VARCHAR(128) NULL");
-        ensureColumn("avatar_url", "VARCHAR(1024) NULL");
-        ensureColumn("is_available", "TINYINT(1) NOT NULL DEFAULT 1");
-    }
-
-    private void ensureColumn(String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                TABLE,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
-        }
+        repositoryService.ensureSchema();
     }
 
     private boolean containsAny(String text, String... values) {
@@ -401,8 +290,5 @@ public class ShipinhaoAccountService {
     private String blankToNull(String value) {
         String text = TextSupport.text(value);
         return text.isBlank() ? null : text;
-    }
-
-    private record AccountProfile(String userId, String nickname) {
     }
 }

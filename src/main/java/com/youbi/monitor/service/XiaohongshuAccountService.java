@@ -13,7 +13,8 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.TimeoutError;
-import com.youbi.monitor.repository.XiaohongshuAccountRepository;
+import com.youbi.monitor.model.SocialAccountProfile;
+import com.youbi.monitor.repository.IXiaohongshuAccountRepositoryService;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -39,7 +40,7 @@ public class XiaohongshuAccountService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
-    private final XiaohongshuAccountRepository repository;
+    private final IXiaohongshuAccountRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
     private final AccountSendAvailabilityService sendAvailabilityService;
     private final SocialBrowserFactory browserFactory;
@@ -47,13 +48,13 @@ public class XiaohongshuAccountService {
     private final Map<String, LoginSession> loginSessions = new ConcurrentHashMap<>();
 
     public XiaohongshuAccountService(
-            XiaohongshuAccountRepository repository,
+            IXiaohongshuAccountRepositoryService repositoryService,
             ObjectMapper objectMapper,
             AccountSendAvailabilityService sendAvailabilityService,
             SocialBrowserFactory browserFactory,
             UploaderAccountService uploaderAccountService
     ) {
-        this.repository = repository;
+        this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
         this.sendAvailabilityService = sendAvailabilityService;
         this.browserFactory = browserFactory;
@@ -62,46 +63,8 @@ public class XiaohongshuAccountService {
     }
 
     public List<XiaohongshuAccountStatus> accounts() {
-        return repository.query(
-                """
-                SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
-                       ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
-                       ua.today_upload_count, ua.cooldown_waiting_count, ua.upload_running_count,
-                       ua.is_enabled,
-                       pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
-                FROM uploader_account ua
-                LEFT JOIN uploader_account_xiaohongshu pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'xiaohongshu'
-                ORDER BY ua.account_key
-                """,
-                (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
-                    String json = rs.getString("storage_state_json");
-                    LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
-                    return new XiaohongshuAccountStatus(
-                            "database",
-                            accountKey,
-                            json != null && !json.isBlank(),
-                            json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
-                            updatedAt,
-                            rs.getString("user_id"),
-                            rs.getString("nickname"),
-                            toLocalDateTime(rs.getTimestamp("last_upload_at")),
-                            toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
-                            nullableInt(rs, "upload_cooldown_min_seconds"),
-                            nullableInt(rs, "upload_cooldown_max_seconds"),
-                            rs.getInt("today_upload_count"),
-                            rs.getInt("cooldown_waiting_count"),
-                            rs.getInt("upload_running_count"),
-                            rs.getBoolean("is_enabled"),
-                            null,
-                            json != null && !json.isBlank() ? "已保存" : "未登录",
-                            Map.of(),
-                            rs.getString("display_name"),
-                            rs.getString("avatar_url")
-                    );
-                }
-        );
+        uploaderAccountService.refreshPlatformMetrics("xiaohongshu");
+        return repositoryService.listAccounts();
     }
 
     public XiaohongshuAccountStatus status(String accountKey) throws IOException {
@@ -114,7 +77,7 @@ public class XiaohongshuAccountService {
         }
         boolean valid = isStorageStateValid(storageState.get());
         LocalDateTime updatedAt = accountUpdatedAt(normalized).orElse(null);
-        AccountProfile profile = loadProfile(normalized);
+        SocialAccountProfile profile = loadProfile(normalized);
         return new XiaohongshuAccountStatus(
                 "database",
                 normalized,
@@ -197,20 +160,10 @@ public class XiaohongshuAccountService {
         if (oldKey.equals(newKey)) {
             return status(oldKey);
         }
-        Integer exists = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                Integer.class,
-                newKey
-        );
-        if (exists != null && exists > 0) {
+        if (repositoryService.existsAccountKey(newKey)) {
             throw new IOException("Xiaohongshu account key already exists: " + newKey);
         }
-        int updated = repository.update(
-                "UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?",
-                newKey,
-                oldKey
-        );
-        if (updated != 1) {
+        if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Xiaohongshu account key not found: " + oldKey);
         }
         uploaderAccountService.renameAccount("xiaohongshu", oldKey, newKey);
@@ -261,13 +214,8 @@ public class XiaohongshuAccountService {
 
     void saveStorageState(String accountKey, String storageState) throws IOException {
         String normalized = normalizeAccountKey(accountKey);
-        AccountProfile profile = profileFromStorageState(storageState);
-        repository.update(
-                """
-                INSERT INTO uploader_account_xiaohongshu (account_key, user_id, nickname, storage_state_json, updated_at)
-                VALUES (?, ?, ?, ?, NOW())
-                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
-                """,
+        SocialAccountProfile profile = profileFromStorageState(storageState);
+        repositoryService.saveStorageState(
                 normalized,
                 profile.userId(),
                 profile.nickname(),
@@ -341,15 +289,6 @@ public class XiaohongshuAccountService {
                 .orElse(true);
     }
 
-    private static Integer nullableInt(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private static LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toLocalDateTime();
-    }
-
     private String extractQrImage(Page page) {
         openQrPanel(page);
         Locator image = page.locator(".login-box-container").getByText("APP扫一扫登录").filter(new Locator.FilterOptions().setVisible(true))
@@ -407,46 +346,24 @@ public class XiaohongshuAccountService {
     }
 
     private Optional<String> loadStorageState(String accountKey) {
-        List<String> values = repository.query(
-                "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getString("storage_state_json"),
-                accountKey
-        );
-        if (values.isEmpty() || values.get(0) == null || values.get(0).isBlank()) {
-            return Optional.empty();
-        }
-        return Optional.of(values.get(0));
+        return repositoryService.findStorageState(accountKey);
     }
 
     private Optional<LocalDateTime> accountUpdatedAt(String accountKey) {
-        List<LocalDateTime> values = repository.query(
-                "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
-                accountKey
-        );
-        return values.stream().findFirst();
+        return repositoryService.findUpdatedAt(accountKey);
     }
 
-    private AccountProfile loadProfile(String accountKey) {
-        List<AccountProfile> values = repository.query(
-                "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
-                (rs, rowNum) -> new AccountProfile(rs.getString("user_id"), rs.getString("nickname")),
-                accountKey
-        );
-        return values.stream().findFirst().orElse(new AccountProfile(null, null));
+    private SocialAccountProfile loadProfile(String accountKey) {
+        return repositoryService.findProfile(accountKey);
     }
 
     private String automaticAccountKey(String storageState) throws IOException {
-        AccountProfile profile = profileFromStorageState(storageState);
+        SocialAccountProfile profile = profileFromStorageState(storageState);
         String userId = text(profile.userId());
         if (!userId.isBlank()) {
-            List<String> existing = repository.query(
-                    "SELECT account_key FROM " + TABLE + " WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
-                    (rs, rowNum) -> rs.getString("account_key"),
-                    userId
-            );
-            if (!existing.isEmpty()) {
-                return existing.get(0);
+            Optional<String> existing = repositoryService.findLatestAccountKeyByUserId(userId);
+            if (existing.isPresent()) {
+                return existing.get();
             }
         }
         String base = userId.isBlank() ? "account" : "uid_" + userId.replaceAll("[^A-Za-z0-9_.-]+", "_");
@@ -458,15 +375,10 @@ public class XiaohongshuAccountService {
     }
 
     private boolean accountKeyExists(String accountKey) {
-        Integer count = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?",
-                Integer.class,
-                accountKey
-        );
-        return count != null && count > 0;
+        return repositoryService.existsAccountKey(accountKey);
     }
 
-    private AccountProfile profileFromStorageState(String storageState) throws IOException {
+    private SocialAccountProfile profileFromStorageState(String storageState) throws IOException {
         JsonNode root = objectMapper.readTree(storageState);
         String userId = "";
         String nickname = "";
@@ -485,45 +397,11 @@ public class XiaohongshuAccountService {
                 }
             }
         }
-        return new AccountProfile(blankToNull(userId), blankToNull(nickname));
+        return new SocialAccountProfile(blankToNull(userId), blankToNull(nickname));
     }
 
     private void ensureSchema() {
-        repository.execute(
-                """
-                CREATE TABLE IF NOT EXISTS uploader_account_xiaohongshu (
-                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    account_key VARCHAR(64) NOT NULL,
-                    user_id VARCHAR(128) NULL,
-                    nickname VARCHAR(128) NULL,
-                    storage_state_json MEDIUMTEXT NOT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_account_xiaohongshu_account_key (account_key)
-                )
-                """
-        );
-        AccountTableSchemaSupport.ensureSurrogatePrimaryKey(repository, TABLE);
-        ensureColumn("display_name", "VARCHAR(128) NULL");
-        ensureColumn("avatar_url", "VARCHAR(1024) NULL");
-    }
-
-    private void ensureColumn(String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                TABLE,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
-        }
+        repositoryService.ensureSchema();
     }
 
     private void closeSession(String authCode) {
@@ -570,9 +448,6 @@ public class XiaohongshuAccountService {
 
     private record LoginSession(String accountKey, String authCode, Browser browser,
                                 BrowserContext context, Page page, Instant expiresAt) {
-    }
-
-    private record AccountProfile(String userId, String nickname) {
     }
 
 }
