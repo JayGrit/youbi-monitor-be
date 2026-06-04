@@ -67,9 +67,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               tr.started_at translator_started_at,
               tr.completed_at translator_completed_at,
               tr.error_message translator_error,
-              ts.translated_count translator_completed_count,
+              COALESCE(tc.translator_completed_count, ts.translated_count) translator_completed_count,
               tf.translator_failed_count translator_failed_count,
-              GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0)) translator_total_count,
+              COALESCE(tc.translator_total_count, GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0))) translator_total_count,
               te.child_error_message translator_child_error,
 
               CASE WHEN COALESCE(ss.speaker_failed_count, 0) > 0 THEN 'failed' ELSE sp.status END speaker_status,
@@ -167,9 +167,27 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
             LEFT JOIN (
-              SELECT task_id, COUNT(*) translator_failed_count
+              SELECT
+                chunk_progress.task_id,
+                SUM(CASE WHEN chunk_progress.normal_count > 0 AND chunk_progress.translated_count >= chunk_progress.normal_count THEN 1 ELSE 0 END) translator_completed_count,
+                COUNT(*) translator_total_count
+              FROM (
+                SELECT
+                  ch.task_id,
+                  ch.chunk_index,
+                  COUNT(*) normal_count,
+                  COUNT(s.id) translated_count
+                FROM `translator-chunk` ch
+                LEFT JOIN yd_speaker_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
+                WHERE ch.row_role = 'normal'
+                GROUP BY ch.task_id, ch.chunk_index
+              ) chunk_progress
+              GROUP BY chunk_progress.task_id
+            ) tc ON tc.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, COUNT(DISTINCT item_index) translator_failed_count
               FROM yd_translator_api_task
-              WHERE status = 'failed'
+              WHERE status = 'failed' AND request_key LIKE 'chunk:%'
               GROUP BY task_id
             ) tf ON tf.task_id = t.id
             LEFT JOIN (
