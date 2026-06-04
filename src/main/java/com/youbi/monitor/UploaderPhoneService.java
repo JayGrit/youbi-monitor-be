@@ -4,12 +4,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class UploaderPhoneService {
     private static final String TABLE = "uploader_phone";
+    private static final String ACCOUNT_TABLE = "uploader_phone_account";
     private static final List<PlatformTable> PLATFORMS = List.of(
             new PlatformTable("douyin", "uploader_account_douyin", "douyin_account_id"),
             new PlatformTable("xiaohongshu", "uploader_account_xiaohongshu", "xiaohongshu_account_id"),
@@ -30,21 +32,6 @@ public class UploaderPhoneService {
         return new UploaderPhoneMatrixResponse(phones(), platformAccounts());
     }
 
-    public UploaderPhoneRecord updatePhone(long phoneId, UploaderPhoneUpdateRequest request) throws IOException {
-        String remark = TextSupport.truncate(request == null ? "" : request.remark(), 128);
-        String note = TextSupport.truncate(request == null ? "" : request.note(), 2000);
-        int updated = jdbcTemplate.update(
-                "UPDATE uploader_phone SET remark = ?, note = ?, updated_at = NOW() WHERE id = ?",
-                remark.isBlank() ? null : remark,
-                note.isBlank() ? null : note,
-                phoneId
-        );
-        if (updated != 1) {
-            throw new IOException("Uploader phone not found: " + phoneId);
-        }
-        return phone(phoneId);
-    }
-
     public UploaderPhoneRecord updatePlatformAccount(long phoneId, String platform, UploaderPhoneAccountUpdateRequest request) throws IOException {
         PlatformTable platformTable = platformTable(platform);
         Long accountId = request == null ? null : request.accountId();
@@ -54,47 +41,51 @@ public class UploaderPhoneService {
         if (accountId != null && !accountIdExists(platformTable, accountId)) {
             throw new IOException("Uploader account not found: " + platform + "/" + accountId);
         }
-        int updated = jdbcTemplate.update(
-                "UPDATE uploader_phone SET " + platformTable.phoneColumn() + " = ?, updated_at = NOW() WHERE id = ?",
-                accountId,
-                phoneId
-        );
-        if (updated != 1) {
+        if (!phoneExists(phoneId)) {
             throw new IOException("Uploader phone not found: " + phoneId);
+        }
+        if (accountId == null) {
+            jdbcTemplate.update(
+                    "DELETE FROM uploader_phone_account WHERE phone_id = ? AND platform = ?",
+                    phoneId,
+                    platformTable.key()
+            );
+        } else {
+            jdbcTemplate.update(
+                    """
+                    INSERT INTO uploader_phone_account (phone_id, platform, account_id, updated_at)
+                    VALUES (?, ?, ?, NOW())
+                    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
+                    """,
+                    phoneId,
+                    platformTable.key(),
+                    accountId
+            );
         }
         return phone(phoneId);
     }
 
     private List<UploaderPhoneRecord> phones() {
+        Map<Long, Map<String, Long>> accountsByPhone = phoneAccountBindings();
         return jdbcTemplate.query(
                 """
-                SELECT id, phone, remark, note,
-                       douyin_account_id, xiaohongshu_account_id, bilibili_account_id,
-                       shipinhao_account_id, kuaishou_account_id, jinritoutiao_account_id
+                SELECT id, phone
                 FROM uploader_phone
                 ORDER BY id
                 """,
                 (rs, rowNum) -> new UploaderPhoneRecord(
                         rs.getLong("id"),
                         rs.getString("phone"),
-                        rs.getString("remark"),
-                        rs.getString("note"),
-                        nullableLong(rs, "douyin_account_id"),
-                        nullableLong(rs, "xiaohongshu_account_id"),
-                        nullableLong(rs, "bilibili_account_id"),
-                        nullableLong(rs, "shipinhao_account_id"),
-                        nullableLong(rs, "kuaishou_account_id"),
-                        nullableLong(rs, "jinritoutiao_account_id")
+                        accountsByPhone.getOrDefault(rs.getLong("id"), Map.of())
                 )
         );
     }
 
     private UploaderPhoneRecord phone(long phoneId) throws IOException {
+        Map<Long, Map<String, Long>> accountsByPhone = phoneAccountBindings();
         List<UploaderPhoneRecord> rows = jdbcTemplate.query(
                 """
-                SELECT id, phone, remark, note,
-                       douyin_account_id, xiaohongshu_account_id, bilibili_account_id,
-                       shipinhao_account_id, kuaishou_account_id, jinritoutiao_account_id
+                SELECT id, phone
                 FROM uploader_phone
                 WHERE id = ?
                 LIMIT 1
@@ -102,18 +93,27 @@ public class UploaderPhoneService {
                 (rs, rowNum) -> new UploaderPhoneRecord(
                         rs.getLong("id"),
                         rs.getString("phone"),
-                        rs.getString("remark"),
-                        rs.getString("note"),
-                        nullableLong(rs, "douyin_account_id"),
-                        nullableLong(rs, "xiaohongshu_account_id"),
-                        nullableLong(rs, "bilibili_account_id"),
-                        nullableLong(rs, "shipinhao_account_id"),
-                        nullableLong(rs, "kuaishou_account_id"),
-                        nullableLong(rs, "jinritoutiao_account_id")
+                        accountsByPhone.getOrDefault(rs.getLong("id"), Map.of())
                 ),
                 phoneId
         );
         return rows.stream().findFirst().orElseThrow(() -> new IOException("Uploader phone not found: " + phoneId));
+    }
+
+    private Map<Long, Map<String, Long>> phoneAccountBindings() {
+        Map<Long, Map<String, Long>> result = new HashMap<>();
+        jdbcTemplate.query(
+                """
+                SELECT phone_id, platform, account_id
+                FROM uploader_phone_account
+                ORDER BY phone_id, platform
+                """,
+                rs -> {
+                    result.computeIfAbsent(rs.getLong("phone_id"), ignored -> new HashMap<>())
+                            .put(rs.getString("platform"), rs.getLong("account_id"));
+                }
+        );
+        return result;
     }
 
     private List<UploaderPhonePlatformAccounts> platformAccounts() {
@@ -161,6 +161,15 @@ public class UploaderPhoneService {
         return count != null && count > 0;
     }
 
+    private boolean phoneExists(long phoneId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM uploader_phone WHERE id = ?",
+                Integer.class,
+                phoneId
+        );
+        return count != null && count > 0;
+    }
+
     private void ensureSchema() {
         for (PlatformTable platform : PLATFORMS) {
             if (tableExists(platform.table())) {
@@ -172,50 +181,72 @@ public class UploaderPhoneService {
                 CREATE TABLE IF NOT EXISTS uploader_phone (
                     id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                     phone VARCHAR(32) NOT NULL,
-                    remark VARCHAR(128) NULL,
-                    note TEXT NULL,
-                    douyin_account_id BIGINT NULL,
-                    xiaohongshu_account_id BIGINT NULL,
-                    bilibili_account_id BIGINT NULL,
-                    shipinhao_account_id BIGINT NULL,
-                    kuaishou_account_id BIGINT NULL,
-                    jinritoutiao_account_id BIGINT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uniq_uploader_phone_phone (phone),
-                    KEY idx_uploader_phone_douyin_account (douyin_account_id),
-                    KEY idx_uploader_phone_xiaohongshu_account (xiaohongshu_account_id),
-                    KEY idx_uploader_phone_bilibili_account (bilibili_account_id),
-                    KEY idx_uploader_phone_shipinhao_account (shipinhao_account_id),
-                    KEY idx_uploader_phone_kuaishou_account (kuaishou_account_id),
-                    KEY idx_uploader_phone_jinritoutiao_account (jinritoutiao_account_id)
+                    UNIQUE KEY uniq_uploader_phone_phone (phone)
                 )
                 """
         );
-        ensureColumn("remark", "VARCHAR(128) NULL");
-        ensureColumn("note", "TEXT NULL");
-        for (PlatformTable platform : PLATFORMS) {
-            ensureColumn(platform.phoneColumn(), "BIGINT NULL");
-            ensureIndex("idx_uploader_phone_" + platform.key() + "_account", platform.phoneColumn());
-        }
-        seedPhone("15548242598", "主号");
-        seedPhone("15049190018", "流量");
-        seedPhone("19139952929", "小宝");
+        jdbcTemplate.execute(
+                """
+                CREATE TABLE IF NOT EXISTS uploader_phone_account (
+                    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    phone_id BIGINT NOT NULL,
+                    platform VARCHAR(32) NOT NULL,
+                    account_id BIGINT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_uploader_phone_account_phone_platform (phone_id, platform),
+                    KEY idx_uploader_phone_account_platform_account (platform, account_id),
+                    KEY idx_uploader_phone_account_phone (phone_id)
+                )
+                """
+        );
+        migrateLegacyAccountColumns();
+        dropLegacyPhoneColumns();
+        seedPhone("15548242598");
+        seedPhone("15049190018");
+        seedPhone("19139952929");
     }
 
-    private void seedPhone(String phone, String remark) {
+    private void migrateLegacyAccountColumns() {
+        for (PlatformTable platform : PLATFORMS) {
+            if (!columnExists(TABLE, platform.phoneColumn())) {
+                continue;
+            }
+            jdbcTemplate.update(
+                    ("""
+                    INSERT INTO uploader_phone_account (phone_id, platform, account_id, updated_at)
+                    SELECT id, ?, %s, NOW()
+                    FROM uploader_phone
+                    WHERE %s IS NOT NULL
+                    ON DUPLICATE KEY UPDATE account_id = VALUES(account_id), updated_at = NOW()
+                    """).formatted(platform.phoneColumn(), platform.phoneColumn()),
+                    platform.key()
+            );
+        }
+    }
+
+    private void dropLegacyPhoneColumns() {
+        for (PlatformTable platform : PLATFORMS) {
+            dropColumnIfExists(TABLE, platform.phoneColumn());
+        }
+        dropColumnIfExists(TABLE, "remark");
+        dropColumnIfExists(TABLE, "note");
+    }
+
+    private void seedPhone(String phone) {
         jdbcTemplate.update(
                 """
-                INSERT INTO uploader_phone (phone, remark, updated_at)
-                VALUES (?, ?, NOW())
-                ON DUPLICATE KEY UPDATE remark = COALESCE(remark, VALUES(remark))
+                INSERT INTO uploader_phone (phone, updated_at)
+                VALUES (?, NOW())
+                ON DUPLICATE KEY UPDATE phone = VALUES(phone)
                 """,
-                phone,
-                remark
+                phone
         );
     }
 
-    private void ensureColumn(String column, String definition) {
+    private boolean columnExists(String table, String column) {
         Integer count = jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
@@ -225,29 +256,15 @@ public class UploaderPhoneService {
                   AND COLUMN_NAME = ?
                 """,
                 Integer.class,
-                TABLE,
+                table,
                 column
         );
-        if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD COLUMN " + column + " " + definition);
-        }
+        return count != null && count > 0;
     }
 
-    private void ensureIndex(String indexName, String column) {
-        Integer count = jdbcTemplate.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.STATISTICS
-                WHERE TABLE_SCHEMA = DATABASE()
-                  AND TABLE_NAME = ?
-                  AND INDEX_NAME = ?
-                """,
-                Integer.class,
-                TABLE,
-                indexName
-        );
-        if (count == null || count == 0) {
-            jdbcTemplate.execute("ALTER TABLE " + TABLE + " ADD KEY " + indexName + " (" + column + ")");
+    private void dropColumnIfExists(String table, String column) {
+        if (columnExists(table, column)) {
+            jdbcTemplate.execute("ALTER TABLE " + table + " DROP COLUMN " + column);
         }
     }
 
@@ -291,11 +308,6 @@ public class UploaderPhoneService {
                 .orElseThrow(() -> new IOException("Unsupported platform: " + platform));
     }
 
-    private static Long nullableLong(java.sql.ResultSet rs, String column) throws java.sql.SQLException {
-        long value = rs.getLong(column);
-        return rs.wasNull() ? null : value;
-    }
-
     private record PlatformTable(String key, String table, String phoneColumn) {
     }
 }
@@ -309,14 +321,7 @@ record UploaderPhoneMatrixResponse(
 record UploaderPhoneRecord(
         Long id,
         String phone,
-        String remark,
-        String note,
-        Long douyinAccountId,
-        Long xiaohongshuAccountId,
-        Long bilibiliAccountId,
-        Long shipinhaoAccountId,
-        Long kuaishouAccountId,
-        Long jinritoutiaoAccountId
+        Map<String, Long> accounts
 ) {
 }
 
@@ -331,12 +336,6 @@ record UploaderPhoneAccountOption(
         String accountKey,
         String displayName,
         String avatarUrl
-) {
-}
-
-record UploaderPhoneUpdateRequest(
-        String remark,
-        String note
 ) {
 }
 

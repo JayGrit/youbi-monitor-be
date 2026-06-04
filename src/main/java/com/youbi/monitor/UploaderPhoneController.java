@@ -22,15 +22,6 @@ public class UploaderPhoneController {
         return uploaderPhoneService.matrix();
     }
 
-    @PostMapping("/api/uploader-phones/{phoneId}")
-    public ResponseEntity<?> updatePhone(@PathVariable long phoneId, @RequestBody UploaderPhoneUpdateRequest request) {
-        try {
-            return ResponseEntity.ok(uploaderPhoneService.updatePhone(phoneId, request));
-        } catch (Exception exception) {
-            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
-        }
-    }
-
     @PostMapping("/api/uploader-phones/{phoneId}/platform/{platform}")
     public ResponseEntity<?> updatePlatformAccount(
             @PathVariable long phoneId,
