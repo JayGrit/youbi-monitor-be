@@ -129,13 +129,13 @@ public class UploaderPhoneService {
         AccountTableSchemaSupport.ensureSurrogatePrimaryKey(jdbcTemplate, platform.table());
         ensureAccountColumn(platform.table(), "display_name", "VARCHAR(128) NULL");
         ensureAccountColumn(platform.table(), "avatar_url", "VARCHAR(1024) NULL");
-        String nameExpression = "COALESCE(NULLIF(display_name, ''), NULLIF(nickname, ''), account_key)";
+        String nameExpression = "COALESCE(NULLIF(nickname, ''), account_key)";
         if ("bilibili".equals(platform.key())) {
-            nameExpression = "COALESCE(NULLIF(display_name, ''), NULLIF(uname, ''), account_key)";
+            nameExpression = "COALESCE(NULLIF(uname, ''), account_key)";
         }
         return jdbcTemplate.query(
                 ("""
-                SELECT id, account_key, %s AS display_name, avatar_url
+                SELECT id, account_key, %s AS display_name, display_name AS remark, avatar_url
                 FROM %s
                 ORDER BY account_key
                 """).formatted(nameExpression, platform.table()),
@@ -143,6 +143,7 @@ public class UploaderPhoneService {
                         rs.getLong("id"),
                         rs.getString("account_key"),
                         rs.getString("display_name"),
+                        rs.getString("remark"),
                         rs.getString("avatar_url")
                 )
         );
@@ -335,6 +336,7 @@ record UploaderPhoneAccountOption(
         Long id,
         String accountKey,
         String displayName,
+        String remark,
         String avatarUrl
 ) {
 }
