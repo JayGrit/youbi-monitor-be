@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 import com.youbi.monitor.model.SocialAccountProfile;
 import com.youbi.monitor.repository.IDouyinAccountRepositoryService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -172,6 +173,7 @@ public class DouyinAccountService {
         }
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public DouyinAccountStatus renameAccountKey(String oldAccountKey, String newAccountKey) throws IOException {
         String oldKey = normalizeAccountKey(oldAccountKey);
         String newKey = normalizeAccountKey(newAccountKey);
@@ -183,6 +185,9 @@ public class DouyinAccountService {
         }
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Douyin account key not found: " + oldKey);
+        }
+        if (!uploaderAccountService.renameAccountKey("douyin", oldKey, newKey)) {
+            throw new IOException("Douyin uploader account key not found: " + oldKey);
         }
         return status(newKey);
     }
@@ -238,6 +243,9 @@ public class DouyinAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Douyin account key not found: " + normalized);
         }
+        if (!uploaderAccountService.updateEnabled("douyin", normalized, enabled)) {
+            throw new IOException("Douyin uploader account key not found: " + normalized);
+        }
         return status(normalized);
     }
 
@@ -246,6 +254,9 @@ public class DouyinAccountService {
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Douyin account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateCooldown("douyin", normalized, cooldown[0], cooldown[1])) {
+            throw new IOException("Douyin uploader account key not found: " + normalized);
         }
         return status(normalized);
     }

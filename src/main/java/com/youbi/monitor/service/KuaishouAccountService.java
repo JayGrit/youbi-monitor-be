@@ -11,6 +11,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -91,6 +92,7 @@ public class KuaishouAccountService {
                 .orElseThrow(() -> new IOException("Kuaishou account is not logged in: " + normalized));
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public KuaishouAccountStatus renameAccountKey(String oldAccountKey, String newAccountKey) throws IOException {
         String oldKey = normalizeAccountKey(oldAccountKey);
         String newKey = normalizeAccountKey(newAccountKey);
@@ -103,6 +105,9 @@ public class KuaishouAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Kuaishou account key not found: " + oldKey);
         }
+        if (!uploaderAccountService.renameAccountKey("kuaishou", oldKey, newKey)) {
+            throw new IOException("Kuaishou uploader account key not found: " + oldKey);
+        }
         return status(newKey);
     }
 
@@ -110,6 +115,9 @@ public class KuaishouAccountService {
         String normalized = normalizeAccountKey(accountKey);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Kuaishou account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateEnabled("kuaishou", normalized, enabled)) {
+            throw new IOException("Kuaishou uploader account key not found: " + normalized);
         }
         return status(normalized);
     }
@@ -119,6 +127,9 @@ public class KuaishouAccountService {
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Kuaishou account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateCooldown("kuaishou", normalized, cooldown[0], cooldown[1])) {
+            throw new IOException("Kuaishou uploader account key not found: " + normalized);
         }
         return status(normalized);
     }

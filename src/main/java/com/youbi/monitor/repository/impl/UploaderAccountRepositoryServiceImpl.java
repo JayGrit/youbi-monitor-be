@@ -57,10 +57,58 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         toLocalDateTime(rs.getTimestamp("source_updated_at")),
                         toLocalDateTime(rs.getTimestamp("metrics_updated_at"))
                 ),
-                normalize(platform),
-                normalize(accountKey)
+                normalizePlatform(platform),
+                normalizeAccountKey(accountKey)
         );
         return rows.stream().findFirst();
+    }
+
+    @Override
+    public boolean renameAccountKey(String platform, String oldAccountKey, String newAccountKey) {
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET account_key = ?, updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                normalizeAccountKey(newAccountKey),
+                normalizePlatform(platform),
+                normalizeAccountKey(oldAccountKey)
+        );
+        return updated == 1;
+    }
+
+    @Override
+    public boolean updateEnabled(String platform, String accountKey, boolean enabled) {
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET is_enabled = ?, updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                enabled,
+                normalizePlatform(platform),
+                normalizeAccountKey(accountKey)
+        );
+        return updated == 1;
+    }
+
+    @Override
+    public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET upload_cooldown_min_seconds = ?,
+                    upload_cooldown_max_seconds = ?,
+                    updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                minSeconds,
+                maxSeconds,
+                normalizePlatform(platform),
+                normalizeAccountKey(accountKey)
+        );
+        return updated == 1;
     }
 
     private boolean tableExists(String table) {
@@ -90,8 +138,12 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         return count != null && count > 0;
     }
 
-    private static String normalize(String value) {
+    private static String normalizePlatform(String value) {
         return value == null ? "" : value.trim().toLowerCase();
+    }
+
+    private static String normalizeAccountKey(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private static LocalDateTime toLocalDateTime(Timestamp timestamp) {

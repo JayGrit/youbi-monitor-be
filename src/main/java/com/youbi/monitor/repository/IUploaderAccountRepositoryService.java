@@ -6,4 +6,10 @@ import java.util.Optional;
 
 public interface IUploaderAccountRepositoryService {
     Optional<UploaderAccountState> state(String platform, String accountKey);
+
+    boolean renameAccountKey(String platform, String oldAccountKey, String newAccountKey);
+
+    boolean updateEnabled(String platform, String accountKey, boolean enabled);
+
+    boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds);
 }

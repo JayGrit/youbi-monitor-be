@@ -16,6 +16,7 @@ import com.microsoft.playwright.TimeoutError;
 import com.youbi.monitor.model.SocialAccountProfile;
 import com.youbi.monitor.repository.IXiaohongshuAccountRepositoryService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -153,6 +154,7 @@ public class XiaohongshuAccountService {
         }
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public XiaohongshuAccountStatus renameAccountKey(String oldAccountKey, String newAccountKey) throws IOException {
         String oldKey = normalizeAccountKey(oldAccountKey);
         String newKey = normalizeAccountKey(newAccountKey);
@@ -165,6 +167,9 @@ public class XiaohongshuAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Xiaohongshu account key not found: " + oldKey);
         }
+        if (!uploaderAccountService.renameAccountKey("xiaohongshu", oldKey, newKey)) {
+            throw new IOException("Xiaohongshu uploader account key not found: " + oldKey);
+        }
         return status(newKey);
     }
 
@@ -172,6 +177,9 @@ public class XiaohongshuAccountService {
         String normalized = normalizeAccountKey(accountKey);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Xiaohongshu account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateEnabled("xiaohongshu", normalized, enabled)) {
+            throw new IOException("Xiaohongshu uploader account key not found: " + normalized);
         }
         return status(normalized);
     }
@@ -181,6 +189,9 @@ public class XiaohongshuAccountService {
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Xiaohongshu account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateCooldown("xiaohongshu", normalized, cooldown[0], cooldown[1])) {
+            throw new IOException("Xiaohongshu uploader account key not found: " + normalized);
         }
         return status(normalized);
     }

@@ -11,6 +11,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -91,6 +92,7 @@ public class ShipinhaoAccountService {
                 .orElseThrow(() -> new IOException("Shipinhao account is not logged in: " + normalized));
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public ShipinhaoAccountStatus renameAccountKey(String oldAccountKey, String newAccountKey) throws IOException {
         String oldKey = normalizeAccountKey(oldAccountKey);
         String newKey = normalizeAccountKey(newAccountKey);
@@ -103,6 +105,9 @@ public class ShipinhaoAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Shipinhao account key not found: " + oldKey);
         }
+        if (!uploaderAccountService.renameAccountKey("shipinhao", oldKey, newKey)) {
+            throw new IOException("Shipinhao uploader account key not found: " + oldKey);
+        }
         return status(newKey);
     }
 
@@ -110,6 +115,9 @@ public class ShipinhaoAccountService {
         String normalized = normalizeAccountKey(accountKey);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Shipinhao account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateEnabled("shipinhao", normalized, enabled)) {
+            throw new IOException("Shipinhao uploader account key not found: " + normalized);
         }
         return status(normalized);
     }
@@ -119,6 +127,9 @@ public class ShipinhaoAccountService {
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Shipinhao account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateCooldown("shipinhao", normalized, cooldown[0], cooldown[1])) {
+            throw new IOException("Shipinhao uploader account key not found: " + normalized);
         }
         return status(normalized);
     }

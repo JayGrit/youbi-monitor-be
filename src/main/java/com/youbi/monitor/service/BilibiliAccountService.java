@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.youbi.monitor.repository.IBilibiliAccountRepositoryService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.net.URI;
@@ -151,6 +152,7 @@ public class BilibiliAccountService {
         return signedParams(params, APP_KEY_BILI_TV, APP_SECRET_BILI_TV);
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public BilibiliAccountStatus renameAccountKey(String oldAccountKey, String newAccountKey) throws IOException {
         String oldKey = normalizeAccountKey(oldAccountKey);
         String newKey = normalizeAccountKey(newAccountKey);
@@ -163,6 +165,9 @@ public class BilibiliAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Bilibili account key not found: " + oldKey);
         }
+        if (!uploaderAccountService.renameAccountKey("bilibili", oldKey, newKey)) {
+            throw new IOException("Bilibili uploader account key not found: " + oldKey);
+        }
         return status(newKey);
     }
 
@@ -170,6 +175,9 @@ public class BilibiliAccountService {
         String normalized = normalizeAccountKey(accountKey);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Bilibili account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateEnabled("bilibili", normalized, enabled)) {
+            throw new IOException("Bilibili uploader account key not found: " + normalized);
         }
         return status(normalized);
     }
@@ -179,6 +187,9 @@ public class BilibiliAccountService {
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Bilibili account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateCooldown("bilibili", normalized, cooldown[0], cooldown[1])) {
+            throw new IOException("Bilibili uploader account key not found: " + normalized);
         }
         return status(normalized);
     }

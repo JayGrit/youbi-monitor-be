@@ -11,6 +11,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -91,6 +92,7 @@ public class JinritoutiaoAccountService {
                 .orElseThrow(() -> new IOException("Jinritoutiao account is not logged in: " + normalized));
     }
 
+    @Transactional(rollbackFor = Exception.class)
     public JinritoutiaoAccountStatus renameAccountKey(String oldAccountKey, String newAccountKey) throws IOException {
         String oldKey = normalizeAccountKey(oldAccountKey);
         String newKey = normalizeAccountKey(newAccountKey);
@@ -103,6 +105,9 @@ public class JinritoutiaoAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Jinritoutiao account key not found: " + oldKey);
         }
+        if (!uploaderAccountService.renameAccountKey("jinritoutiao", oldKey, newKey)) {
+            throw new IOException("Jinritoutiao uploader account key not found: " + oldKey);
+        }
         return status(newKey);
     }
 
@@ -110,6 +115,9 @@ public class JinritoutiaoAccountService {
         String normalized = normalizeAccountKey(accountKey);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Jinritoutiao account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateEnabled("jinritoutiao", normalized, enabled)) {
+            throw new IOException("Jinritoutiao uploader account key not found: " + normalized);
         }
         return status(normalized);
     }
@@ -119,6 +127,9 @@ public class JinritoutiaoAccountService {
         int[] cooldown = normalizeCooldown(minSeconds, maxSeconds);
         if (!accountKeyExists(normalized)) {
             throw new IOException("Jinritoutiao account key not found: " + normalized);
+        }
+        if (!uploaderAccountService.updateCooldown("jinritoutiao", normalized, cooldown[0], cooldown[1])) {
+            throw new IOException("Jinritoutiao uploader account key not found: " + normalized);
         }
         return status(normalized);
     }
