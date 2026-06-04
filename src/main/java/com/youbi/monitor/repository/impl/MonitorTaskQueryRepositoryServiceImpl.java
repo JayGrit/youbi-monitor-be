@@ -205,10 +205,16 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               WHERE status = 'failed'
               GROUP BY task_id
             ) se ON se.task_id = t.id
+            %s
             ORDER BY t.created_at DESC
             LIMIT ? OFFSET ?
             """;
-    private static final String MONITOR_COUNT_SQL = "SELECT COUNT(*) FROM yd_task";
+    private static final String MONITOR_COUNT_SQL = """
+            SELECT COUNT(*)
+            FROM yd_task t
+            LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            %s
+            """;
     private static final String HEARTBEAT_TABLE = "yd_service_heartbeat";
     private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
             SELECT COUNT(*)
@@ -231,14 +237,40 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset) {
-        return repository.query(MONITOR_SQL, new TaskRowMapper(now), limit, offset);
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage) {
+        SqlFilter filter = taskMonitorFilter(status, type, stage);
+        List<Object> args = new ArrayList<>(filter.args());
+        args.add(limit);
+        args.add(offset);
+        return repository.query(MONITOR_SQL.formatted(filter.clause()), new TaskRowMapper(now), args.toArray());
     }
 
     @Override
-    public long countTaskMonitorItems() {
-        Long count = repository.queryForObject(MONITOR_COUNT_SQL, Long.class);
+    public long countTaskMonitorItems(String status, String type, String stage) {
+        SqlFilter filter = taskMonitorFilter(status, type, stage);
+        Long count = repository.queryForObject(MONITOR_COUNT_SQL.formatted(filter.clause()), Long.class, filter.args().toArray());
         return count == null ? 0 : count;
+    }
+
+    private static SqlFilter taskMonitorFilter(String status, String type, String stage) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+        addFilter(conditions, args, "t.status", status);
+        addFilter(conditions, args, "vi.type", type);
+        addFilter(conditions, args, "t.current_stage", stage);
+        if (conditions.isEmpty()) {
+            return new SqlFilter("", List.of());
+        }
+        return new SqlFilter("WHERE " + String.join(" AND ", conditions), args);
+    }
+
+    private static void addFilter(List<String> conditions, List<Object> args, String column, String value) {
+        String normalized = text(value);
+        if (normalized.isBlank() || "all".equalsIgnoreCase(normalized)) {
+            return;
+        }
+        conditions.add(column + " = ?");
+        args.add(normalized);
     }
 
     @Override
@@ -485,5 +517,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             statuses.add(new UploadPlatformStatus(platform, status));
         }
 
+    }
+
+    private record SqlFilter(String clause, List<Object> args) {
     }
 }

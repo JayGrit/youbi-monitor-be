@@ -116,12 +116,12 @@ public class MonitorService {
         this.taskQueryRepositoryService.ensureMonitorSchema();
     }
 
-    public MonitorResponse listTasks(int page, int limit) {
+    public MonitorResponse listTasks(int page, int limit, String status, String type, String stage) {
         LocalDateTime now = LocalDateTime.now();
         int offset = Math.max(0, page - 1) * limit;
-        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset);
+        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, type, stage);
         List<ServiceHeartbeat> serviceHeartbeats = taskQueryRepositoryService.listServiceHeartbeats(now);
-        long totalCount = taskQueryRepositoryService.countTaskMonitorItems();
+        long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, type, stage);
         return new MonitorResponse(tasks, serviceHeartbeats, now, page, limit, totalCount);
     }
 
