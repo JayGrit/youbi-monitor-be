@@ -12,6 +12,7 @@ public record UploaderAccountState(
         int todayUploadCount,
         int cooldownWaitingCount,
         int uploadRunningCount,
+        int failedUploadCount,
         boolean enabled,
         Boolean available,
         String sourceTable,
@@ -20,6 +21,6 @@ public record UploaderAccountState(
 ) {
     public static UploaderAccountState defaults(String platform, String accountKey) {
         return new UploaderAccountState(platform, accountKey, null, null, 3600, 7200,
-                0, 0, 0, true, null, null, null, null);
+                0, 0, 0, 0, true, null, null, null, null);
     }
 }

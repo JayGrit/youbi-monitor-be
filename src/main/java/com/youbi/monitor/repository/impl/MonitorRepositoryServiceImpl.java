@@ -190,12 +190,40 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
               m.completed_at combiner_completed_at,
               m.error_message combiner_error,
 
-              CASE WHEN COALESCE(us.upload_failed_count, 0) > 0 THEN 'failed' ELSE u.status END uploader_status,
+              CASE WHEN (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
+              ) > 0 THEN 'failed' ELSE u.status END uploader_status,
               u.started_at uploader_started_at,
               u.completed_at uploader_completed_at,
-              us.upload_completed_count uploader_completed_count,
-              us.upload_failed_count uploader_failed_count,
-              us.upload_total_count uploader_total_count,
+              (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END
+              ) uploader_completed_count,
+              (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
+              ) uploader_failed_count,
+              (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
+              ) uploader_total_count,
               ue.child_error_message uploader_child_error,
               u.bilibili_upload_uid,
               u.bilibili_upload_account_name,
@@ -221,6 +249,8 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                 SELECT task_id, title FROM uploader_task_shipinhao WHERE title IS NOT NULL AND title <> ''
                 UNION ALL
                 SELECT task_id, title FROM uploader_task_kuaishou WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_jinritoutiao WHERE title IS NOT NULL AND title <> ''
               ) upload_titles
               GROUP BY task_id
             ) ut ON ut.task_id = t.id
@@ -276,25 +306,6 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
             LEFT JOIN (
               SELECT
                 task_id,
-                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) upload_completed_count,
-                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) upload_failed_count,
-                COUNT(*) upload_total_count
-              FROM (
-                SELECT task_id, status FROM uploader_task_bilibili
-                UNION ALL
-                SELECT task_id, status FROM uploader_task_douyin
-                UNION ALL
-                SELECT task_id, status FROM uploader_task_xiaohongshu
-                UNION ALL
-                SELECT task_id, status FROM uploader_task_shipinhao
-                UNION ALL
-                SELECT task_id, status FROM uploader_task_kuaishou
-              ) upload_task
-              GROUP BY task_id
-            ) us ON us.task_id = t.id
-            LEFT JOIN (
-              SELECT
-                task_id,
                 GROUP_CONCAT(
                   CONCAT(platform, '/', account_key, ': ', COALESCE(NULLIF(error_message, ''), status))
                   ORDER BY platform, account_key
@@ -310,6 +321,8 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                 SELECT task_id, account_key, status, error_message, 'shipinhao' platform FROM uploader_task_shipinhao
                 UNION ALL
                 SELECT task_id, account_key, status, error_message, 'kuaishou' platform FROM uploader_task_kuaishou
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'jinritoutiao' platform FROM uploader_task_jinritoutiao
               ) upload_task
               WHERE status = 'failed'
               GROUP BY task_id
@@ -594,12 +607,13 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
         int uploaderUpdated = repository.update("""
                 UPDATE yd_uploader
                 SET status = 'running',
+                    %s = 'ready',
                     started_at = COALESCE(started_at, NOW()),
                     completed_at = NULL,
                     error_message = NULL,
                     `operator` = NULL
                 WHERE task_id IN (%s)
-                """.formatted(taskPlaceholders), taskArgs);
+                """.formatted(quotedIdentifier(uploadStatusColumn(normalized)), taskPlaceholders), taskArgs);
         int taskUpdated = repository.update("""
                 UPDATE yd_task
                 SET status = 'running',
@@ -817,12 +831,13 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
         int uploaderUpdated = repository.update("""
                 UPDATE yd_uploader
                 SET status = 'running',
+                    %s = 'ready',
                     started_at = COALESCE(started_at, NOW()),
                     completed_at = NULL,
                     error_message = NULL,
                     `operator` = NULL
                 WHERE task_id IN (%s)
-                """.formatted(registeredPlaceholders), registeredArgs);
+                """.formatted(quotedIdentifier(uploadStatusColumn(normalized)), registeredPlaceholders), registeredArgs);
         int taskUpdated = repository.update("""
                 UPDATE yd_task
                 SET status = 'running',
@@ -1274,7 +1289,12 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                               COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
                               OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
                           )
-                        """.formatted(table), taskId, platform);
+	                        """.formatted(table), taskId, platform);
+                repository.update("""
+                        UPDATE yd_uploader
+                        SET %s = 'ready'
+                        WHERE task_id = ?
+                        """.formatted(quotedIdentifier(uploadStatusColumn(platform))), taskId);
             });
         }
     }
@@ -1482,6 +1502,10 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                 .orElse("SELECT NULL task_id, NULL platform WHERE FALSE");
     }
 
+    private static String uploadStatusColumn(String platform) {
+        return normalizeUploadPlatform(platform) + "_upload_status";
+    }
+
     private static String finalVideoRefSql() {
         return """
                 COALESCE(
@@ -1564,6 +1588,12 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
     }
 
     private void ensureUploaderMonitorColumns() {
+        ensureColumn("yd_uploader", "bilibili_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
+        ensureColumn("yd_uploader", "douyin_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
+        ensureColumn("yd_uploader", "xiaohongshu_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
+        ensureColumn("yd_uploader", "shipinhao_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
+        ensureColumn("yd_uploader", "kuaishou_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
+        ensureColumn("yd_uploader", "jinritoutiao_upload_status", "VARCHAR(32) NOT NULL DEFAULT 'no_need'");
         ensureColumn("yd_uploader", "bilibili_upload_uid", "VARCHAR(64) NULL");
         ensureColumn("yd_uploader", "bilibili_upload_account_name", "VARCHAR(128) NULL");
         ensureColumn("yd_uploader", "shipinhao_upload_account_key", "VARCHAR(128) NULL");

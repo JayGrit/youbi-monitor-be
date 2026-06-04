@@ -13,7 +13,6 @@ public class UploaderAccountService {
 
     public UploaderAccountService(IUploaderAccountRepositoryService repositoryService) {
         this.repositoryService = repositoryService;
-        this.repositoryService.ensureSchema();
     }
 
     public UploaderAccountState syncFromPlatformRow(
@@ -27,17 +26,7 @@ public class UploaderAccountService {
             LocalDateTime nextUploadAllowedAt,
             LocalDateTime sourceUpdatedAt
     ) {
-        return repositoryService.syncFromPlatformRow(
-                platform,
-                accountKey,
-                sourceTable,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
+        return state(platform, accountKey).orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
     }
 
     public Optional<UploaderAccountState> state(String platform, String accountKey) {
@@ -45,22 +34,20 @@ public class UploaderAccountService {
     }
 
     public UploaderAccountState updateEnabled(String platform, String accountKey, boolean enabled) {
-        return repositoryService.updateEnabled(platform, accountKey, enabled);
+        return state(platform, accountKey).orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
     }
 
     public UploaderAccountState updateAvailable(String platform, String accountKey, boolean available) {
-        return repositoryService.updateAvailable(platform, accountKey, available);
+        return state(platform, accountKey).orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
     }
 
     public UploaderAccountState updateCooldown(String platform, String accountKey, Integer minSeconds, Integer maxSeconds) {
-        return repositoryService.updateCooldown(platform, accountKey, minSeconds, maxSeconds);
+        return state(platform, accountKey).orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
     }
 
     public void renameAccount(String platform, String oldKey, String newKey) {
-        repositoryService.renameAccount(platform, oldKey, newKey);
     }
 
     public void refreshPlatformMetrics(String platform) {
-        repositoryService.refreshPlatformMetrics(platform);
     }
 }
