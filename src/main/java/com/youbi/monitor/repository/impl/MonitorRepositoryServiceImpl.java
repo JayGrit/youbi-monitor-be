@@ -576,6 +576,25 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
         }
 
         String placeholders = placeholders(normalizedIds.size());
+        List<UploadAccountStatusChange> accountStatusChanges = repository.query("""
+                SELECT submission.account_key, submission.status
+                FROM %s submission
+                JOIN %s account ON account.account_key = submission.account_key
+                WHERE submission.id IN (%s)
+                  AND submission.status = 'failed'
+                FOR UPDATE
+                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders),
+                (rs, rowNum) -> new UploadAccountStatusChange(
+                        rs.getString("account_key"),
+                        rs.getString("status"),
+                        "ready"
+                ),
+                normalizedIds.toArray()
+        );
+        if (accountStatusChanges.isEmpty()) {
+            return new MonitorService.UploadSubmissionRetryResult(normalized, 0, 0, 0);
+        }
+
         List<String> taskIds = repository.queryForList("""
                 SELECT DISTINCT submission.task_id
                 FROM %s submission
@@ -597,6 +616,9 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                 WHERE submission.id IN (%s)
                   AND submission.status = 'failed'
                 """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), normalizedIds.toArray());
+        if (retried > 0) {
+            applyUploaderAccountStatusChanges(normalized, accountStatusChanges);
+        }
 
         String taskPlaceholders = placeholders(taskIds.size());
         Object[] taskArgs = taskIds.toArray();
@@ -804,8 +826,9 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
         }
 
         int registered = 0;
+        List<UploadAccountStatusChange> accountStatusChanges = new ArrayList<>();
         for (UploadBackfillInsertRow row : rows) {
-            registered += repository.update("""
+            int inserted = repository.update("""
                     INSERT INTO %s (
                         task_id, account_key, status, title, video_url, cover_url, description, tags
                     )
@@ -819,7 +842,12 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                     row.description(),
                     row.tags()
             );
+            registered += inserted;
+            if (inserted > 0) {
+                accountStatusChanges.add(new UploadAccountStatusChange(normalizedAccountKey, null, "ready"));
+            }
         }
+        applyUploaderAccountStatusChanges(normalized, accountStatusChanges);
 
         List<String> registeredTaskIds = rows.stream().map(UploadBackfillInsertRow::taskId).distinct().toList();
         Object[] registeredArgs = registeredTaskIds.toArray();
@@ -1270,6 +1298,28 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                 if (!tableExists(table)) {
                     return;
                 }
+                List<UploadAccountStatusChange> accountStatusChanges = repository.query("""
+                        SELECT submission.account_key, submission.status
+                        FROM %s submission
+                        JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                        LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
+                        WHERE submission.task_id = ?
+                          AND submission.status IN ('failed', 'running')
+                          AND submission.account_key = video_info.type
+                          AND (
+                              COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
+                              OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
+                          )
+                        FOR UPDATE
+                        """.formatted(quotedIdentifier(table)),
+                        (rs, rowNum) -> new UploadAccountStatusChange(
+                                rs.getString("account_key"),
+                                rs.getString("status"),
+                                "ready"
+                        ),
+                        taskId,
+                        platform
+                );
                 repository.update("""
                         UPDATE %s submission
                         JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
@@ -1285,7 +1335,8 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                               COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
                               OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
                           )
-	                        """.formatted(table), taskId, platform);
+                        """.formatted(quotedIdentifier(table)), taskId, platform);
+                applyUploaderAccountStatusChanges(platform, accountStatusChanges);
                 repository.update("""
                         UPDATE yd_uploader
                         SET %s = 'ready'
@@ -1293,6 +1344,116 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
                         """.formatted(quotedIdentifier(uploadStatusColumn(platform))), taskId);
             });
         }
+    }
+
+    private void applyUploaderAccountStatusChanges(String platform, List<UploadAccountStatusChange> changes) {
+        String normalizedPlatform = normalizeUploadPlatform(platform);
+        if (changes == null || changes.isEmpty() || !tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)) {
+            return;
+        }
+        boolean hasFailedUploadCount = columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "failed_upload_count");
+        Map<UploadAccountStatusDeltaKey, Integer> counts = new LinkedHashMap<>();
+        for (UploadAccountStatusChange change : changes) {
+            String accountKey = text(change.accountKey());
+            if (accountKey.isBlank()) {
+                continue;
+            }
+            UploadAccountStatusDeltaKey key = new UploadAccountStatusDeltaKey(
+                    accountKey,
+                    normalizeStatus(change.oldStatus()),
+                    normalizeStatus(change.newStatus())
+            );
+            counts.put(key, counts.getOrDefault(key, 0) + 1);
+        }
+        for (Map.Entry<UploadAccountStatusDeltaKey, Integer> entry : counts.entrySet()) {
+            UploadAccountStatusDeltaKey key = entry.getKey();
+            int count = entry.getValue();
+            ensureUploaderAccountRow(normalizedPlatform, key.accountKey());
+            int runningDelta = (runningContribution(key.newStatus()) - runningContribution(key.oldStatus())) * count;
+            int failedDelta = (failedContribution(key.newStatus()) - failedContribution(key.oldStatus())) * count;
+            int todayDelta = (successContribution(key.newStatus()) - successContribution(key.oldStatus())) * count;
+            int waitingDelta = (runningContribution(key.newStatus()) - runningContribution(key.oldStatus())) * count;
+            int readyDelta = (readyContribution(key.newStatus()) - readyContribution(key.oldStatus())) * count;
+            if (runningDelta == 0 && failedDelta == 0 && todayDelta == 0 && waitingDelta == 0 && readyDelta == 0) {
+                continue;
+            }
+
+            List<Object> args = new ArrayList<>();
+            args.add(runningDelta);
+            if (hasFailedUploadCount) {
+                args.add(failedDelta);
+            }
+            args.add(todayDelta);
+            args.add(waitingDelta);
+            args.add(readyDelta);
+            args.add(normalizedPlatform);
+            args.add(key.accountKey());
+            repository.update("""
+                    UPDATE %s
+                    SET upload_running_count = GREATEST(0, upload_running_count + ?),
+                        %s
+                        today_upload_count = GREATEST(0, today_upload_count + ?),
+                        cooldown_waiting_count = GREATEST(
+                            0,
+                            cooldown_waiting_count
+                            + ?
+                            + CASE WHEN next_upload_allowed_at > NOW() THEN ? ELSE 0 END
+                        ),
+                        metrics_updated_at = NOW(),
+                        updated_at = NOW()
+                    WHERE platform = ? AND account_key = ?
+                    """.formatted(
+                            quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE),
+                            hasFailedUploadCount
+                                    ? "failed_upload_count = GREATEST(0, failed_upload_count + ?),"
+                                    : ""
+                    ),
+                    args.toArray()
+            );
+        }
+    }
+
+    private void ensureUploaderAccountRow(String platform, String accountKey) {
+        repository.update("""
+                INSERT INTO %s (
+                    platform, account_key, source_table, is_enabled, is_available, updated_at
+                )
+                VALUES (?, ?, ?, 1, 1, NOW())
+                ON DUPLICATE KEY UPDATE updated_at = updated_at
+                """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
+                platform,
+                accountKey,
+                UPLOADER_ACCOUNT_TABLES.get(platform)
+        );
+    }
+
+    private boolean columnExists(String table, String column) {
+        Integer count = repository.queryForObject("""
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """, Integer.class, table, column);
+        return count != null && count > 0;
+    }
+
+    private static String normalizeStatus(String status) {
+        return text(status).toLowerCase();
+    }
+
+    private static int runningContribution(String status) {
+        return "running".equals(status) ? 1 : 0;
+    }
+
+    private static int failedContribution(String status) {
+        return "failed".equals(status) ? 1 : 0;
+    }
+
+    private static int successContribution(String status) {
+        return "success".equals(status) ? 1 : 0;
+    }
+
+    private static int readyContribution(String status) {
+        return "ready".equals(status) ? 1 : 0;
     }
 
     @Override
@@ -1664,6 +1825,12 @@ public class MonitorRepositoryServiceImpl implements IMonitorRepositoryService {
             String description,
             String tags
     ) {
+    }
+
+    private record UploadAccountStatusChange(String accountKey, String oldStatus, String newStatus) {
+    }
+
+    private record UploadAccountStatusDeltaKey(String accountKey, String oldStatus, String newStatus) {
     }
 
     private static LocalDateTime timestamp(ResultSet rs, String column) throws SQLException {
