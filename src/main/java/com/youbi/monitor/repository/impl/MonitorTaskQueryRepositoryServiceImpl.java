@@ -205,7 +205,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               WHERE status = 'failed'
               GROUP BY task_id
             ) se ON se.task_id = t.id
-            %s
+            __TASK_MONITOR_WHERE__
             ORDER BY t.created_at DESC
             LIMIT ? OFFSET ?
             """;
@@ -213,7 +213,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             SELECT COUNT(*)
             FROM yd_task t
             LEFT JOIN yd_video_info vi ON vi.task_id = t.id
-            %s
+            __TASK_MONITOR_WHERE__
             """;
     private static final String HEARTBEAT_TABLE = "yd_service_heartbeat";
     private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
@@ -242,14 +242,18 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
-        return repository.query(MONITOR_SQL.formatted(filter.clause()), new TaskRowMapper(now), args.toArray());
+        return repository.query(monitorSql(MONITOR_SQL, filter), new TaskRowMapper(now), args.toArray());
     }
 
     @Override
     public long countTaskMonitorItems(String status, String type, String stage) {
         SqlFilter filter = taskMonitorFilter(status, type, stage);
-        Long count = repository.queryForObject(MONITOR_COUNT_SQL.formatted(filter.clause()), Long.class, filter.args().toArray());
+        Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter), Long.class, filter.args().toArray());
         return count == null ? 0 : count;
+    }
+
+    private static String monitorSql(String template, SqlFilter filter) {
+        return template.replace("__TASK_MONITOR_WHERE__", filter.clause());
     }
 
     private static SqlFilter taskMonitorFilter(String status, String type, String stage) {
