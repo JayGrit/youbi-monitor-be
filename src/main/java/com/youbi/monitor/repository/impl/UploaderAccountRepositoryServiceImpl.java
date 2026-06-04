@@ -111,6 +111,22 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         return updated == 1;
     }
 
+    @Override
+    public int resetTodayUploadCounts() {
+        if (!tableExists(TABLE)) {
+            return 0;
+        }
+        return repository.update(
+                """
+                UPDATE uploader_account
+                SET today_upload_count = 0,
+                    metrics_updated_at = NOW(),
+                    updated_at = NOW()
+                WHERE today_upload_count <> 0
+                """
+        );
+    }
+
     private boolean tableExists(String table) {
         Integer count = repository.queryForObject(
                 """

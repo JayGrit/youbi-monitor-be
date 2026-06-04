@@ -12,4 +12,6 @@ public interface IUploaderAccountRepositoryService {
     boolean updateEnabled(String platform, String accountKey, boolean enabled);
 
     boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds);
+
+    int resetTodayUploadCounts();
 }
