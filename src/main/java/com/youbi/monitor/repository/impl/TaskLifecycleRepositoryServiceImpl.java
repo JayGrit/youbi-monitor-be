@@ -222,7 +222,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     return;
                 }
                 List<UploadAccountStatusChange> accountStatusChanges = repository.query("""
-                        SELECT submission.account_key, submission.status
+                        SELECT submission.task_id, submission.account_key, submission.status
                         FROM %s submission
                         JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
                         LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
@@ -236,6 +236,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         FOR UPDATE
                         """.formatted(quotedIdentifier(table)),
                         (rs, rowNum) -> new UploadAccountStatusChange(
+                                rs.getString("task_id"),
                                 rs.getString("account_key"),
                                 rs.getString("status"),
                                 "ready"

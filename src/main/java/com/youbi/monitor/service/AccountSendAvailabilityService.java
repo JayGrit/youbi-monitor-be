@@ -20,6 +20,7 @@ public class AccountSendAvailabilityService {
                 state.nextUploadAllowedAt(),
                 state.todayUploadCount(),
                 state.cooldownWaitingCount(),
+                state.uploadRunningTaskId(),
                 state.uploadRunningCount()
         );
     }

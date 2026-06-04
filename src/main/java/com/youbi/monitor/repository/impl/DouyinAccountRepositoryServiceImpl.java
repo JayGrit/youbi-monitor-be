@@ -29,18 +29,19 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
 
     @Override
     public List<DouyinAccountStatus> listAccounts() {
+        String runningCountSql = runningCountSql();
         return repository.query(
-                """
+                ("""
                 SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
-                       ua.today_upload_count, ua.cooldown_waiting_count, ua.upload_running_count,
+                       ua.today_upload_count, ua.cooldown_waiting_count, %s,
                        ua.is_enabled,
                        pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
                 FROM uploader_account ua
                 LEFT JOIN uploader_account_douyin pa ON pa.account_key = ua.account_key
                 WHERE ua.platform = 'douyin'
                 ORDER BY ua.account_key
-                """,
+                """).formatted(runningCountSql),
                 (rs, rowNum) -> {
                     String accountKey = rs.getString("account_key");
                     String json = rs.getString("storage_state_json");
@@ -69,6 +70,26 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
                     );
                 }
         );
+    }
+
+    private String runningCountSql() {
+        return columnExists("uploader_account", "upload_running_task_id")
+                ? "CASE WHEN NULLIF(ua.upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
+                : "ua.upload_running_count";
+    }
+
+    private boolean columnExists(String table, String column) {
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                table,
+                column
+        );
+        return count != null && count > 0;
     }
 
     @Override

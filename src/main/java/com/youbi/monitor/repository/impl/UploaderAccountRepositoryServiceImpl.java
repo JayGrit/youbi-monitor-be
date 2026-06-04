@@ -29,17 +29,24 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         String failedCountSql = columnExists(TABLE, "failed_upload_count")
                 ? "failed_upload_count"
                 : "0 failed_upload_count";
+        boolean hasRunningTaskId = columnExists(TABLE, "upload_running_task_id");
+        String runningTaskIdSql = hasRunningTaskId
+                ? "NULLIF(upload_running_task_id, '') AS upload_running_task_id"
+                : "NULL AS upload_running_task_id";
+        String runningCountSql = hasRunningTaskId
+                ? "CASE WHEN NULLIF(upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
+                : "upload_running_count";
         List<UploaderAccountState> rows = repository.query(
                 ("""
                 SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
-                       today_upload_count, cooldown_waiting_count, upload_running_count,
+                       today_upload_count, cooldown_waiting_count, %s, %s,
                        %s,
                        is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
                 FROM uploader_account
                 WHERE platform = ? AND account_key = ?
                 LIMIT 1
-                """).formatted(failedCountSql),
+                """).formatted(runningTaskIdSql, runningCountSql, failedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
                         rs.getString("platform"),
                         rs.getString("account_key"),
@@ -49,6 +56,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         nullableInt(rs, "upload_cooldown_max_seconds"),
                         rs.getInt("today_upload_count"),
                         rs.getInt("cooldown_waiting_count"),
+                        rs.getString("upload_running_task_id"),
                         rs.getInt("upload_running_count"),
                         rs.getInt("failed_upload_count"),
                         rs.getBoolean("is_enabled"),

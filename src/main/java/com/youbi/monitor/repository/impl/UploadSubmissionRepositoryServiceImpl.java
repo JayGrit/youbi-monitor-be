@@ -89,7 +89,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
 
         String placeholders = placeholders(normalizedIds.size());
         List<UploadAccountStatusChange> accountStatusChanges = repository.query("""
-                SELECT submission.account_key, submission.status
+                SELECT submission.task_id, submission.account_key, submission.status
                 FROM %s submission
                 JOIN %s account ON account.account_key = submission.account_key
                 WHERE submission.id IN (%s)
@@ -97,6 +97,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 FOR UPDATE
                 """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders),
                 (rs, rowNum) -> new UploadAccountStatusChange(
+                        rs.getString("task_id"),
                         rs.getString("account_key"),
                         rs.getString("status"),
                         "ready"
@@ -356,7 +357,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
             );
             registered += inserted;
             if (inserted > 0) {
-                accountStatusChanges.add(new UploadAccountStatusChange(normalizedAccountKey, null, "ready"));
+                accountStatusChanges.add(new UploadAccountStatusChange(row.taskId(), normalizedAccountKey, null, "ready"));
             }
         }
         applyUploaderAccountStatusChanges(normalized, accountStatusChanges);

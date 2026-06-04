@@ -7,6 +7,7 @@ public record AccountSendAvailability(
         LocalDateTime nextUploadAllowedAt,
         int todayUploadCount,
         int cooldownWaitingCount,
+        String uploadRunningTaskId,
         int uploadRunningCount
 ) {
 }

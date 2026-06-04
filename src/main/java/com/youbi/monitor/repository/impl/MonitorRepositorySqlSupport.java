@@ -239,6 +239,7 @@ abstract class MonitorRepositorySqlSupport {
             return;
         }
         boolean hasFailedUploadCount = columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "failed_upload_count");
+        boolean hasRunningTaskId = columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "upload_running_task_id");
         Map<UploadAccountStatusDeltaKey, Integer> counts = new LinkedHashMap<>();
         for (UploadAccountStatusChange change : changes) {
             String accountKey = text(change.accountKey());
@@ -266,7 +267,9 @@ abstract class MonitorRepositorySqlSupport {
             }
 
             List<Object> args = new ArrayList<>();
-            args.add(runningDelta);
+            if (!hasRunningTaskId) {
+                args.add(runningDelta);
+            }
             if (hasFailedUploadCount) {
                 args.add(failedDelta);
             }
@@ -277,7 +280,7 @@ abstract class MonitorRepositorySqlSupport {
             args.add(key.accountKey());
             repository.update("""
                     UPDATE %s
-                    SET upload_running_count = GREATEST(0, upload_running_count + ?),
+                    SET %s
                         %s
                         today_upload_count = GREATEST(0, today_upload_count + ?),
                         cooldown_waiting_count = GREATEST(
@@ -291,12 +294,56 @@ abstract class MonitorRepositorySqlSupport {
                     WHERE platform = ? AND account_key = ?
                     """.formatted(
                             quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE),
+                            hasRunningTaskId
+                                    ? ""
+                                    : "upload_running_count = GREATEST(0, upload_running_count + ?),",
                             hasFailedUploadCount
                                     ? "failed_upload_count = GREATEST(0, failed_upload_count + ?),"
                                     : ""
                     ),
                     args.toArray()
             );
+        }
+        if (hasRunningTaskId) {
+            for (UploadAccountStatusChange change : changes) {
+                String accountKey = text(change.accountKey());
+                String taskId = text(change.taskId());
+                if (accountKey.isBlank() || taskId.isBlank()) {
+                    continue;
+                }
+                String oldStatus = normalizeStatus(change.oldStatus());
+                String newStatus = normalizeStatus(change.newStatus());
+                if ("running".equals(newStatus)) {
+                    ensureUploaderAccountRow(normalizedPlatform, accountKey);
+                    repository.update("""
+                            UPDATE %s
+                            SET upload_running_task_id = ?,
+                                metrics_updated_at = NOW(),
+                                updated_at = NOW()
+                            WHERE platform = ? AND account_key = ?
+                            """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
+                            taskId,
+                            normalizedPlatform,
+                            accountKey
+                    );
+                } else if ("running".equals(oldStatus)) {
+                    ensureUploaderAccountRow(normalizedPlatform, accountKey);
+                    repository.update("""
+                            UPDATE %s
+                            SET upload_running_task_id = CASE
+                                    WHEN upload_running_task_id = ? THEN NULL
+                                    ELSE upload_running_task_id
+                                END,
+                                metrics_updated_at = NOW(),
+                                updated_at = NOW()
+                            WHERE platform = ? AND account_key = ?
+                            """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
+                            taskId,
+                            normalizedPlatform,
+                            accountKey
+                    );
+                }
+            }
         }
     }
 
@@ -357,7 +404,7 @@ abstract class MonitorRepositorySqlSupport {
     ) {
     }
 
-    protected record UploadAccountStatusChange(String accountKey, String oldStatus, String newStatus) {
+    protected record UploadAccountStatusChange(String taskId, String accountKey, String oldStatus, String newStatus) {
     }
 
     private record UploadAccountStatusDeltaKey(String accountKey, String oldStatus, String newStatus) {

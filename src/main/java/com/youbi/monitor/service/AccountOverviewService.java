@@ -75,6 +75,13 @@ public class AccountOverviewService {
         String failedCountSql = columnExists("uploader_account", "failed_upload_count")
                 ? "ua.failed_upload_count"
                 : "0 failed_upload_count";
+        boolean hasRunningTaskId = columnExists("uploader_account", "upload_running_task_id");
+        String runningTaskIdSql = hasRunningTaskId
+                ? "NULLIF(ua.upload_running_task_id, '') AS upload_running_task_id"
+                : "NULL AS upload_running_task_id";
+        String runningCountSql = hasRunningTaskId
+                ? "CASE WHEN NULLIF(ua.upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
+                : "ua.upload_running_count";
         return ("""
                 SELECT ua.platform,
                        ua.account_key,
@@ -84,7 +91,8 @@ public class AccountOverviewService {
                        ua.upload_cooldown_max_seconds,
                        ua.today_upload_count,
                        ua.cooldown_waiting_count,
-                       ua.upload_running_count,
+                       %s,
+                       %s,
                        %s,
                        ua.is_enabled,
                        ua.is_available,
@@ -157,7 +165,7 @@ public class AccountOverviewService {
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
                 %s
-                """).formatted(failedCountSql, extraWhere == null ? "" : extraWhere);
+                """).formatted(runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -185,6 +193,7 @@ public class AccountOverviewService {
         row.put("uploadCooldownMaxSeconds", nullableInt(rs, "upload_cooldown_max_seconds"));
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
         row.put("cooldownWaitingCount", rs.getInt("cooldown_waiting_count"));
+        row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
         row.put("uploadRunningCount", rs.getInt("upload_running_count"));
         row.put("failedUploadCount", rs.getInt("failed_upload_count"));
         row.put("enabled", rs.getBoolean("is_enabled"));
