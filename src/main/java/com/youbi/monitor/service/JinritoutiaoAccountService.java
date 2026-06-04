@@ -103,7 +103,6 @@ public class JinritoutiaoAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Jinritoutiao account key not found: " + oldKey);
         }
-        uploaderAccountService.renameAccount("jinritoutiao", oldKey, newKey);
         return status(newKey);
     }
 
@@ -112,7 +111,6 @@ public class JinritoutiaoAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Jinritoutiao account key not found: " + normalized);
         }
-        uploaderAccountService.updateEnabled("jinritoutiao", normalized, enabled);
         return status(normalized);
     }
 
@@ -122,7 +120,6 @@ public class JinritoutiaoAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Jinritoutiao account key not found: " + normalized);
         }
-        uploaderAccountService.updateCooldown("jinritoutiao", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -154,7 +151,6 @@ public class JinritoutiaoAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
-        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
     }
 
     private boolean isStorageStateValid(String storageState) {
@@ -241,28 +237,6 @@ public class JinritoutiaoAccountService {
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("jinritoutiao", accountKey, TABLE);
-    }
-
-    private UploaderAccountState syncAccountState(
-            String accountKey,
-            Boolean enabled,
-            Integer minSeconds,
-            Integer maxSeconds,
-            LocalDateTime lastUploadAt,
-            LocalDateTime nextUploadAllowedAt,
-            LocalDateTime sourceUpdatedAt
-    ) {
-        return uploaderAccountService.syncFromPlatformRow(
-                "jinritoutiao",
-                accountKey,
-                TABLE,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
     }
 
     private boolean accountKeyExists(String accountKey) {

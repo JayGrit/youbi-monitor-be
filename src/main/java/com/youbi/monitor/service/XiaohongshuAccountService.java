@@ -63,7 +63,6 @@ public class XiaohongshuAccountService {
     }
 
     public List<XiaohongshuAccountStatus> accounts() {
-        uploaderAccountService.refreshPlatformMetrics("xiaohongshu");
         return repositoryService.listAccounts();
     }
 
@@ -166,7 +165,6 @@ public class XiaohongshuAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Xiaohongshu account key not found: " + oldKey);
         }
-        uploaderAccountService.renameAccount("xiaohongshu", oldKey, newKey);
         return status(newKey);
     }
 
@@ -175,7 +173,6 @@ public class XiaohongshuAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Xiaohongshu account key not found: " + normalized);
         }
-        uploaderAccountService.updateEnabled("xiaohongshu", normalized, enabled);
         return status(normalized);
     }
 
@@ -185,7 +182,6 @@ public class XiaohongshuAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Xiaohongshu account key not found: " + normalized);
         }
-        uploaderAccountService.updateCooldown("xiaohongshu", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -221,7 +217,6 @@ public class XiaohongshuAccountService {
                 profile.nickname(),
                 storageState
         );
-        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
     }
 
     private String normalizeRequestedAccountKey(String accountKey) {
@@ -259,28 +254,6 @@ public class XiaohongshuAccountService {
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("xiaohongshu", accountKey, TABLE);
-    }
-
-    private UploaderAccountState syncAccountState(
-            String accountKey,
-            Boolean enabled,
-            Integer minSeconds,
-            Integer maxSeconds,
-            LocalDateTime lastUploadAt,
-            LocalDateTime nextUploadAllowedAt,
-            LocalDateTime sourceUpdatedAt
-    ) {
-        return uploaderAccountService.syncFromPlatformRow(
-                "xiaohongshu",
-                accountKey,
-                TABLE,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
     }
 
     private boolean accountEnabled(String accountKey) {

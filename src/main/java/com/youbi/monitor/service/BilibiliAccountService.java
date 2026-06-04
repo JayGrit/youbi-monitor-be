@@ -64,7 +64,6 @@ public class BilibiliAccountService {
     }
 
     public List<BilibiliAccountStatus> accounts() {
-        uploaderAccountService.refreshPlatformMetrics("bilibili");
         return repositoryService.listAccounts();
     }
 
@@ -164,7 +163,6 @@ public class BilibiliAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Bilibili account key not found: " + oldKey);
         }
-        uploaderAccountService.renameAccount("bilibili", oldKey, newKey);
         return status(newKey);
     }
 
@@ -173,7 +171,6 @@ public class BilibiliAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Bilibili account key not found: " + normalized);
         }
-        uploaderAccountService.updateEnabled("bilibili", normalized, enabled);
         return status(normalized);
     }
 
@@ -183,7 +180,6 @@ public class BilibiliAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Bilibili account key not found: " + normalized);
         }
-        uploaderAccountService.updateCooldown("bilibili", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -311,28 +307,6 @@ public class BilibiliAccountService {
         return sendAvailabilityService.availability("bilibili", accountKey, TABLE);
     }
 
-    private UploaderAccountState syncAccountState(
-            String accountKey,
-            Boolean enabled,
-            Integer minSeconds,
-            Integer maxSeconds,
-            LocalDateTime lastUploadAt,
-            LocalDateTime nextUploadAllowedAt,
-            LocalDateTime sourceUpdatedAt
-    ) {
-        return uploaderAccountService.syncFromPlatformRow(
-                "bilibili",
-                accountKey,
-                TABLE,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
-    }
-
     private JsonNode getMyInfo(JsonNode loginInfo) throws IOException, InterruptedException {
         HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.bilibili.com/x/space/myinfo"))
                 .header("User-Agent", "Mozilla/5.0")
@@ -385,7 +359,6 @@ public class BilibiliAccountService {
                 uname,
                 objectMapper.writeValueAsString(normalized)
         );
-        syncAccountState(accountKey, null, null, null, null, null, LocalDateTime.now());
     }
 
     private void ensureSchema() {

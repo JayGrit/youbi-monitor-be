@@ -103,7 +103,6 @@ public class ShipinhaoAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Shipinhao account key not found: " + oldKey);
         }
-        uploaderAccountService.renameAccount("shipinhao", oldKey, newKey);
         return status(newKey);
     }
 
@@ -112,7 +111,6 @@ public class ShipinhaoAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Shipinhao account key not found: " + normalized);
         }
-        uploaderAccountService.updateEnabled("shipinhao", normalized, enabled);
         return status(normalized);
     }
 
@@ -122,7 +120,6 @@ public class ShipinhaoAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Shipinhao account key not found: " + normalized);
         }
-        uploaderAccountService.updateCooldown("shipinhao", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -154,14 +151,11 @@ public class ShipinhaoAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
-        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
-        uploaderAccountService.updateAvailable("shipinhao", normalized, true);
     }
 
     void markUnavailable(String accountKey) {
         String normalized = normalizeAccountKey(accountKey);
         repositoryService.markUnavailable(normalized);
-        uploaderAccountService.updateAvailable("shipinhao", normalized, false);
     }
 
     private boolean isStorageStateValid(String storageState) {
@@ -247,28 +241,6 @@ public class ShipinhaoAccountService {
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("shipinhao", accountKey, TABLE);
-    }
-
-    private UploaderAccountState syncAccountState(
-            String accountKey,
-            Boolean enabled,
-            Integer minSeconds,
-            Integer maxSeconds,
-            LocalDateTime lastUploadAt,
-            LocalDateTime nextUploadAllowedAt,
-            LocalDateTime sourceUpdatedAt
-    ) {
-        return uploaderAccountService.syncFromPlatformRow(
-                "shipinhao",
-                accountKey,
-                TABLE,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
     }
 
     private boolean accountKeyExists(String accountKey) {

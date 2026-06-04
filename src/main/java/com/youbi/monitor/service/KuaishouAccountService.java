@@ -103,7 +103,6 @@ public class KuaishouAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Kuaishou account key not found: " + oldKey);
         }
-        uploaderAccountService.renameAccount("kuaishou", oldKey, newKey);
         return status(newKey);
     }
 
@@ -112,7 +111,6 @@ public class KuaishouAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Kuaishou account key not found: " + normalized);
         }
-        uploaderAccountService.updateEnabled("kuaishou", normalized, enabled);
         return status(normalized);
     }
 
@@ -122,7 +120,6 @@ public class KuaishouAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Kuaishou account key not found: " + normalized);
         }
-        uploaderAccountService.updateCooldown("kuaishou", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -154,7 +151,6 @@ public class KuaishouAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
-        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
     }
 
     private boolean isStorageStateValid(String storageState) {
@@ -240,28 +236,6 @@ public class KuaishouAccountService {
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("kuaishou", accountKey, TABLE);
-    }
-
-    private UploaderAccountState syncAccountState(
-            String accountKey,
-            Boolean enabled,
-            Integer minSeconds,
-            Integer maxSeconds,
-            LocalDateTime lastUploadAt,
-            LocalDateTime nextUploadAllowedAt,
-            LocalDateTime sourceUpdatedAt
-    ) {
-        return uploaderAccountService.syncFromPlatformRow(
-                "kuaishou",
-                accountKey,
-                TABLE,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
     }
 
     private boolean accountKeyExists(String accountKey) {

@@ -184,7 +184,6 @@ public class DouyinAccountService {
         if (!repositoryService.renameAccountKey(oldKey, newKey)) {
             throw new IOException("Douyin account key not found: " + oldKey);
         }
-        uploaderAccountService.renameAccount("douyin", oldKey, newKey);
         return status(newKey);
     }
 
@@ -232,7 +231,6 @@ public class DouyinAccountService {
                 truncate(profile.nickname(), 128),
                 storageState
         );
-        syncAccountState(normalized, null, null, null, null, null, LocalDateTime.now());
     }
 
     public DouyinAccountStatus setEnabled(String accountKey, boolean enabled) throws IOException {
@@ -240,7 +238,6 @@ public class DouyinAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Douyin account key not found: " + normalized);
         }
-        uploaderAccountService.updateEnabled("douyin", normalized, enabled);
         return status(normalized);
     }
 
@@ -250,7 +247,6 @@ public class DouyinAccountService {
         if (!accountKeyExists(normalized)) {
             throw new IOException("Douyin account key not found: " + normalized);
         }
-        uploaderAccountService.updateCooldown("douyin", normalized, cooldown[0], cooldown[1]);
         return status(normalized);
     }
 
@@ -289,28 +285,6 @@ public class DouyinAccountService {
 
     private AccountSendAvailability sendAvailability(String accountKey) {
         return sendAvailabilityService.availability("douyin", accountKey, TABLE);
-    }
-
-    private UploaderAccountState syncAccountState(
-            String accountKey,
-            Boolean enabled,
-            Integer minSeconds,
-            Integer maxSeconds,
-            LocalDateTime lastUploadAt,
-            LocalDateTime nextUploadAllowedAt,
-            LocalDateTime sourceUpdatedAt
-    ) {
-        return uploaderAccountService.syncFromPlatformRow(
-                "douyin",
-                accountKey,
-                TABLE,
-                enabled,
-                minSeconds,
-                maxSeconds,
-                lastUploadAt,
-                nextUploadAllowedAt,
-                sourceUpdatedAt
-        );
     }
 
     private boolean accountEnabled(String accountKey) {
