@@ -34,6 +34,7 @@ class Account:
     account_key: str
     user_id: str
     nickname: str
+    is_enabled: bool | None
     storage_state: dict[str, Any]
 
 
@@ -47,9 +48,10 @@ class OpenedAccount:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Open enabled Shipinhao accounts in isolated temporary Chrome profiles using storage_state_json from MySQL."
+        description="Open Shipinhao accounts in isolated temporary Chrome profiles using storage_state_json from MySQL."
     )
     parser.add_argument("--account-key", action="append", default=[], help="Only open selected account_key. Can be specified multiple times.")
+    parser.add_argument("--enabled-only", action="store_true", help="Only open accounts marked enabled in uploader_account.")
     parser.add_argument("--url", default=os.getenv("YDBI_SHIPINHAO_URL", SHIPINHAO_PLATFORM_URL))
     parser.add_argument("--hold-seconds", type=int, default=int(os.getenv("YDBI_SHIPINHAO_HOLD_SECONDS", "0")), help="Seconds to keep Chrome open. 0 means wait until all browser windows are closed.")
     parser.add_argument("--mysql-host", default=os.getenv("YDBI_MYSQL_HOST", DEFAULT_MYSQL_HOST))
@@ -82,12 +84,12 @@ def fetch_accounts(args: argparse.Namespace) -> list[Account]:
             SELECT account.account_key,
                    account.user_id,
                    account.nickname,
+                   state.is_enabled,
                    account.storage_state_json
             FROM uploader_account_shipinhao account
-            JOIN uploader_account state
+            LEFT JOIN uploader_account state
               ON state.platform = 'shipinhao'
              AND state.account_key = account.account_key
-             AND state.is_enabled = 1
             ORDER BY account.account_key
             """
         )
@@ -95,6 +97,8 @@ def fetch_accounts(args: argparse.Namespace) -> list[Account]:
         for row in cursor.fetchall():
             account_key = str(row["account_key"])
             if selected and account_key not in selected:
+                continue
+            if args.enabled_only and not row.get("is_enabled"):
                 continue
             storage_state_json = str(row.get("storage_state_json") or "")
             if not storage_state_json:
@@ -105,6 +109,7 @@ def fetch_accounts(args: argparse.Namespace) -> list[Account]:
                     account_key=account_key,
                     user_id=str(row.get("user_id") or ""),
                     nickname=str(row.get("nickname") or ""),
+                    is_enabled=None if row.get("is_enabled") is None else bool(row.get("is_enabled")),
                     storage_state=json.loads(storage_state_json),
                 )
             )
@@ -161,11 +166,13 @@ def main() -> int:
     args = parse_args()
     accounts = fetch_accounts(args)
     if not accounts:
-        raise SystemExit("No enabled Shipinhao accounts with storage_state_json found.")
+        qualifier = "enabled " if args.enabled_only else ""
+        raise SystemExit(f"No {qualifier}Shipinhao accounts with storage_state_json found.")
 
     print("将打开以下视频号账号，每个账号使用独立临时 Chrome profile：")
     for account in accounts:
-        print(f"- {account.account_key}: user_id={account.user_id or '-'} nickname={account.nickname or '-'}")
+        enabled = "-" if account.is_enabled is None else str(int(account.is_enabled))
+        print(f"- {account.account_key}: enabled={enabled} user_id={account.user_id or '-'} nickname={account.nickname or '-'}")
     print()
 
     opened: list[OpenedAccount] = []

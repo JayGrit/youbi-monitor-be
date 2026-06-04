@@ -29,7 +29,7 @@ then
 fi
 
 echo "准备从数据库读取视频号登录态并打开本地临时 Chrome。"
-echo "每个启用账号会使用独立临时 profile，避免同域名登录态互相覆盖。"
+echo "每个账号会使用独立临时 profile，避免同域名登录态互相覆盖。"
 echo
 
 if ! "${PYTHON}" "${PY_SCRIPT}" "$@"; then
