@@ -6,7 +6,12 @@ import com.youbi.monitor.model.TaskFlowDetail;
 import com.youbi.monitor.model.TaskMonitorItem;
 import com.youbi.monitor.model.WhisperProcessingDetail;
 import com.youbi.monitor.model.WhisperWordTimestamp;
-import com.youbi.monitor.repository.IMonitorRepositoryService;
+import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
+import com.youbi.monitor.repository.ISpeakerSegmentRepositoryService;
+import com.youbi.monitor.repository.ISubmitterAuthorRepositoryService;
+import com.youbi.monitor.repository.ITaskLifecycleRepositoryService;
+import com.youbi.monitor.repository.IUploadSubmissionRepositoryService;
+import com.youbi.monitor.repository.IWhisperProcessingRepositoryService;
 import io.minio.ListObjectsArgs;
 import io.minio.MinioClient;
 import io.minio.RemoveObjectArgs;
@@ -74,43 +79,58 @@ public class MonitorService {
             "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name", "shipinhao_upload_account_key", "shipinhao_upload_account_name", "shipinhao_upload_result_json", "kuaishou_upload_account_key", "kuaishou_upload_account_name", "kuaishou_upload_result_json")
     );
 
-    private final IMonitorRepositoryService repositoryService;
+    private final IMonitorTaskQueryRepositoryService taskQueryRepositoryService;
+    private final IWhisperProcessingRepositoryService whisperProcessingRepositoryService;
+    private final ISpeakerSegmentRepositoryService speakerSegmentRepositoryService;
+    private final IUploadSubmissionRepositoryService uploadSubmissionRepositoryService;
+    private final ISubmitterAuthorRepositoryService submitterAuthorRepositoryService;
+    private final ITaskLifecycleRepositoryService taskLifecycleRepositoryService;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
 
     public MonitorService(
-            IMonitorRepositoryService repositoryService,
+            IMonitorTaskQueryRepositoryService taskQueryRepositoryService,
+            IWhisperProcessingRepositoryService whisperProcessingRepositoryService,
+            ISpeakerSegmentRepositoryService speakerSegmentRepositoryService,
+            IUploadSubmissionRepositoryService uploadSubmissionRepositoryService,
+            ISubmitterAuthorRepositoryService submitterAuthorRepositoryService,
+            ITaskLifecycleRepositoryService taskLifecycleRepositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
     ) {
-        this.repositoryService = repositoryService;
+        this.taskQueryRepositoryService = taskQueryRepositoryService;
+        this.whisperProcessingRepositoryService = whisperProcessingRepositoryService;
+        this.speakerSegmentRepositoryService = speakerSegmentRepositoryService;
+        this.uploadSubmissionRepositoryService = uploadSubmissionRepositoryService;
+        this.submitterAuthorRepositoryService = submitterAuthorRepositoryService;
+        this.taskLifecycleRepositoryService = taskLifecycleRepositoryService;
         this.minioEndpoint = text(minioEndpoint);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
-        this.repositoryService.ensureMonitorSchema();
+        this.taskQueryRepositoryService.ensureMonitorSchema();
     }
 
     public MonitorResponse listTasks(int limit) {
         LocalDateTime now = LocalDateTime.now();
-        List<TaskMonitorItem> tasks = repositoryService.listTaskMonitorItems(now, limit);
-        List<ServiceHeartbeat> serviceHeartbeats = repositoryService.listServiceHeartbeats(now);
+        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit);
+        List<ServiceHeartbeat> serviceHeartbeats = taskQueryRepositoryService.listServiceHeartbeats(now);
         return new MonitorResponse(tasks, serviceHeartbeats, now);
     }
 
     public TaskFlowDetail getTaskFlow(String taskId) {
         LocalDateTime now = LocalDateTime.now();
-        Map<String, Object> task = repositoryService.findTaskFlowRow("yd_task", "id", taskId);
+        Map<String, Object> task = taskQueryRepositoryService.findTaskFlowRow("yd_task", "id", taskId);
         if (task.isEmpty()) {
             return null;
         }
 
-        Map<String, Object> videoInfo = repositoryService.findTaskFlowRow("yd_video_info", "task_id", taskId);
+        Map<String, Object> videoInfo = taskQueryRepositoryService.findTaskFlowRow("yd_video_info", "task_id", taskId);
         List<TaskFlowDetail.TaskFlowAsset> minioObjects = listTaskAssets(taskId);
         List<TaskFlowDetail.TaskFlowStage> stages = new ArrayList<>();
         for (StageDefinition definition : STAGES) {
@@ -120,41 +140,41 @@ public class MonitorService {
     }
 
     public List<WhisperWordTimestamp> whisperWordTimestamps(String taskId) {
-        return repositoryService.listWhisperWordTimestamps(taskId);
+        return whisperProcessingRepositoryService.listWhisperWordTimestamps(taskId);
     }
 
     public WhisperProcessingDetail whisperProcessing(String taskId) {
-        return repositoryService.findWhisperProcessing(taskId);
+        return whisperProcessingRepositoryService.findWhisperProcessing(taskId);
     }
 
     public SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(String taskId, long segmentId, String dstText) {
-        return repositoryService.updateSpeakerSegmentDstText(taskId, segmentId, dstText);
+        return speakerSegmentRepositoryService.updateSpeakerSegmentDstText(taskId, segmentId, dstText);
     }
 
     public FailedUploadSubmissionList failedUploadSubmissions(String platform) {
-        return repositoryService.listFailedUploadSubmissions(platform);
+        return uploadSubmissionRepositoryService.listFailedUploadSubmissions(platform);
     }
 
     @Transactional
     public UploadSubmissionRetryResult retryUploadSubmissions(String platform, List<Long> ids) {
-        return repositoryService.retryFailedUploadSubmissions(platform, ids);
+        return uploadSubmissionRepositoryService.retryFailedUploadSubmissions(platform, ids);
     }
 
     public UploadBackfillCandidateList uploadBackfillCandidates(String platform, String accountKey, String type) {
-        return repositoryService.listUploadBackfillCandidates(platform, accountKey, type);
+        return uploadSubmissionRepositoryService.listUploadBackfillCandidates(platform, accountKey, type);
     }
 
     @Transactional
     public UploadBackfillRegisterResult registerUploadBackfill(String platform, String accountKey, String type, List<String> taskIds) {
-        return repositoryService.registerUploadBackfill(platform, accountKey, type, taskIds);
+        return uploadSubmissionRepositoryService.registerUploadBackfill(platform, accountKey, type, taskIds);
     }
 
     public SubmitterAuthorType authorType(String author) {
-        return repositoryService.findSubmitterAuthorType(author);
+        return submitterAuthorRepositoryService.findSubmitterAuthorType(author);
     }
 
     public List<SubmitterAuthorType> authorTypes() {
-        return repositoryService.listSubmitterAuthorTypes();
+        return submitterAuthorRepositoryService.listSubmitterAuthorTypes();
     }
 
     public SubmitterAuthorType saveAuthorType(
@@ -166,7 +186,7 @@ public class MonitorService {
             String sourceLanguage,
             String targetLanguage
     ) {
-        return repositoryService.saveSubmitterAuthorType(
+        return submitterAuthorRepositoryService.saveSubmitterAuthorType(
                 author,
                 type,
                 needSubtitle,
@@ -178,32 +198,32 @@ public class MonitorService {
     }
 
     public SubmitterAuthorDeleteResult deleteAuthorType(String author) {
-        return repositoryService.deleteSubmitterAuthorType(author);
+        return submitterAuthorRepositoryService.deleteSubmitterAuthorType(author);
     }
 
     @Transactional
     public boolean markTaskReady(String taskId) {
-        return repositoryService.markTaskReady(taskId);
+        return taskLifecycleRepositoryService.markTaskReady(taskId);
     }
 
     @Transactional
     public TaskRestartResult restartTask(String taskId) throws IOException {
-        String status = repositoryService.findTaskStatus(taskId);
+        String status = taskLifecycleRepositoryService.findTaskStatus(taskId);
         if (status == null) {
             return null;
         }
-        if ("running".equals(status) || repositoryService.hasRunningStage(taskId)) {
+        if ("running".equals(status) || taskLifecycleRepositoryService.hasRunningStage(taskId)) {
             throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before restarting.");
         }
 
         int deletedObjects = deleteTaskObjects(taskId);
-        repositoryService.resetTaskRowsForDownloader(taskId);
+        taskLifecycleRepositoryService.resetTaskRowsForDownloader(taskId);
         return new TaskRestartResult("ready", deletedObjects);
     }
 
     @Transactional
     public TaskDeleteResult deleteTask(String taskId) throws IOException {
-        String status = repositoryService.findTaskStatus(taskId);
+        String status = taskLifecycleRepositoryService.findTaskStatus(taskId);
         if (status == null) {
             return null;
         }
@@ -212,13 +232,13 @@ public class MonitorService {
         }
 
         int deletedObjects = deleteTaskObjects(taskId);
-        int deletedRows = repositoryService.deleteTaskRows(taskId);
+        int deletedRows = taskLifecycleRepositoryService.deleteTaskRows(taskId);
         return new TaskDeleteResult("deleted", deletedRows, deletedObjects);
     }
 
     @Transactional
     public TaskStopResult stopTask(String taskId) {
-        return repositoryService.stopTask(taskId);
+        return taskLifecycleRepositoryService.stopTask(taskId);
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
@@ -230,7 +250,7 @@ public class MonitorService {
             LocalDateTime now
     ) {
         String table = STAGE_TABLES.get(definition.key());
-        Map<String, Object> stageRow = repositoryService.findTaskFlowRow(table, "task_id", taskId);
+        Map<String, Object> stageRow = taskQueryRepositoryService.findTaskFlowRow(table, "task_id", taskId);
         LocalDateTime startedAt = localDateTime(stageRow.get("started_at"));
         LocalDateTime completedAt = localDateTime(stageRow.get("completed_at"));
         String status = stringValue(stageRow.getOrDefault("status", "pending"));
@@ -296,10 +316,10 @@ public class MonitorService {
     }
 
     private void addUploaderTaskTable(List<TaskFlowDetail.TaskFlowTable> tables, String platform, String table, String taskId) {
-        if (!repositoryService.tableExists(table)) {
+        if (!taskQueryRepositoryService.tableExists(table)) {
             return;
         }
-        List<Map<String, Object>> rows = repositoryService.listTaskFlowRows(table, "task_id", taskId, "account_key, id", CHILD_ROW_LIMIT + 1);
+        List<Map<String, Object>> rows = taskQueryRepositoryService.listTaskFlowRows(table, "task_id", taskId, "account_key, id", CHILD_ROW_LIMIT + 1);
         boolean truncated = rows.size() > CHILD_ROW_LIMIT;
         if (truncated) {
             rows = rows.subList(0, CHILD_ROW_LIMIT);
@@ -317,10 +337,10 @@ public class MonitorService {
     }
 
     private void addLimitedTable(List<TaskFlowDetail.TaskFlowTable> tables, String table, String id, String idColumn, String orderBy) {
-        if (!repositoryService.tableExists(table)) {
+        if (!taskQueryRepositoryService.tableExists(table)) {
             return;
         }
-        List<Map<String, Object>> rows = repositoryService.listTaskFlowRows(table, idColumn, id, orderBy, CHILD_ROW_LIMIT + 1);
+        List<Map<String, Object>> rows = taskQueryRepositoryService.listTaskFlowRows(table, idColumn, id, orderBy, CHILD_ROW_LIMIT + 1);
         boolean truncated = rows.size() > CHILD_ROW_LIMIT;
         if (truncated) {
             rows = rows.subList(0, CHILD_ROW_LIMIT);

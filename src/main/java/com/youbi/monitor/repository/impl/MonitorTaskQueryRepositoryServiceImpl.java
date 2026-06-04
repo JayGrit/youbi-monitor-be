@@ -1,0 +1,476 @@
+package com.youbi.monitor.repository.impl;
+
+import com.youbi.monitor.dto.DeviceHeartbeat;
+import com.youbi.monitor.dto.ServiceHeartbeat;
+import com.youbi.monitor.model.StageNode;
+import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
+import com.youbi.monitor.repository.MonitorRepository;
+import com.youbi.monitor.repository.RowMapper;
+import org.springframework.stereotype.Service;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+@Service
+public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlSupport implements IMonitorTaskQueryRepositoryService {
+    private static final long HEARTBEAT_ONLINE_SECONDS = 60;
+    private static final List<String> HEARTBEAT_DEVICES = List.of(
+            "Macbook Air M4",
+            "Macmini M2",
+            "LPXB",
+            "MY_HP",
+            "LPXB_HP",
+            "TXY"
+    );
+    private static final String MONITOR_SQL = """
+            SELECT
+              t.id,
+              COALESCE(NULLIF(u.upload_title, ''), NULLIF(ut.upload_title, ''), NULLIF(t.title, '')) title,
+              t.source_url,
+              vi.source_webpage_url,
+              vi.source_thumbnail_url,
+              vi.source_duration_seconds,
+              vi.type task_type,
+              t.status,
+              t.current_stage,
+              t.created_at,
+              t.started_at,
+              t.completed_at,
+              t.error_message,
+
+              d.status downloader_status,
+              d.started_at downloader_started_at,
+              d.completed_at downloader_completed_at,
+              d.error_message downloader_error,
+
+              de.status demucs_status,
+              de.started_at demucs_started_at,
+              de.completed_at demucs_completed_at,
+              de.error_message demucs_error,
+
+              w.status whisper_status,
+              w.started_at whisper_started_at,
+              w.completed_at whisper_completed_at,
+              w.error_message whisper_error,
+
+              CASE WHEN COALESCE(tf.translator_failed_count, 0) > 0 THEN 'failed' ELSE tr.status END translator_status,
+              tr.started_at translator_started_at,
+              tr.completed_at translator_completed_at,
+              tr.error_message translator_error,
+              ts.translated_count translator_completed_count,
+              tf.translator_failed_count translator_failed_count,
+              GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0)) translator_total_count,
+              te.child_error_message translator_child_error,
+
+              CASE WHEN COALESCE(ss.speaker_failed_count, 0) > 0 THEN 'failed' ELSE sp.status END speaker_status,
+              sp.started_at speaker_started_at,
+              sp.completed_at speaker_completed_at,
+              sp.error_message speaker_error,
+              ss.speaker_completed_count,
+              ss.speaker_failed_count,
+              ss.speaker_total_count,
+              se.child_error_message speaker_child_error,
+
+              m.status combiner_status,
+              m.started_at combiner_started_at,
+              m.completed_at combiner_completed_at,
+              m.error_message combiner_error,
+
+              CASE WHEN (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
+              ) > 0 THEN 'failed' ELSE u.status END uploader_status,
+              u.started_at uploader_started_at,
+              u.completed_at uploader_completed_at,
+              (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END
+              ) uploader_completed_count,
+              (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
+              ) uploader_failed_count,
+              (
+                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
+              ) uploader_total_count,
+              ue.child_error_message uploader_child_error,
+              u.bilibili_upload_uid,
+              u.bilibili_upload_account_name,
+              u.error_message uploader_error
+            FROM yd_task t
+            LEFT JOIN yd_downloader d ON d.task_id = t.id
+            LEFT JOIN yd_demucs de ON de.task_id = t.id
+            LEFT JOIN yd_whisper w ON w.task_id = t.id
+            LEFT JOIN yd_translator tr ON tr.task_id = t.id
+            LEFT JOIN yd_speaker sp ON sp.task_id = t.id
+            LEFT JOIN yd_combiner m ON m.task_id = t.id
+            LEFT JOIN yd_uploader u ON u.task_id = t.id
+            LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, MIN(title) upload_title
+              FROM (
+                SELECT task_id, title FROM uploader_task_bilibili WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_douyin WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_xiaohongshu WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_shipinhao WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_kuaishou WHERE title IS NOT NULL AND title <> ''
+                UNION ALL
+                SELECT task_id, title FROM uploader_task_jinritoutiao WHERE title IS NOT NULL AND title <> ''
+              ) upload_titles
+              GROUP BY task_id
+            ) ut ON ut.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, COUNT(*) fixed_count
+              FROM yd_asr_segment
+              GROUP BY task_id
+            ) fa ON fa.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, COUNT(*) translated_count
+              FROM yd_speaker_segment
+              GROUP BY task_id
+            ) ts ON ts.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id, COUNT(*) translator_failed_count
+              FROM yd_translator_api_task
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) tf ON tf.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) speaker_completed_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) speaker_failed_count,
+                COUNT(*) speaker_total_count
+              FROM yd_speaker_segment
+              GROUP BY task_id
+            ) ss ON ss.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                GROUP_CONCAT(
+                  CONCAT(request_key, ' #', item_index, ': ', COALESCE(NULLIF(error_message, ''), status))
+                  ORDER BY id
+                  SEPARATOR 0x0A
+                ) child_error_message
+              FROM yd_translator_api_task
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) te ON te.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                GROUP_CONCAT(
+                  CONCAT('segment #', item_index, ': ', COALESCE(NULLIF(error_message, ''), status))
+                  ORDER BY item_index
+                  SEPARATOR 0x0A
+                ) child_error_message
+              FROM yd_speaker_segment
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) se ON se.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                GROUP_CONCAT(
+                  CONCAT(platform, '/', account_key, ': ', COALESCE(NULLIF(error_message, ''), status))
+                  ORDER BY platform, account_key
+                  SEPARATOR 0x0A
+                ) child_error_message
+              FROM (
+                SELECT task_id, account_key, status, error_message, 'bilibili' platform FROM uploader_task_bilibili
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'douyin' platform FROM uploader_task_douyin
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'xiaohongshu' platform FROM uploader_task_xiaohongshu
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'shipinhao' platform FROM uploader_task_shipinhao
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'kuaishou' platform FROM uploader_task_kuaishou
+                UNION ALL
+                SELECT task_id, account_key, status, error_message, 'jinritoutiao' platform FROM uploader_task_jinritoutiao
+              ) upload_task
+              WHERE status = 'failed'
+              GROUP BY task_id
+            ) ue ON ue.task_id = t.id
+            ORDER BY t.created_at DESC
+            LIMIT ?
+            """;
+    private static final String HEARTBEAT_TABLE = "yd_service_heartbeat";
+    private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
+            SELECT COUNT(*)
+            FROM INFORMATION_SCHEMA.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            """;
+    private static final String HEARTBEAT_COLUMNS_SQL = """
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+            """;
+
+
+    public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository) {
+        super(repository);
+    }
+
+    @Override
+    public void ensureMonitorSchema() {
+    }
+
+    @Override
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit) {
+        return repository.query(MONITOR_SQL, new TaskRowMapper(now), limit);
+    }
+
+    @Override
+    public Map<String, Object> findTaskFlowRow(String table, String idColumn, String id) {
+        return singleRow(table, idColumn, id);
+    }
+
+    @Override
+    public List<Map<String, Object>> listTaskFlowRows(String table, String idColumn, String id, String orderBy, int limit) {
+        return rows(table, idColumn, id, orderBy, limit);
+    }
+
+    private Map<String, Object> singleRow(String table, String idColumn, String id) {
+        if (table == null || !tableExists(table)) {
+            return Map.of();
+        }
+        List<Map<String, Object>> rows = rows(table, idColumn, id, idColumn, 1);
+        return rows.isEmpty() ? Map.of() : rows.get(0);
+    }
+
+    private List<Map<String, Object>> rows(String table, String idColumn, String id, String orderBy, int limit) {
+        return repository.query(
+                "SELECT * FROM " + quotedIdentifier(table)
+                        + " WHERE " + quotedIdentifier(idColumn) + " = ?"
+                        + orderClause(table, orderBy)
+                        + " LIMIT ?",
+                (rs, rowNum) -> rowMap(rs),
+                id,
+                limit
+        );
+    }
+
+    private String orderClause(String table, String orderBy) {
+        if (orderBy == null || orderBy.isBlank()) {
+            return "";
+        }
+        Set<String> columns = new HashSet<>(columns(table));
+        List<String> parts = new ArrayList<>();
+        for (String raw : orderBy.split(",")) {
+            String column = raw.trim();
+            if (columns.contains(column)) {
+                parts.add(quotedIdentifier(column));
+            }
+        }
+        return parts.isEmpty() ? "" : " ORDER BY " + String.join(", ", parts);
+    }
+
+    private List<String> columns(String table) {
+        if (!tableExists(table)) {
+            return List.of();
+        }
+        return repository.queryForList("""
+                SELECT COLUMN_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                ORDER BY ORDINAL_POSITION
+                """, String.class, table);
+    }
+
+    private Map<String, Object> rowMap(ResultSet rs) throws SQLException {
+        Map<String, Object> row = new LinkedHashMap<>();
+        int count = rs.getMetaData().getColumnCount();
+        for (int i = 1; i <= count; i++) {
+            String name = rs.getMetaData().getColumnLabel(i);
+            Object value = rs.getObject(i);
+            if (value instanceof Timestamp timestamp) {
+                value = timestamp.toLocalDateTime();
+            }
+            row.put(name, value);
+        }
+        return row;
+    }
+
+    @Override
+    public List<ServiceHeartbeat> listServiceHeartbeats(LocalDateTime now) {
+        Map<String, ServiceHeartbeat> byService = new LinkedHashMap<>();
+        for (StageDefinition stage : STAGES) {
+            byService.put(stage.key(), emptyHeartbeat(stage));
+        }
+
+        if (!heartbeatTableExists()) {
+            return new ArrayList<>(byService.values());
+        }
+
+        repository.query(heartbeatSql(), rs -> {
+            String serviceName = rs.getString("service_name");
+            if (!byService.containsKey(serviceName)) {
+                return;
+            }
+            String label = labelForService(serviceName);
+            byService.put(serviceName, new ServiceHeartbeat(serviceName, label, deviceHeartbeats(rs, now)));
+        });
+        return new ArrayList<>(byService.values());
+    }
+
+    private boolean heartbeatTableExists() {
+        Integer count = repository.queryForObject(HEARTBEAT_TABLE_EXISTS_SQL, Integer.class, HEARTBEAT_TABLE);
+        return count != null && count > 0;
+    }
+
+    private String heartbeatSql() {
+        List<String> columns = repository.queryForList(HEARTBEAT_COLUMNS_SQL, String.class, HEARTBEAT_TABLE);
+        StringBuilder sql = new StringBuilder("SELECT service_name");
+        for (String device : HEARTBEAT_DEVICES) {
+            sql.append(",\n  ");
+            if (columns.contains(device)) {
+                sql.append(quotedIdentifier(device));
+            } else {
+                sql.append("NULL AS ").append(quotedIdentifier(device));
+            }
+        }
+        sql.append("\nFROM ").append(HEARTBEAT_TABLE);
+        return sql.toString();
+    }
+
+    private static ServiceHeartbeat emptyHeartbeat(StageDefinition stage) {
+        return new ServiceHeartbeat(stage.key(), stage.label(), emptyDeviceHeartbeats());
+    }
+
+    private static List<DeviceHeartbeat> emptyDeviceHeartbeats() {
+        List<DeviceHeartbeat> devices = new ArrayList<>();
+        for (String device : HEARTBEAT_DEVICES) {
+            devices.add(new DeviceHeartbeat(device, null, false, 0));
+        }
+        return devices;
+    }
+
+    private static List<DeviceHeartbeat> deviceHeartbeats(ResultSet rs, LocalDateTime now) throws SQLException {
+        List<DeviceHeartbeat> devices = new ArrayList<>();
+        for (String device : HEARTBEAT_DEVICES) {
+            LocalDateTime lastSeenAt = timestamp(rs, device);
+            long secondsSinceLastSeen = elapsedSeconds(lastSeenAt, null, now);
+            boolean online = lastSeenAt != null && secondsSinceLastSeen <= HEARTBEAT_ONLINE_SECONDS;
+            devices.add(new DeviceHeartbeat(device, lastSeenAt, online, secondsSinceLastSeen));
+        }
+        return devices;
+    }
+
+    private static String labelForService(String serviceName) {
+        for (StageDefinition stage : STAGES) {
+            if (stage.key().equals(serviceName)) {
+                return stage.label();
+            }
+        }
+        return serviceName;
+    }
+
+    private static class TaskRowMapper implements RowMapper<TaskMonitorItem> {
+        private final LocalDateTime now;
+
+        private TaskRowMapper(LocalDateTime now) {
+            this.now = now;
+        }
+
+        @Override
+        public TaskMonitorItem mapRow(ResultSet rs, int rowNum) throws SQLException {
+            LocalDateTime taskStartedAt = timestamp(rs, "started_at");
+            LocalDateTime taskCompletedAt = timestamp(rs, "completed_at");
+            List<StageNode> nodes = new ArrayList<>();
+            for (StageDefinition stage : STAGES) {
+                LocalDateTime startedAt = timestamp(rs, stage.startedAtColumn());
+                LocalDateTime completedAt = timestamp(rs, stage.completedAtColumn());
+                nodes.add(new StageNode(
+                        stage.key(),
+                        stage.label(),
+                        stringOrDefault(rs, stage.statusColumn(), "pending"),
+                        startedAt,
+                        completedAt,
+                        elapsedSeconds(startedAt, completedAt, now),
+                        countValue(rs, stage.key(), "completed_count"),
+                        countValue(rs, stage.key(), "failed_count"),
+                        countValue(rs, stage.key(), "total_count"),
+                        rs.getString(stage.errorColumn()),
+                        childErrorMessage(rs, stage.key())
+                ));
+            }
+
+            return new TaskMonitorItem(
+                    rs.getString("id"),
+                    rs.getString("title"),
+                    rs.getString("source_url"),
+                    rs.getString("source_webpage_url"),
+                    rs.getString("source_thumbnail_url"),
+                    doubleOrNull(rs, "source_duration_seconds"),
+                    rs.getString("task_type"),
+                    rs.getString("status"),
+                    rs.getString("current_stage"),
+                    timestamp(rs, "created_at"),
+                    taskStartedAt,
+                    taskCompletedAt,
+                    elapsedSeconds(taskStartedAt, taskCompletedAt, now),
+                    rs.getString("bilibili_upload_uid"),
+                    rs.getString("bilibili_upload_account_name"),
+                    rs.getString("error_message"),
+                    nodes
+            );
+        }
+
+        private static String stringOrDefault(ResultSet rs, String column, String defaultValue) throws SQLException {
+            String value = rs.getString(column);
+            return value == null || value.isBlank() ? defaultValue : value;
+        }
+
+        private static Double doubleOrNull(ResultSet rs, String column) throws SQLException {
+            double value = rs.getDouble(column);
+            return rs.wasNull() ? null : value;
+        }
+
+        private static Integer countValue(ResultSet rs, String stageKey, String suffix) throws SQLException {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey) && !"uploader".equals(stageKey)) {
+                return null;
+            }
+            int value = rs.getInt(stageKey + "_" + suffix);
+            return rs.wasNull() ? null : value;
+        }
+
+        private static String childErrorMessage(ResultSet rs, String stageKey) throws SQLException {
+            if (!"translator".equals(stageKey) && !"speaker".equals(stageKey) && !"uploader".equals(stageKey)) {
+                return null;
+            }
+            return rs.getString(stageKey + "_child_error");
+        }
+
+    }
+}
