@@ -45,6 +45,9 @@ public class JinritoutiaoUploadService {
     private static final List<String> MISSING_VIDEO_TEXTS = List.of(
             "请上传视频", "请选择视频", "上传视频后", "请添加视频"
     );
+    private static final List<String> MISSING_COVER_TEXTS = List.of(
+            "该视频需要上传一个封面", "请上传封面", "请选择封面"
+    );
     private static final List<String> TITLE_SELECTORS = List.of(
             ".form-item-title input",
             "input[placeholder*='0～30']",
@@ -235,7 +238,7 @@ public class JinritoutiaoUploadService {
     private void uploadCover(Page page, Path coverPath, String taskId) {
         Path preparedCoverPath = coverPath;
         try {
-            if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "修改封面", "重新上传封面")) {
+            if (hasSelectedCover(page)) {
                 return;
             }
             preparedCoverPath = prepareCoverForUpload(coverPath, taskId);
@@ -245,19 +248,22 @@ public class JinritoutiaoUploadService {
                 return;
             }
             page.waitForTimeout(1500);
-            clickVisibleText(page, "本地上传");
-            Locator coverInput = page.locator("input[type='file'][accept*='image']").last();
+            dumpDiagnostics(page, taskId, "cover-picker-open");
+            clickCoverEditorText(page, "本地上传", taskId);
+            Locator coverInput = page.locator("input[type='file'][accept*='image'], input[type='file'][accept*='.png'], input[type='file'][accept*='.jpg'], input[type='file'][accept*='.jpeg']").last();
             coverInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
             coverInput.setInputFiles(preparedCoverPath);
             page.waitForTimeout(3000);
             dumpDiagnostics(page, taskId, "cover-uploaded");
             confirmCoverEditor(page, taskId);
+            waitForCoverSelected(page, taskId);
             dumpDiagnostics(page, taskId, "cover-confirmed");
             log.info("Jinritoutiao upload cover uploaded taskId={} cover={} preparedCover={} trigger={}", taskId, coverPath, preparedCoverPath, clicked);
         } catch (Exception exception) {
             dumpDiagnostics(page, taskId, "cover-upload-failed");
-            log.warn("Jinritoutiao upload cover upload failed taskId={} cover={} message={}", taskId, coverPath, exception.getMessage());
-            selectGeneratedCover(page, taskId);
+            throw exception instanceof RuntimeException runtimeException
+                    ? runtimeException
+                    : new RuntimeException("Jinritoutiao cover upload failed: " + exception.getMessage(), exception);
         } finally {
             if (preparedCoverPath != null && !preparedCoverPath.equals(coverPath)) {
                 try {
@@ -307,7 +313,7 @@ public class JinritoutiaoUploadService {
 
     private void selectGeneratedCover(Page page, String taskId) {
         try {
-            if (TextSupport.containsAny(PlaywrightDiagnostics.safeBodyText(page), "修改封面", "重新上传封面")) {
+            if (hasSelectedCover(page)) {
                 return;
             }
             String clicked = clickVisibleText(page, "上传封面");
@@ -323,9 +329,10 @@ public class JinritoutiaoUploadService {
                 firstFrame.click(new Locator.ClickOptions().setForce(true));
                 page.waitForTimeout(500);
             }
-            clickVisibleText(page, "下一步");
+            clickCoverEditorText(page, "下一步", taskId);
             page.waitForTimeout(2000);
             confirmCoverEditor(page, taskId);
+            waitForCoverSelected(page, taskId);
             dumpDiagnostics(page, taskId, "cover-selected");
             log.info("Jinritoutiao upload selected generated cover taskId={} trigger={}", taskId, clicked);
         } catch (Exception exception) {
@@ -337,17 +344,16 @@ public class JinritoutiaoUploadService {
     private void confirmCoverEditor(Page page, String taskId) {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 4; attempt++) {
-            String body = PlaywrightDiagnostics.safeBodyText(page);
-            if (!coverEditorNeedsConfirmation(body)) {
+            if (!isCoverEditorVisible(page)) {
                 page.waitForTimeout(1000);
-                if (!coverEditorNeedsConfirmation(PlaywrightDiagnostics.safeBodyText(page))) {
+                if (!isCoverEditorVisible(page)) {
                     log.info("Jinritoutiao upload cover editor closed taskId={} attempts={}", taskId, attempt - 1);
                     return;
                 }
             }
             for (String text : List.of("完成", "确定", "确认")) {
                 try {
-                    String clicked = clickTopmostVisibleText(page, text);
+                    String clicked = clickCoverEditorText(page, text, taskId);
                     if (!"not-clicked".equals(clicked)) {
                         log.info("Jinritoutiao upload cover editor confirm clicked taskId={} attempt={} text={} method={}",
                                 taskId, attempt, text, clicked);
@@ -360,23 +366,100 @@ public class JinritoutiaoUploadService {
                 }
             }
         }
-        String body = PlaywrightDiagnostics.safeBodyText(page);
-        if (coverEditorNeedsConfirmation(body)) {
+        if (isCoverEditorVisible(page)) {
             dumpDiagnostics(page, taskId, "cover-confirm-timeout");
             throw last == null
-                    ? new RuntimeException("Jinritoutiao cover editor did not close, body=" + TextSupport.truncate(body, 200))
+                    ? new RuntimeException("Jinritoutiao cover editor did not close, body=" + TextSupport.truncate(visibleBodyText(page), 200))
                     : last;
         }
     }
 
-    private boolean coverEditorNeedsConfirmation(String body) {
-        return TextSupport.containsAny(body,
-                "封面编辑",
-                "完成后无法继续编辑",
-                "是否确定完成",
-                "图片截取",
-                "本地上传"
+    private void waitForCoverSelected(Page page, String taskId) {
+        long deadline = System.currentTimeMillis() + Duration.ofSeconds(30).toMillis();
+        int checks = 0;
+        while (System.currentTimeMillis() < deadline) {
+            checks += 1;
+            if (!isCoverEditorVisible(page) && hasSelectedCover(page) && !isMissingCoverVisible(page)) {
+                log.info("Jinritoutiao upload cover selected taskId={} checks={}", taskId, checks);
+                return;
+            }
+            page.waitForTimeout(1000);
+        }
+        dumpDiagnostics(page, taskId, "cover-selected-timeout");
+        throw new RuntimeException("Jinritoutiao cover was not selected, body=" + TextSupport.truncate(visibleBodyText(page), 200));
+    }
+
+    private String clickCoverEditorText(Page page, String text, String taskId) {
+        String clicked = clickTopmostVisibleText(page, text);
+        if (!"not-clicked".equals(clicked)) {
+            return clicked;
+        }
+        clicked = clickVisibleText(page, text);
+        if (!"not-clicked".equals(clicked)) {
+            return clicked;
+        }
+        log.warn("Jinritoutiao upload cover editor text not clicked taskId={} text={}", taskId, text);
+        return clicked;
+    }
+
+    private boolean isCoverEditorVisible(Page page) {
+        return Boolean.TRUE.equals(page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const style = getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+                  };
+                  return Array.from(document.querySelectorAll('.body, [role="dialog"], .byte-modal, .arco-modal, .m-server-bg-list, .detail'))
+                    .some((el) => visible(el) && (el.innerText || '').includes('封面截取') && (el.innerText || '').includes('本地上传'));
+                }
+                """
+        ));
+    }
+
+    private boolean hasSelectedCover(Page page) {
+        String body = visibleBodyText(page);
+        if (TextSupport.containsAny(body, "修改封面", "重新上传封面")) {
+            return true;
+        }
+        return Boolean.TRUE.equals(page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const style = getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 40 && rect.height >= 40;
+                  };
+                  return Array.from(document.querySelectorAll('.form-item-poster img, .form-item-poster canvas, .m-poster img, .m-poster canvas'))
+                    .some((el) => visible(el));
+                }
+                """
+        ));
+    }
+
+    private boolean isMissingCoverVisible(Page page) {
+        return TextSupport.containsAny(visibleBodyText(page), MISSING_COVER_TEXTS.toArray(String[]::new));
+    }
+
+    private String visibleBodyText(Page page) {
+        Object result = page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const style = getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+                  };
+                  return Array.from(document.querySelectorAll('body *'))
+                    .filter(visible)
+                    .map((el) => el.innerText || '')
+                    .filter(Boolean)
+                    .join('\\n');
+                }
+                """
         );
+        return result == null ? "" : result.toString();
     }
 
     private String clickTopmostVisibleText(Page page, String text) {
@@ -520,6 +603,10 @@ public class JinritoutiaoUploadService {
                             taskId, attempts, TextSupport.truncate(body, 300));
                     page.waitForTimeout(5000);
                     continue;
+                }
+                if (TextSupport.containsAny(body, MISSING_COVER_TEXTS.toArray(String[]::new))) {
+                    dumpDiagnostics(page, taskId, "submit-missing-cover-" + attempts);
+                    throw new RuntimeException("Jinritoutiao submit requires cover, body=" + TextSupport.truncate(visibleBodyText(page), 300));
                 }
                 last = new RuntimeException("Jinritoutiao submit did not finish, currentUrl=" + page.url());
             } catch (RuntimeException exception) {
