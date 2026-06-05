@@ -7,8 +7,10 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
+import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +34,7 @@ public class AccountOverviewService {
     }
 
     public Map<String, List<Map<String, Object>>> overview() {
+        ensureQuietTimeColumns();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountSelectSql("") + """
@@ -82,6 +85,44 @@ public class AccountOverviewService {
                 WHERE platform = ? AND account_key = ?
                 """,
                 nextUploadAllowedAt,
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        List<Map<String, Object>> rows = repository.query(
+                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                (rs, rowNum) -> mapAccount(rs),
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return rows.get(0);
+    }
+
+    public Map<String, Object> updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime) {
+        String normalizedPlatform = normalizePlatform(platform);
+        String normalizedAccountKey = accountKey == null ? "" : accountKey.trim();
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedAccountKey.isBlank()) {
+            throw new IllegalArgumentException("Invalid account");
+        }
+        if (startTime == null || endTime == null) {
+            throw new IllegalArgumentException("Quiet time is required");
+        }
+        ensureQuietTimeColumns();
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET upload_quiet_start_time = ?,
+                    upload_quiet_end_time = ?,
+                    updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                Time.valueOf(startTime),
+                Time.valueOf(endTime),
                 normalizedPlatform,
                 normalizedAccountKey
         );
@@ -153,6 +194,12 @@ public class AccountOverviewService {
         String downloaderPendingCountSql = columnExists("uploader_account", "downloader_pending_count")
                 ? "ua.downloader_pending_count"
                 : "0 downloader_pending_count";
+        String quietStartSql = columnExists("uploader_account", "upload_quiet_start_time")
+                ? "ua.upload_quiet_start_time"
+                : "TIME('01:00:00') upload_quiet_start_time";
+        String quietEndSql = columnExists("uploader_account", "upload_quiet_end_time")
+                ? "ua.upload_quiet_end_time"
+                : "TIME('07:00:00') upload_quiet_end_time";
         return ("""
                 SELECT ua.platform,
                        ua.account_key,
@@ -160,6 +207,8 @@ public class AccountOverviewService {
                        ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds,
                        ua.upload_cooldown_max_seconds,
+                       %s,
+                       %s,
                        %s,
                        %s,
                        ua.today_upload_count,
@@ -238,7 +287,7 @@ public class AccountOverviewService {
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
                 %s
-                """).formatted(downloaderMaxStagedCountSql, downloaderPendingCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -264,6 +313,8 @@ public class AccountOverviewService {
         row.put("nextUploadAllowedAt", toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")));
         row.put("uploadCooldownMinSeconds", nullableInt(rs, "upload_cooldown_min_seconds"));
         row.put("uploadCooldownMaxSeconds", nullableInt(rs, "upload_cooldown_max_seconds"));
+        row.put("uploadQuietStartTime", toLocalTime(rs.getTime("upload_quiet_start_time")));
+        row.put("uploadQuietEndTime", toLocalTime(rs.getTime("upload_quiet_end_time")));
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
         row.put("downloaderPendingCount", rs.getInt("downloader_pending_count"));
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
@@ -283,6 +334,10 @@ public class AccountOverviewService {
 
     private static LocalDateTime toLocalDateTime(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
+    private static LocalTime toLocalTime(Time time) {
+        return time == null ? null : time.toLocalTime();
     }
 
     private static Integer nullableInt(ResultSet rs, String column) throws java.sql.SQLException {
@@ -339,6 +394,28 @@ public class AccountOverviewService {
                     """
                     ALTER TABLE uploader_account
                     ADD COLUMN downloader_pending_count INT NOT NULL DEFAULT 0
+                    """
+            );
+        }
+    }
+
+    private void ensureQuietTimeColumns() {
+        if (!tableExists("uploader_account")) {
+            return;
+        }
+        if (!columnExists("uploader_account", "upload_quiet_start_time")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN upload_quiet_start_time TIME NOT NULL DEFAULT '01:00:00'
+                    """
+            );
+        }
+        if (!columnExists("uploader_account", "upload_quiet_end_time")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN upload_quiet_end_time TIME NOT NULL DEFAULT '07:00:00'
                     """
             );
         }

@@ -2,6 +2,7 @@ package com.youbi.monitor.controller;
 
 import com.youbi.monitor.dto.AccountDownloaderMaxStagedCountUpdateRequest;
 import com.youbi.monitor.dto.AccountNextUploadAllowedAtUpdateRequest;
+import com.youbi.monitor.dto.AccountQuietTimeUpdateRequest;
 import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.service.AccountOverviewService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -54,6 +55,20 @@ public class AccountOverviewController {
                 platform,
                 accountKey,
                 request == null ? null : request.maxStagedCount()
+        );
+    }
+
+    @PostMapping("/api/accounts/{platform}/{accountKey}/quiet-time")
+    public Map<String, Object> updateQuietTime(
+            @PathVariable String platform,
+            @PathVariable String accountKey,
+            @RequestBody(required = false) AccountQuietTimeUpdateRequest request
+    ) {
+        return accountOverviewService.updateQuietTime(
+                platform,
+                accountKey,
+                request == null ? null : request.startTime(),
+                request == null ? null : request.endTime()
         );
     }
 }

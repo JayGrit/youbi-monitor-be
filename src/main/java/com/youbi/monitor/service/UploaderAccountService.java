@@ -4,6 +4,7 @@ import com.youbi.monitor.dto.UploaderAccountState;
 import com.youbi.monitor.repository.IUploaderAccountRepositoryService;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalTime;
 import java.util.Optional;
 
 @Service
@@ -28,6 +29,10 @@ public class UploaderAccountService {
 
     public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
         return repositoryService.updateCooldown(platform, accountKey, minSeconds, maxSeconds);
+    }
+
+    public boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime) {
+        return repositoryService.updateQuietTime(platform, accountKey, startTime, endTime);
     }
 
     public boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount) {

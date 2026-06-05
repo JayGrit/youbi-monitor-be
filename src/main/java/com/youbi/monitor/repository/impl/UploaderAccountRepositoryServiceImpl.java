@@ -6,8 +6,10 @@ import com.youbi.monitor.repository.UploaderAccountRepository;
 import org.springframework.stereotype.Service;
 
 import java.sql.ResultSet;
+import java.sql.Time;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -42,17 +44,24 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         String downloaderPendingCountSql = columnExists(TABLE, "downloader_pending_count")
                 ? "downloader_pending_count"
                 : "0 downloader_pending_count";
+        String quietStartSql = columnExists(TABLE, "upload_quiet_start_time")
+                ? "upload_quiet_start_time"
+                : "TIME('01:00:00') upload_quiet_start_time";
+        String quietEndSql = columnExists(TABLE, "upload_quiet_end_time")
+                ? "upload_quiet_end_time"
+                : "TIME('07:00:00') upload_quiet_end_time";
         List<UploaderAccountState> rows = repository.query(
                 ("""
                 SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
+                       %s, %s,
                        %s, %s, today_upload_count, cooldown_waiting_count, %s, %s,
                        %s,
                        is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
                 FROM uploader_account
                 WHERE platform = ? AND account_key = ?
                 LIMIT 1
-                """).formatted(downloaderMaxStagedCountSql, downloaderPendingCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
                         rs.getString("platform"),
                         rs.getString("account_key"),
@@ -60,6 +69,8 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
                         nullableInt(rs, "upload_cooldown_min_seconds"),
                         nullableInt(rs, "upload_cooldown_max_seconds"),
+                        toLocalTime(rs.getTime("upload_quiet_start_time")),
+                        toLocalTime(rs.getTime("upload_quiet_end_time")),
                         rs.getInt("downloader_max_staged_count"),
                         rs.getInt("downloader_pending_count"),
                         rs.getInt("today_upload_count"),
@@ -121,6 +132,25 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 """,
                 minSeconds,
                 maxSeconds,
+                normalizePlatform(platform),
+                normalizeAccountKey(accountKey)
+        );
+        return updated == 1;
+    }
+
+    @Override
+    public boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime) {
+        ensureQuietTimeColumns();
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET upload_quiet_start_time = ?,
+                    upload_quiet_end_time = ?,
+                    updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                Time.valueOf(startTime),
+                Time.valueOf(endTime),
                 normalizePlatform(platform),
                 normalizeAccountKey(accountKey)
         );
@@ -209,6 +239,28 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         }
     }
 
+    private void ensureQuietTimeColumns() {
+        if (!tableExists(TABLE)) {
+            return;
+        }
+        if (!columnExists(TABLE, "upload_quiet_start_time")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN upload_quiet_start_time TIME NOT NULL DEFAULT '01:00:00'
+                    """
+            );
+        }
+        if (!columnExists(TABLE, "upload_quiet_end_time")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN upload_quiet_end_time TIME NOT NULL DEFAULT '07:00:00'
+                    """
+            );
+        }
+    }
+
     private static String normalizePlatform(String value) {
         return value == null ? "" : value.trim().toLowerCase();
     }
@@ -219,6 +271,10 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     private static LocalDateTime toLocalDateTime(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
+    private static LocalTime toLocalTime(Time time) {
+        return time == null ? null : time.toLocalTime();
     }
 
     private static Integer nullableInt(ResultSet rs, String column) throws java.sql.SQLException {
