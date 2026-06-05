@@ -29,7 +29,7 @@ import java.util.concurrent.Executors;
 public class MonitorAsyncUploadService {
     private static final Logger log = LoggerFactory.getLogger(MonitorAsyncUploadService.class);
     private static final String TABLE = "monitor_upload_task";
-    private static final int UPLOAD_TASK_TIMEOUT_SECONDS = 75 * 60;
+    private static final int UPLOAD_TASK_TIMEOUT_SECONDS = 8 * 60;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
