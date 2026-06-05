@@ -75,10 +75,6 @@ def load_accounts(args: argparse.Namespace) -> list[Account]:
             """
             SELECT account.account_key, account.mid, account.uname
             FROM uploader_account_bilibili account
-            JOIN uploader_account state
-              ON state.platform = 'bilibili'
-             AND state.account_key = account.account_key
-             AND state.is_enabled = 1
             ORDER BY account.account_key
             """
         )
@@ -248,7 +244,7 @@ def main() -> int:
     args = parse_args()
     accounts = load_accounts(args)
     if not accounts:
-        raise SystemExit("No enabled Bilibili accounts found.")
+        raise SystemExit("No Bilibili accounts found.")
     print("将依次更新以下 B 站账号：")
     for account in accounts:
         print(f"- {account.account_key}: {account.uname} ({account.mid})")

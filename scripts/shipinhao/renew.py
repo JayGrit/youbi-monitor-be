@@ -81,10 +81,6 @@ def load_accounts(args: argparse.Namespace) -> list[Account]:
             """
             SELECT account.account_key, account.user_id, account.nickname
             FROM uploader_account_shipinhao account
-            JOIN uploader_account state
-              ON state.platform = 'shipinhao'
-             AND state.account_key = account.account_key
-             AND state.is_enabled = 1
             ORDER BY account.account_key
             """
         )
@@ -194,7 +190,7 @@ def main() -> int:
     args = parse_args()
     accounts = load_accounts(args)
     if not accounts:
-        raise SystemExit("No enabled Shipinhao accounts found.")
+        raise SystemExit("No Shipinhao accounts found.")
 
     print("将依次更新以下视频号账号：")
     for account in accounts:

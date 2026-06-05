@@ -81,10 +81,6 @@ def load_accounts(args: argparse.Namespace) -> list[Account]:
             """
             SELECT account.account_key, account.user_id, account.nickname
             FROM uploader_account_kuaishou account
-            JOIN uploader_account state
-              ON state.platform = 'kuaishou'
-             AND state.account_key = account.account_key
-             AND state.is_enabled = 1
             ORDER BY account.account_key
             """
         )
@@ -220,7 +216,7 @@ def main() -> int:
     args = parse_args()
     accounts = load_accounts(args)
     if not accounts:
-        raise SystemExit("No enabled Kuaishou accounts found.")
+        raise SystemExit("No Kuaishou accounts found.")
 
     print("将依次更新以下快手账号：")
     for account in accounts:
