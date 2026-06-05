@@ -425,7 +425,8 @@ public class JinritoutiaoUploadService {
 
     private boolean hasSelectedCover(Page page) {
         String body = visibleBodyText(page);
-        if (TextSupport.containsAny(body, "修改封面", "重新上传封面")) {
+        if (TextSupport.containsAny(body, "修改封面", "重新上传封面", "当前封面分辨率")
+                || (body.contains("封面") && body.contains("编辑") && body.contains("替换"))) {
             return true;
         }
         return Boolean.TRUE.equals(page.evaluate(
@@ -436,8 +437,12 @@ public class JinritoutiaoUploadService {
                     const rect = el.getBoundingClientRect();
                     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 40 && rect.height >= 40;
                   };
-                  return Array.from(document.querySelectorAll('.form-item-poster img, .form-item-poster canvas, .m-poster img, .m-poster canvas'))
-                    .some((el) => visible(el));
+                  if (Array.from(document.querySelectorAll('.form-item-poster img, .form-item-poster canvas, .m-poster img, .m-poster canvas'))
+                    .some((el) => visible(el))) {
+                    return true;
+                  }
+                  return Array.from(document.querySelectorAll('.form-item-poster .xigua-poster-editor .bg, .form-item-poster [style*="background-image"]'))
+                    .some((el) => visible(el) && getComputedStyle(el).backgroundImage !== 'none');
                 }
                 """
         ));
