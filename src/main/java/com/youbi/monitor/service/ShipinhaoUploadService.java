@@ -42,11 +42,13 @@ public class ShipinhaoUploadService {
     private final ShipinhaoAccountService accountService;
     private final UploadMaterialResolver materialResolver;
     private final DiagnosticArtifactService diagnosticArtifactService;
+    private final UploaderAttemptService uploaderAttemptService;
     private final ThreadLocal<DiagnosticRunContext> diagnosticContext = new ThreadLocal<>();
 
     public ShipinhaoUploadService(
             ShipinhaoAccountService accountService,
             DiagnosticArtifactService diagnosticArtifactService,
+            UploaderAttemptService uploaderAttemptService,
             AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
@@ -56,6 +58,7 @@ public class ShipinhaoUploadService {
     ) {
         this.accountService = accountService;
         this.diagnosticArtifactService = diagnosticArtifactService;
+        this.uploaderAttemptService = uploaderAttemptService;
         MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -71,7 +74,8 @@ public class ShipinhaoUploadService {
         String taskId = TextSupport.firstText(request.taskId(), "manual");
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
-        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
+        String runId = uploaderAttemptService.nextRunId(taskId, DIAGNOSTIC_PLATFORM, accountKey);
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, runId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
         diagnosticContext.set(diagnostics);
         try {
             Path videoPath = resolvedVideo.path();

@@ -54,6 +54,7 @@ public class DouyinUploadService {
     private final SocialHumanActions humanActions;
     private final SocialRiskDetector riskDetector;
     private final DiagnosticArtifactService diagnosticArtifactService;
+    private final UploaderAttemptService uploaderAttemptService;
     private final ThreadLocal<DiagnosticRunContext> diagnosticContext = new ThreadLocal<>();
 
     public DouyinUploadService(
@@ -61,6 +62,7 @@ public class DouyinUploadService {
             SocialHumanActions humanActions,
             SocialRiskDetector riskDetector,
             DiagnosticArtifactService diagnosticArtifactService,
+            UploaderAttemptService uploaderAttemptService,
             AliDriveService aliDriveService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
@@ -73,6 +75,7 @@ public class DouyinUploadService {
         this.humanActions = humanActions;
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
+        this.uploaderAttemptService = uploaderAttemptService;
         this.aliDriveService = aliDriveService;
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
@@ -92,7 +95,8 @@ public class DouyinUploadService {
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
         ResolvedFile resolvedVideo = resolveVideo(request);
         ResolvedFile resolvedCover = resolveCover(request);
-        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, taskId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
+        String runId = uploaderAttemptService.nextRunId(taskId, DIAGNOSTIC_PLATFORM, accountKey);
+        DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, runId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
         diagnosticContext.set(diagnostics);
         try {
             Path videoPath = resolvedVideo.path();
