@@ -216,7 +216,7 @@ public class ShipinhaoUploadService {
 
     private void setShortTitle(Page page, ShipinhaoUploadRequest request, String taskId) {
         try {
-            String shortTitle = TextSupport.firstText(request.shortTitle(), formatShortTitle(request.title()));
+            String shortTitle = normalizeShortTitle(request.shortTitle(), request.title());
             Locator input = page.getByText("短标题").first()
                     .locator("..")
                     .locator("xpath=following-sibling::div")
@@ -515,8 +515,22 @@ public class ShipinhaoUploadService {
         if (value.length() > 16) {
             value = value.substring(0, 16);
         }
+        return value;
+    }
+
+    private String normalizeShortTitle(String shortTitle, String title) {
+        String value = TextSupport.firstText(shortTitle, formatShortTitle(title)).trim();
+        if (value.isBlank()) {
+            value = "精彩视频";
+        }
+        if (value.length() > 16) {
+            value = value.substring(0, 16);
+        }
         while (value.length() < 6) {
-            value += " ";
+            value += "视频";
+            if (value.length() > 16) {
+                value = value.substring(0, 16);
+            }
         }
         return value;
     }
