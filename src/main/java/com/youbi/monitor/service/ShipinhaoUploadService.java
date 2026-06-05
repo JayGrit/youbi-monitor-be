@@ -36,7 +36,10 @@ public class ShipinhaoUploadService {
             "上传失败", "上传出错", "上传异常"
     );
     private static final List<String> MISSING_VIDEO_TEXTS = List.of(
-            "请上传视频", "请选择视频", "上传视频后"
+            "请上传视频", "请选择视频", "上传视频后", "上传时长8小时内", "大小不超过20GB", "格式为MP4"
+    );
+    private static final List<String> UPLOADED_VIDEO_TEXTS = List.of(
+            "视频已上传", "当前浏览器暂不支持预览", "手机预览", "封面预览", "重新上传"
     );
 
     private final ShipinhaoAccountService accountService;
@@ -339,13 +342,15 @@ public class ShipinhaoUploadService {
                 .setTimeout(30000));
         int count = inputs.count();
         RuntimeException lastException = null;
+        boolean fileSet = false;
         for (int index = 0; index < count; index += 1) {
             Locator input = inputs.nth(index);
             try {
                 String accept = TextSupport.text(input.getAttribute("accept"));
                 log.info("Shipinhao upload set video input taskId={} index={} accept={}", taskId, index, accept);
                 input.setInputFiles(videoPath);
-                if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(20))) {
+                fileSet = true;
+                if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(30))) {
                     return;
                 }
                 dumpDiagnostics(page, taskId, "video-file-not-accepted-" + (index + 1));
@@ -355,6 +360,10 @@ public class ShipinhaoUploadService {
             }
         }
         dumpDiagnostics(page, taskId, "video-file-not-accepted");
+        if (fileSet) {
+            log.warn("Shipinhao upload selected video was not detected by early DOM check taskId={}, continue to metadata/upload readiness checks", taskId);
+            return;
+        }
         if (lastException != null) {
             throw new RuntimeException("Shipinhao video file was not accepted by any upload input", lastException);
         }
@@ -392,7 +401,7 @@ public class ShipinhaoUploadService {
         }
         boolean fileSelected = Boolean.TRUE.equals(page.evaluate(
                 """
-                () => Array.from(document.querySelectorAll('input[type="file"][accept*="video"]'))
+                () => Array.from(document.querySelectorAll('input[type="file"]'))
                   .some((input) => input.files && input.files.length > 0)
                 """
         ));
@@ -414,7 +423,7 @@ public class ShipinhaoUploadService {
                 }
                 """
         ));
-        boolean uploadPreviewText = body.contains("封面预览")
+        boolean uploadPreviewText = TextSupport.containsAny(body, UPLOADED_VIDEO_TEXTS.toArray(String[]::new))
                 || (body.contains("个人主页卡片") && body.contains("分享卡片"))
                 || (body.contains("删除") && body.contains("短标题"))
                 || body.contains("取消上传");
