@@ -351,7 +351,7 @@ public class JinritoutiaoUploadService {
                     return;
                 }
             }
-            for (String text : List.of("完成", "确定", "确认")) {
+            for (String text : List.of("完成裁剪", "完成", "确定", "确认")) {
                 try {
                     String clicked = clickCoverEditorText(page, text, taskId);
                     if (!"not-clicked".equals(clicked)) {
@@ -412,7 +412,12 @@ public class JinritoutiaoUploadService {
                     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
                   };
                   return Array.from(document.querySelectorAll('.body, [role="dialog"], .byte-modal, .arco-modal, .m-server-bg-list, .detail'))
-                    .some((el) => visible(el) && (el.innerText || '').includes('封面截取') && (el.innerText || '').includes('本地上传'));
+                    .some((el) => {
+                      const text = el.innerText || '';
+                      return visible(el)
+                        && (text.includes('封面截取') || text.includes('封面编辑') || text.includes('完成裁剪'))
+                        && (text.includes('本地上传') || text.includes('重选封面') || text.includes('确定'));
+                    });
                 }
                 """
         ));
