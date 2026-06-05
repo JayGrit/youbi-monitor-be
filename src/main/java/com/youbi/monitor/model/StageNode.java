@@ -13,6 +13,7 @@ public record StageNode(
         Integer completedCount,
         Integer failedCount,
         Integer totalCount,
+        Double progressPercent,
         String errorMessage,
         String childErrorMessage,
         List<UploadPlatformStatus> platformStatuses

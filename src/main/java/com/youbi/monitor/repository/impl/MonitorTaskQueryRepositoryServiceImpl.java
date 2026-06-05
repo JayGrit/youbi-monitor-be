@@ -52,6 +52,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               d.started_at downloader_started_at,
               d.completed_at downloader_completed_at,
               d.error_message downloader_error,
+              __DOWNLOADER_PROGRESS_SELECT__
 
               de.status demucs_status,
               de.started_at demucs_started_at,
@@ -138,6 +139,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN yd_combiner m ON m.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
             LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
               FROM yd_asr_segment
@@ -252,8 +254,21 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return count == null ? 0 : count;
     }
 
-    private static String monitorSql(String template, SqlFilter filter) {
-        return template.replace("__TASK_MONITOR_WHERE__", filter.clause());
+    private String monitorSql(String template, SqlFilter filter) {
+        String progressSelect = "NULL downloader_progress_percent,";
+        String progressJoin = "";
+        if (tableExists("downloader_detail")) {
+            progressSelect = "dv.progress_percent downloader_progress_percent,";
+            progressJoin = """
+                    LEFT JOIN downloader_detail dv
+                      ON dv.task_id = t.id
+                     AND dv.kind = 'video'
+                    """;
+        }
+        return template
+                .replace("__DOWNLOADER_PROGRESS_SELECT__", progressSelect)
+                .replace("__DOWNLOADER_PROGRESS_JOIN__", progressJoin)
+                .replace("__TASK_MONITOR_WHERE__", filter.clause());
     }
 
     private static SqlFilter taskMonitorFilter(String status, String type, String stage) {
@@ -447,6 +462,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                         countValue(rs, stage.key(), "completed_count"),
                         countValue(rs, stage.key(), "failed_count"),
                         countValue(rs, stage.key(), "total_count"),
+                        progressPercent(rs, stage.key()),
                         rs.getString(stage.errorColumn()),
                         childErrorMessage(rs, stage.key()),
                         platformStatuses(rs, stage.key())
@@ -490,6 +506,13 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             }
             int value = rs.getInt(stageKey + "_" + suffix);
             return rs.wasNull() ? null : value;
+        }
+
+        private static Double progressPercent(ResultSet rs, String stageKey) throws SQLException {
+            if (!"downloader".equals(stageKey)) {
+                return null;
+            }
+            return doubleOrNull(rs, "downloader_progress_percent");
         }
 
         private static String childErrorMessage(ResultSet rs, String stageKey) throws SQLException {

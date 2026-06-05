@@ -297,6 +297,7 @@ public class MonitorService {
             tables.add(new TaskFlowDetail.TaskFlowTable(stageTable, List.of(stageRow), false));
         }
         switch (stageKey) {
+            case "downloader" -> addLimitedTable(tables, "downloader_detail", taskId, "task_id", "kind, id");
             case "whisper" -> {
                 addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "item_index, id");
                 addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_index, word_index, id");
