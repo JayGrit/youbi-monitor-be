@@ -1,8 +1,10 @@
 package com.youbi.monitor.service;
 
+import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.repository.MonitorRepository;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
@@ -38,6 +40,33 @@ public class AccountOverviewService {
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
         );
         return result;
+    }
+
+    public BackupperStatus latestBackupperStatus() {
+        if (!tableExists("backupper_status")) {
+            return null;
+        }
+        List<BackupperStatus> rows = repository.query(
+                """
+                SELECT id, host, device, mount_point, total_gb, used_gb, available_gb, used_percent, total_label, created_at
+                FROM backupper_status
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (rs, rowNum) -> new BackupperStatus(
+                        rs.getLong("id"),
+                        rs.getString("host"),
+                        rs.getString("device"),
+                        rs.getString("mount_point"),
+                        rs.getBigDecimal("total_gb"),
+                        rs.getBigDecimal("used_gb"),
+                        rs.getBigDecimal("available_gb"),
+                        rs.getBigDecimal("used_percent"),
+                        formatBackupperStatusText(rs.getBigDecimal("used_gb"), rs.getString("total_label")),
+                        toLocalDateTime(rs.getTimestamp("created_at"))
+                )
+        );
+        return rows.isEmpty() ? null : rows.get(0);
     }
 
     public Map<String, Object> updateNextUploadAllowedAt(String platform, String accountKey, LocalDateTime nextUploadAllowedAt) {
@@ -232,6 +261,34 @@ public class AccountOverviewService {
                 column
         );
         return count != null && count > 0;
+    }
+
+    private boolean tableExists(String table) {
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                """,
+                Integer.class,
+                table
+        );
+        return count != null && count > 0;
+    }
+
+    private static String formatBackupperStatusText(BigDecimal usedGb, String totalLabel) {
+        if (usedGb == null) {
+            return "";
+        }
+        String total = totalLabel == null ? "" : totalLabel.trim();
+        if (total.isBlank()) {
+            return oneDecimal(usedGb) + "G";
+        }
+        return oneDecimal(usedGb) + "G/" + total;
+    }
+
+    private static String oneDecimal(BigDecimal value) {
+        return value.setScale(1, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 
     private static Boolean nullableBoolean(ResultSet rs, String column) throws java.sql.SQLException {

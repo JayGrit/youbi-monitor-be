@@ -1,6 +1,7 @@
 package com.youbi.monitor.controller;
 
 import com.youbi.monitor.dto.AccountNextUploadAllowedAtUpdateRequest;
+import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.service.AccountOverviewService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +23,11 @@ public class AccountOverviewController {
     @GetMapping("/api/accounts/overview")
     public Map<String, List<Map<String, Object>>> overview() {
         return accountOverviewService.overview();
+    }
+
+    @GetMapping("/api/accounts/backupper-status")
+    public BackupperStatus backupperStatus() {
+        return accountOverviewService.latestBackupperStatus();
     }
 
     @PostMapping("/api/accounts/{platform}/{accountKey}/next-upload-allowed-at")
