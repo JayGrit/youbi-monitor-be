@@ -30,7 +30,7 @@ public class ShipinhaoUploadService {
     private static final String DIAGNOSTIC_PLATFORM = "shipinhao";
     private static final String DIAGNOSTIC_SOURCE = "shipinhao-upload";
     private static final List<String> UPLOAD_IN_PROGRESS_TEXTS = List.of(
-            "上传中", "正在上传", "视频上传中", "处理中", "视频处理中", "转码中", "上传进度"
+            "上传中", "正在上传", "视频上传中", "处理中", "视频处理中", "转码中", "上传进度", "取消上传"
     );
     private static final List<String> UPLOAD_FAILED_TEXTS = List.of(
             "上传失败", "上传出错", "上传异常"
@@ -416,7 +416,8 @@ public class ShipinhaoUploadService {
         ));
         boolean uploadPreviewText = body.contains("封面预览")
                 || (body.contains("个人主页卡片") && body.contains("分享卡片"))
-                || (body.contains("删除") && body.contains("短标题"));
+                || (body.contains("删除") && body.contains("短标题"))
+                || body.contains("取消上传");
         boolean mediaVisible = domMediaVisible || uploadPreviewText;
         boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
         boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
