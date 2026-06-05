@@ -287,7 +287,7 @@ abstract class MonitorRepositorySqlSupport {
                             0,
                             cooldown_waiting_count
                             + ?
-                            + CASE WHEN next_upload_allowed_at > NOW() THEN ? ELSE 0 END
+                            + ?
                         ),
                         metrics_updated_at = NOW(),
                         updated_at = NOW()
