@@ -10,6 +10,7 @@ public record UploaderAccountState(
         Integer uploadCooldownMinSeconds,
         Integer uploadCooldownMaxSeconds,
         int downloaderMaxStagedCount,
+        int downloaderPendingCount,
         int todayUploadCount,
         int cooldownWaitingCount,
         String uploadRunningTaskId,
@@ -23,6 +24,6 @@ public record UploaderAccountState(
 ) {
     public static UploaderAccountState defaults(String platform, String accountKey) {
         return new UploaderAccountState(platform, accountKey, null, null, 3600, 7200,
-                5, 0, 0, null, 0, 0, true, null, null, null, null);
+                5, 0, 0, 0, null, 0, 0, true, null, null, null, null);
     }
 }

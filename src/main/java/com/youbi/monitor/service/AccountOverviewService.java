@@ -110,7 +110,7 @@ public class AccountOverviewService {
         if (normalizedMax < 0 || normalizedMax > 100) {
             throw new IllegalArgumentException("Invalid downloader max staged count: " + normalizedMax);
         }
-        ensureDownloaderMaxStagedCountColumn();
+        ensureDownloaderStagingColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
@@ -150,6 +150,9 @@ public class AccountOverviewService {
         String downloaderMaxStagedCountSql = columnExists("uploader_account", "downloader_max_staged_count")
                 ? "ua.downloader_max_staged_count"
                 : "5 downloader_max_staged_count";
+        String downloaderPendingCountSql = columnExists("uploader_account", "downloader_pending_count")
+                ? "ua.downloader_pending_count"
+                : "0 downloader_pending_count";
         return ("""
                 SELECT ua.platform,
                        ua.account_key,
@@ -157,6 +160,7 @@ public class AccountOverviewService {
                        ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds,
                        ua.upload_cooldown_max_seconds,
+                       %s,
                        %s,
                        ua.today_upload_count,
                        ua.cooldown_waiting_count,
@@ -234,7 +238,7 @@ public class AccountOverviewService {
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
                 %s
-                """).formatted(downloaderMaxStagedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
+                """).formatted(downloaderMaxStagedCountSql, downloaderPendingCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -261,6 +265,7 @@ public class AccountOverviewService {
         row.put("uploadCooldownMinSeconds", nullableInt(rs, "upload_cooldown_min_seconds"));
         row.put("uploadCooldownMaxSeconds", nullableInt(rs, "upload_cooldown_max_seconds"));
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
+        row.put("downloaderPendingCount", rs.getInt("downloader_pending_count"));
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
         row.put("cooldownWaitingCount", rs.getInt("cooldown_waiting_count"));
         row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
@@ -317,16 +322,26 @@ public class AccountOverviewService {
         return count != null && count > 0;
     }
 
-    private void ensureDownloaderMaxStagedCountColumn() {
-        if (!tableExists("uploader_account") || columnExists("uploader_account", "downloader_max_staged_count")) {
+    private void ensureDownloaderStagingColumns() {
+        if (!tableExists("uploader_account")) {
             return;
         }
-        repository.update(
-                """
-                ALTER TABLE uploader_account
-                ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
-                """
-        );
+        if (!columnExists("uploader_account", "downloader_max_staged_count")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
+                    """
+            );
+        }
+        if (!columnExists("uploader_account", "downloader_pending_count")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN downloader_pending_count INT NOT NULL DEFAULT 0
+                    """
+            );
+        }
     }
 
     private static String formatBackupperStatusText(BigDecimal usedGb, String totalLabel) {
