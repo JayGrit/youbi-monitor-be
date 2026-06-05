@@ -9,7 +9,7 @@ PIP="${REPO_DIR}/.venv/bin/pip"
 CDP_URL="${YDBI_CHROME_CDP_URL:-http://127.0.0.1:9222}"
 CHROME_APP="/Applications/Google Chrome.app"
 CHROME_BIN="${CHROME_APP}/Contents/MacOS/Google Chrome"
-CHROME_DEBUG_PROFILE_DIR="${YDBI_CHROME_DEBUG_PROFILE_DIR:-${HOME}/Library/Application Support/Google/Chrome YouBi Bilibili Debug}"
+CHROME_DEBUG_PROFILE_DIR=""
 CHROME_STARTED_BY_SCRIPT=0
 
 if [[ ! -f "${PY_SCRIPT}" ]]; then
@@ -51,12 +51,12 @@ wait_for_cdp() {
 
 if ! curl --noproxy "*" -fsS "${CDP_URL}/json/version" >/dev/null 2>&1; then
   echo "当前没有检测到 Chrome remote debugging：${CDP_URL}"
-  echo "脚本会启动一个专用的 Chrome 调试用户目录；如果要同步你日常 Chrome 里的多个 profile，请先手动用 remote debugging 启动那个 Chrome。"
+  echo "脚本会启动一个全新的临时 Chrome 调试用户目录；如果要同步你日常 Chrome 里的多个 profile，请先手动用 remote debugging 启动那个 Chrome。"
+  CHROME_DEBUG_PROFILE_DIR="$(mktemp -d /private/tmp/youbi-bilibili-debug.XXXXXX)"
   echo "专用目录：${CHROME_DEBUG_PROFILE_DIR}"
   read "?按回车启动专用调试 Chrome..."
 
   echo "正在用 remote debugging 启动 Chrome..."
-  mkdir -p "${CHROME_DEBUG_PROFILE_DIR}"
   "${CHROME_BIN}" \
     --remote-debugging-port=9222 \
     --user-data-dir="${CHROME_DEBUG_PROFILE_DIR}" \

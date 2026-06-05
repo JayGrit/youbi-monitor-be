@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--account-key", action="append", default=[], help="Only update selected account_key. Can be specified multiple times.")
     parser.add_argument("--timeout-seconds", type=int, default=int(os.getenv("YDBI_BILIBILI_LOGIN_TIMEOUT_SECONDS", "600")))
-    parser.add_argument("--fresh", action="store_true", help="Delete temporary Chrome profile dirs before each login.")
+    parser.add_argument("--fresh", action="store_true", help="Ignored for compatibility; renew always starts from a clean temporary profile.")
     parser.add_argument("--mysql-host", default=os.getenv("YDBI_MYSQL_HOST", DEFAULT_MYSQL_HOST))
     parser.add_argument("--mysql-port", type=int, default=int(os.getenv("YDBI_MYSQL_PORT", str(DEFAULT_MYSQL_PORT))))
     parser.add_argument("--mysql-database", default=os.getenv("YDBI_MYSQL_DATABASE", DEFAULT_MYSQL_DATABASE))
@@ -180,14 +181,13 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
 
 
 def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
-    profile_dir = PROFILE_ROOT / account.account_key
-    if args.fresh and profile_dir.exists():
-        shutil.rmtree(profile_dir)
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    PROFILE_ROOT.mkdir(parents=True, exist_ok=True)
+    profile_dir = Path(tempfile.mkdtemp(prefix=f"{account.account_key}-", dir=str(PROFILE_ROOT)))
     print()
     print("=" * 72)
     print(f"请在弹出的 Chrome 窗口登录 B 站账号：key={account.account_key} name={account.uname} mid={account.mid}")
     print("脚本会轮询登录态；账号 mid 匹配后才写入数据库。")
+    print(f"使用全新临时 Chrome profile：{profile_dir}")
     print("=" * 72, flush=True)
     with sync_playwright() as playwright:
         context = playwright.chromium.launch_persistent_context(
@@ -238,6 +238,7 @@ def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
             return False
         finally:
             context.close()
+            shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 def main() -> int:
