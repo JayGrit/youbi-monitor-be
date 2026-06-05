@@ -1,5 +1,6 @@
 package com.youbi.monitor.controller;
 
+import com.youbi.monitor.dto.AccountDownloaderMaxStagedCountUpdateRequest;
 import com.youbi.monitor.dto.AccountNextUploadAllowedAtUpdateRequest;
 import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.service.AccountOverviewService;
@@ -40,6 +41,19 @@ public class AccountOverviewController {
                 platform,
                 accountKey,
                 request == null ? null : request.nextUploadAllowedAt()
+        );
+    }
+
+    @PostMapping("/api/accounts/{platform}/{accountKey}/downloader-max-staged-count")
+    public Map<String, Object> updateDownloaderMaxStagedCount(
+            @PathVariable String platform,
+            @PathVariable String accountKey,
+            @RequestBody(required = false) AccountDownloaderMaxStagedCountUpdateRequest request
+    ) {
+        return accountOverviewService.updateDownloaderMaxStagedCount(
+                platform,
+                accountKey,
+                request == null ? null : request.maxStagedCount()
         );
     }
 }

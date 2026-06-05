@@ -100,6 +100,42 @@ public class AccountOverviewService {
         return rows.get(0);
     }
 
+    public Map<String, Object> updateDownloaderMaxStagedCount(String platform, String accountKey, Integer maxStagedCount) {
+        String normalizedPlatform = normalizePlatform(platform);
+        String normalizedAccountKey = accountKey == null ? "" : accountKey.trim();
+        int normalizedMax = maxStagedCount == null ? 5 : maxStagedCount;
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedAccountKey.isBlank()) {
+            throw new IllegalArgumentException("Invalid account");
+        }
+        if (normalizedMax < 0 || normalizedMax > 100) {
+            throw new IllegalArgumentException("Invalid downloader max staged count: " + normalizedMax);
+        }
+        ensureDownloaderMaxStagedCountColumn();
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET downloader_max_staged_count = ?, updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                normalizedMax,
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        List<Map<String, Object>> rows = repository.query(
+                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                (rs, rowNum) -> mapAccount(rs),
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return rows.get(0);
+    }
+
     private String accountSelectSql(String extraWhere) {
         String failedCountSql = columnExists("uploader_account", "failed_upload_count")
                 ? "ua.failed_upload_count"
@@ -111,6 +147,9 @@ public class AccountOverviewService {
         String runningCountSql = hasRunningTaskId
                 ? "CASE WHEN NULLIF(ua.upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
                 : "ua.upload_running_count";
+        String downloaderMaxStagedCountSql = columnExists("uploader_account", "downloader_max_staged_count")
+                ? "ua.downloader_max_staged_count"
+                : "5 downloader_max_staged_count";
         return ("""
                 SELECT ua.platform,
                        ua.account_key,
@@ -118,6 +157,7 @@ public class AccountOverviewService {
                        ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds,
                        ua.upload_cooldown_max_seconds,
+                       %s,
                        ua.today_upload_count,
                        ua.cooldown_waiting_count,
                        %s,
@@ -194,7 +234,7 @@ public class AccountOverviewService {
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
                 %s
-                """).formatted(runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
+                """).formatted(downloaderMaxStagedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -220,6 +260,7 @@ public class AccountOverviewService {
         row.put("nextUploadAllowedAt", toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")));
         row.put("uploadCooldownMinSeconds", nullableInt(rs, "upload_cooldown_min_seconds"));
         row.put("uploadCooldownMaxSeconds", nullableInt(rs, "upload_cooldown_max_seconds"));
+        row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
         row.put("cooldownWaitingCount", rs.getInt("cooldown_waiting_count"));
         row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
@@ -274,6 +315,18 @@ public class AccountOverviewService {
                 table
         );
         return count != null && count > 0;
+    }
+
+    private void ensureDownloaderMaxStagedCountColumn() {
+        if (!tableExists("uploader_account") || columnExists("uploader_account", "downloader_max_staged_count")) {
+            return;
+        }
+        repository.update(
+                """
+                ALTER TABLE uploader_account
+                ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
+                """
+        );
     }
 
     private static String formatBackupperStatusText(BigDecimal usedGb, String totalLabel) {

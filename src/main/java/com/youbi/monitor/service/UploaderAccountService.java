@@ -29,4 +29,8 @@ public class UploaderAccountService {
     public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
         return repositoryService.updateCooldown(platform, accountKey, minSeconds, maxSeconds);
     }
+
+    public boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount) {
+        return repositoryService.updateDownloaderMaxStagedCount(platform, accountKey, maxStagedCount);
+    }
 }

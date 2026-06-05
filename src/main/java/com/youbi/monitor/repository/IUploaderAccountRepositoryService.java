@@ -13,5 +13,7 @@ public interface IUploaderAccountRepositoryService {
 
     boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds);
 
+    boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount);
+
     int resetTodayUploadCounts();
 }

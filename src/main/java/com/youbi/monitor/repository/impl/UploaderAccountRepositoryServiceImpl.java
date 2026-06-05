@@ -36,17 +36,20 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         String runningCountSql = hasRunningTaskId
                 ? "CASE WHEN NULLIF(upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
                 : "upload_running_count";
+        String downloaderMaxStagedCountSql = columnExists(TABLE, "downloader_max_staged_count")
+                ? "downloader_max_staged_count"
+                : "5 downloader_max_staged_count";
         List<UploaderAccountState> rows = repository.query(
                 ("""
                 SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
-                       today_upload_count, cooldown_waiting_count, %s, %s,
+                       %s, today_upload_count, cooldown_waiting_count, %s, %s,
                        %s,
                        is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
                 FROM uploader_account
                 WHERE platform = ? AND account_key = ?
                 LIMIT 1
-                """).formatted(runningTaskIdSql, runningCountSql, failedCountSql),
+                """).formatted(downloaderMaxStagedCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
                         rs.getString("platform"),
                         rs.getString("account_key"),
@@ -54,6 +57,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
                         nullableInt(rs, "upload_cooldown_min_seconds"),
                         nullableInt(rs, "upload_cooldown_max_seconds"),
+                        rs.getInt("downloader_max_staged_count"),
                         rs.getInt("today_upload_count"),
                         rs.getInt("cooldown_waiting_count"),
                         rs.getString("upload_running_task_id"),
@@ -120,6 +124,23 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
     }
 
     @Override
+    public boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount) {
+        ensureDownloaderMaxStagedCountColumn();
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET downloader_max_staged_count = ?,
+                    updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                maxStagedCount,
+                normalizePlatform(platform),
+                normalizeAccountKey(accountKey)
+        );
+        return updated == 1;
+    }
+
+    @Override
     public int resetTodayUploadCounts() {
         if (!tableExists(TABLE)) {
             return 0;
@@ -160,6 +181,18 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 column
         );
         return count != null && count > 0;
+    }
+
+    private void ensureDownloaderMaxStagedCountColumn() {
+        if (!tableExists(TABLE) || columnExists(TABLE, "downloader_max_staged_count")) {
+            return;
+        }
+        repository.update(
+                """
+                ALTER TABLE uploader_account
+                ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
+                """
+        );
     }
 
     private static String normalizePlatform(String value) {
