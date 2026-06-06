@@ -33,6 +33,15 @@ public class AccountOverviewService {
         this.repository = repository;
     }
 
+    public List<String> types() {
+        return repository.queryForList("""
+                SELECT DISTINCT type
+                FROM uploader_account
+                WHERE type IS NOT NULL AND TRIM(type) <> ''
+                ORDER BY type
+                """, String.class);
+    }
+
     public Map<String, List<Map<String, Object>>> overview() {
         ensureQuietTimeColumns();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();

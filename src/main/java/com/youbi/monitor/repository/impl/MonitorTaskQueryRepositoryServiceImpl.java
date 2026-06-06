@@ -239,8 +239,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage) {
-        SqlFilter filter = taskMonitorFilter(status, type, stage);
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId) {
+        SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
@@ -248,8 +248,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public long countTaskMonitorItems(String status, String type, String stage) {
-        SqlFilter filter = taskMonitorFilter(status, type, stage);
+    public long countTaskMonitorItems(String status, String type, String stage, String taskId) {
+        SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
         Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter), Long.class, filter.args().toArray());
         return count == null ? 0 : count;
     }
@@ -271,12 +271,17 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 .replace("__TASK_MONITOR_WHERE__", filter.clause());
     }
 
-    private static SqlFilter taskMonitorFilter(String status, String type, String stage) {
+    private static SqlFilter taskMonitorFilter(String status, String type, String stage, String taskId) {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addFilter(conditions, args, "t.status", status);
         addFilter(conditions, args, "vi.type", type);
         addFilter(conditions, args, "t.current_stage", stage);
+        String normalizedTaskId = text(taskId);
+        if (!normalizedTaskId.isBlank()) {
+            conditions.add("t.id LIKE ?");
+            args.add("%" + normalizedTaskId + "%");
+        }
         if (conditions.isEmpty()) {
             return new SqlFilter("", List.of());
         }

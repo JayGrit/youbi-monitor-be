@@ -27,6 +27,11 @@ public class AccountOverviewController {
         return accountOverviewService.overview();
     }
 
+    @GetMapping("/api/accounts/types")
+    public Map<String, List<String>> types() {
+        return Map.of("items", accountOverviewService.types());
+    }
+
     @GetMapping("/api/accounts/backupper-status")
     public BackupperStatus backupperStatus() {
         return accountOverviewService.latestBackupperStatus();

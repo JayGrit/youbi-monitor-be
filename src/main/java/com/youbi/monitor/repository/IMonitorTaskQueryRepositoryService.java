@@ -10,9 +10,9 @@ import java.util.Map;
 public interface IMonitorTaskQueryRepositoryService {
     void ensureMonitorSchema();
 
-    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage);
+    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId);
 
-    long countTaskMonitorItems(String status, String type, String stage);
+    long countTaskMonitorItems(String status, String type, String stage, String taskId);
 
     Map<String, Object> findTaskFlowRow(String table, String idColumn, String id);
 
