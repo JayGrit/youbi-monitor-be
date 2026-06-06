@@ -270,6 +270,18 @@ def save_storage_state(args: argparse.Namespace, account_key: str, profile: Prof
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"Bilibili account key not found: {account_key}")
+        cursor.execute(
+            """
+            UPDATE uploader_account
+            SET is_available = 1,
+                updated_at = NOW()
+            WHERE platform = 'bilibili'
+              AND account_key = %s
+            """,
+            (account_key,),
+        )
+        if cursor.rowcount == 0:
+            raise RuntimeError(f"Bilibili uploader account key not found: {account_key}")
         connection.commit()
     finally:
         connection.close()

@@ -175,6 +175,18 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"No matching DB row for account_key={account.account_key} mid={account.mid}")
+        cursor.execute(
+            """
+            UPDATE uploader_account
+            SET is_available = 1,
+                updated_at = NOW()
+            WHERE platform = 'bilibili'
+              AND account_key = %s
+            """,
+            (account.account_key,),
+        )
+        if cursor.rowcount == 0:
+            raise RuntimeError(f"Bilibili uploader account key not found: {account.account_key}")
         connection.commit()
     finally:
         connection.close()
