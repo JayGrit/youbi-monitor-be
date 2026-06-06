@@ -27,6 +27,10 @@ public class UploaderAccountService {
         return repositoryService.updateEnabled(platform, accountKey, enabled);
     }
 
+    public boolean updateAvailable(String platform, String accountKey, boolean available) {
+        return repositoryService.updateAvailable(platform, accountKey, available);
+    }
+
     public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
         return repositoryService.updateCooldown(platform, accountKey, minSeconds, maxSeconds);
     }

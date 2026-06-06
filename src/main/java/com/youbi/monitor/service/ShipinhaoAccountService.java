@@ -162,11 +162,16 @@ public class ShipinhaoAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
+        if (!uploaderAccountService.updateAvailable("shipinhao", normalized, true)) {
+            throw new IOException("Shipinhao uploader account key not found: " + normalized);
+        }
     }
 
     void markUnavailable(String accountKey) {
         String normalized = normalizeAccountKey(accountKey);
-        repositoryService.markUnavailable(normalized);
+        if (!uploaderAccountService.updateAvailable("shipinhao", normalized, false)) {
+            throw new IllegalStateException("Shipinhao uploader account key not found: " + normalized);
+        }
     }
 
     private boolean isStorageStateValid(String storageState) {

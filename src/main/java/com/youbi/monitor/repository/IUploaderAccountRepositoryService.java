@@ -12,6 +12,8 @@ public interface IUploaderAccountRepositoryService {
 
     boolean updateEnabled(String platform, String accountKey, boolean enabled);
 
+    boolean updateAvailable(String platform, String accountKey, boolean available);
+
     boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds);
 
     boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime);

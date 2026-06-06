@@ -120,6 +120,18 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"Shipinhao account key not found: {account.account_key}")
+        cursor.execute(
+            """
+            UPDATE uploader_account
+            SET is_available = 1,
+                updated_at = NOW()
+            WHERE platform = 'shipinhao'
+              AND account_key = %s
+            """,
+            (account.account_key,),
+        )
+        if cursor.rowcount == 0:
+            raise RuntimeError(f"Shipinhao uploader account key not found: {account.account_key}")
         connection.commit()
     finally:
         connection.close()

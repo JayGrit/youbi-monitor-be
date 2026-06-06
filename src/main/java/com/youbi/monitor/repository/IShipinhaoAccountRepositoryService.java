@@ -18,8 +18,6 @@ public interface IShipinhaoAccountRepositoryService {
 
     void saveStorageState(String accountKey, String userId, String nickname, String storageState);
 
-    void markUnavailable(String accountKey);
-
     Optional<String> findStorageState(String accountKey);
 
     Optional<LocalDateTime> findUpdatedAt(String accountKey);

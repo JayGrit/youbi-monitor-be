@@ -108,22 +108,14 @@ public class ShipinhaoAccountRepositoryServiceImpl implements IShipinhaoAccountR
     public void saveStorageState(String accountKey, String userId, String nickname, String storageState) {
         repository.update(
                 """
-                INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, is_available, updated_at)
-                VALUES (?, ?, ?, ?, 1, NOW())
-                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), is_available = 1, updated_at = NOW()
+                INSERT INTO uploader_account_shipinhao (account_key, user_id, nickname, storage_state_json, updated_at)
+                VALUES (?, ?, ?, ?, NOW())
+                ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
                 accountKey,
                 userId,
                 nickname,
                 storageState
-        );
-    }
-
-    @Override
-    public void markUnavailable(String accountKey) {
-        repository.update(
-                "UPDATE " + TABLE + " SET is_available = 0, updated_at = NOW() WHERE account_key = ?",
-                accountKey
         );
     }
 

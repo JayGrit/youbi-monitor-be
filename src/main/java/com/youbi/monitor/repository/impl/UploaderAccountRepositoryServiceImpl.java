@@ -125,6 +125,21 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
     }
 
     @Override
+    public boolean updateAvailable(String platform, String accountKey, boolean available) {
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET is_available = ?, updated_at = NOW()
+                WHERE platform = ? AND account_key = ?
+                """,
+                available,
+                normalizePlatform(platform),
+                normalizeAccountKey(accountKey)
+        );
+        return updated == 1;
+    }
+
+    @Override
     public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
         int updated = repository.update(
                 """

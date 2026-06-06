@@ -196,6 +196,16 @@ def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_i
             """,
             (args.account_key, user_id, nickname, storage_state_json),
         )
+        cursor.execute(
+            """
+            INSERT INTO uploader_account (
+                platform, account_key, source_table, is_enabled, is_available, updated_at
+            )
+            VALUES ('shipinhao', %s, 'uploader_account_shipinhao', 1, 1, NOW())
+            ON DUPLICATE KEY UPDATE is_available = 1, updated_at = NOW()
+            """,
+            (args.account_key,),
+        )
         connection.commit()
     finally:
         connection.close()
