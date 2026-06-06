@@ -35,10 +35,10 @@ public class AccountOverviewService {
 
     public List<String> types() {
         return repository.queryForList("""
-                SELECT DISTINCT type
+                SELECT DISTINCT account_key
                 FROM uploader_account
-                WHERE type IS NOT NULL AND TRIM(type) <> ''
-                ORDER BY type
+                WHERE account_key IS NOT NULL AND TRIM(account_key) <> ''
+                ORDER BY account_key
                 """, String.class);
     }
 
