@@ -216,15 +216,14 @@ public class ShipinhaoUploadService {
 
     private void setShortTitle(Page page, ShipinhaoUploadRequest request, String taskId) {
         try {
-            String shortTitle = normalizeShortTitle(request.shortTitle(), request.title());
             Locator input = page.getByText("短标题").first()
                     .locator("..")
                     .locator("xpath=following-sibling::div")
                     .locator("span input[type='text']")
                     .first();
             if (input.count() > 0) {
-                input.fill(shortTitle);
-                log.info("Shipinhao upload short title filled taskId={} shortTitle={}", taskId, shortTitle);
+                input.fill(request.shortTitle());
+                log.info("Shipinhao upload short title filled taskId={} shortTitle={}", taskId, request.shortTitle());
             }
         } catch (Exception exception) {
             log.warn("Shipinhao upload short title skipped taskId={} message={}", taskId, exception.getMessage());
@@ -501,38 +500,6 @@ public class ShipinhaoUploadService {
                 .map(value -> value.startsWith("#") ? value.substring(1) : value)
                 .filter(value -> !value.isBlank())
                 .toList();
-    }
-
-    private String formatShortTitle(String title) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < TextSupport.text(title).length(); i += 1) {
-            char ch = TextSupport.text(title).charAt(i);
-            if (Character.isLetterOrDigit(ch) || "《》“”:+?%°".indexOf(ch) >= 0) {
-                builder.append(ch);
-            }
-        }
-        String value = builder.toString();
-        if (value.length() > 16) {
-            value = value.substring(0, 16);
-        }
-        return value;
-    }
-
-    private String normalizeShortTitle(String shortTitle, String title) {
-        String value = TextSupport.firstText(shortTitle, formatShortTitle(title)).trim();
-        if (value.isBlank()) {
-            value = "精彩视频";
-        }
-        if (value.length() > 16) {
-            value = value.substring(0, 16);
-        }
-        while (value.length() < 6) {
-            value += "视频";
-            if (value.length() > 16) {
-                value = value.substring(0, 16);
-            }
-        }
-        return value;
     }
 
     private record UploadReadiness(
