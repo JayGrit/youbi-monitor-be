@@ -26,6 +26,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         resetFailedStage(taskId, failedStage);
         resetDownstreamStages(taskId, failedStage);
         resetStageChildren(taskId, failedStage);
+        resetExhaustedTranslatorApiTasks(taskId);
         repository.update("""
                 UPDATE yd_task
                 SET status = 'ready',
@@ -124,6 +125,13 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private RetryStage findFailedStage(String taskId) {
+        if (hasExhaustedTranslatorApiTasks(taskId)) {
+            return RETRY_STAGES.stream()
+                    .filter(stage -> "translator".equals(stage.key()))
+                    .findFirst()
+                    .orElse(null);
+        }
+
         for (RetryStage stage : RETRY_STAGES) {
             Integer count = repository.queryForObject(
                     "SELECT COUNT(*) FROM " + stage.table() + " WHERE task_id = ? AND status = 'failed'",
@@ -150,6 +158,20 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             }
         }
         return null;
+    }
+
+    private boolean hasExhaustedTranslatorApiTasks(String taskId) {
+        if (!tableExists("yd_translator_api_task")) {
+            return false;
+        }
+        Integer count = repository.queryForObject("""
+                SELECT COUNT(*)
+                FROM yd_translator_api_task
+                WHERE task_id = ?
+                  AND status = 'failed'
+                  AND attempt_count >= max_attempts
+                """, Integer.class, taskId);
+        return count != null && count > 0;
     }
 
     private void resetFailedStage(String taskId, RetryStage stage) {
@@ -193,13 +215,11 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                             started_at = NULL,
                             completed_at = NULL,
                             error_message = NULL,
+                            response_json = NULL,
                             next_run_at = NOW(),
                             `operator` = NULL
                         WHERE task_id = ? AND status IN ('failed', 'running')
                         """, taskId);
-            }
-            if (tableExists("yd_speaker_segment")) {
-                repository.update("DELETE FROM yd_speaker_segment WHERE task_id = ?", taskId);
             }
             return;
         }
@@ -270,6 +290,27 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         """.formatted(quotedIdentifier(uploadStatusColumn(platform))), taskId);
             });
         }
+    }
+
+    private void resetExhaustedTranslatorApiTasks(String taskId) {
+        if (!tableExists("yd_translator_api_task")) {
+            return;
+        }
+        ensureOperatorColumn("yd_translator_api_task");
+        repository.update("""
+                UPDATE yd_translator_api_task
+                SET status = 'pending',
+                    attempt_count = 0,
+                    started_at = NULL,
+                    completed_at = NULL,
+                    error_message = NULL,
+                    response_json = NULL,
+                    next_run_at = NOW(),
+                    `operator` = NULL
+                WHERE task_id = ?
+                  AND status = 'failed'
+                  AND attempt_count >= max_attempts
+                """, taskId);
     }
 
     @Override
