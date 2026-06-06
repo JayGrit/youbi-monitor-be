@@ -22,6 +22,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             return false;
         }
 
+        applyStagedPipelineRetry(taskId);
         resetFailedStage(taskId, failedStage);
         resetDownstreamStages(taskId, failedStage);
         resetStageChildren(taskId, failedStage);
@@ -118,6 +119,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     `operator` = NULL
                 WHERE id = ?
                 """, stoppedStage, message, taskId);
+        applyStagedPipelineFailure(taskId, statuses.get(0));
         return new MonitorService.TaskStopResult("failed", stoppedStages, true);
     }
 
@@ -319,6 +321,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     `operator` = NULL
                 WHERE id = ?
                 """, taskId);
+        reconcileUploaderAccountStagedCounts();
     }
 
     @Override
@@ -328,6 +331,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             deleted += repository.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
         }
         deleted += repository.update("DELETE FROM yd_task WHERE id = ?", taskId);
+        reconcileUploaderAccountStagedCounts();
         return deleted;
     }
 

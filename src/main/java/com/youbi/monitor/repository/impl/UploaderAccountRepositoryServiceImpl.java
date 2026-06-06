@@ -47,6 +47,9 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         String stagedRunningCountSql = columnExists(TABLE, "staged_running_count")
                 ? "staged_running_count"
                 : "0 staged_running_count";
+        String stagedFailedCountSql = columnExists(TABLE, "staged_failed_count")
+                ? "staged_failed_count"
+                : "0 staged_failed_count";
         String quietStartSql = columnExists(TABLE, "upload_quiet_start_time")
                 ? "upload_quiet_start_time"
                 : "TIME('01:00:00') upload_quiet_start_time";
@@ -58,13 +61,13 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
                        %s, %s,
-                       %s, %s, %s, today_upload_count, cooldown_waiting_count, %s, %s,
+                       %s, %s, %s, %s, today_upload_count, cooldown_waiting_count, %s, %s,
                        %s,
                        is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
                 FROM uploader_account
                 WHERE platform = ? AND account_key = ?
                 LIMIT 1
-                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
                         rs.getString("platform"),
                         rs.getString("account_key"),
@@ -77,6 +80,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         rs.getInt("downloader_max_staged_count"),
                         rs.getInt("downloader_pending_count"),
                         rs.getInt("staged_running_count"),
+                        rs.getInt("staged_failed_count"),
                         rs.getInt("today_upload_count"),
                         rs.getInt("cooldown_waiting_count"),
                         rs.getString("upload_running_task_id"),
@@ -261,6 +265,14 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                     """
                     ALTER TABLE uploader_account
                     ADD COLUMN staged_running_count INT NOT NULL DEFAULT 0
+                    """
+            );
+        }
+        if (!columnExists(TABLE, "staged_failed_count")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN staged_failed_count INT NOT NULL DEFAULT 0
                     """
             );
         }

@@ -206,6 +206,9 @@ public class AccountOverviewService {
         String stagedRunningCountSql = columnExists("uploader_account", "staged_running_count")
                 ? "ua.staged_running_count"
                 : "0 staged_running_count";
+        String stagedFailedCountSql = columnExists("uploader_account", "staged_failed_count")
+                ? "ua.staged_failed_count"
+                : "0 staged_failed_count";
         String quietStartSql = columnExists("uploader_account", "upload_quiet_start_time")
                 ? "ua.upload_quiet_start_time"
                 : "TIME('01:00:00') upload_quiet_start_time";
@@ -219,6 +222,7 @@ public class AccountOverviewService {
                        ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds,
                        ua.upload_cooldown_max_seconds,
+                       %s,
                        %s,
                        %s,
                        %s,
@@ -300,7 +304,7 @@ public class AccountOverviewService {
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
                 %s
-                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -331,6 +335,7 @@ public class AccountOverviewService {
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
         row.put("downloaderPendingCount", rs.getInt("downloader_pending_count"));
         row.put("stagedRunningCount", rs.getInt("staged_running_count"));
+        row.put("stagedFailedCount", rs.getInt("staged_failed_count"));
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
         row.put("cooldownWaitingCount", rs.getInt("cooldown_waiting_count"));
         row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
@@ -416,6 +421,14 @@ public class AccountOverviewService {
                     """
                     ALTER TABLE uploader_account
                     ADD COLUMN staged_running_count INT NOT NULL DEFAULT 0
+                    """
+            );
+        }
+        if (!columnExists("uploader_account", "staged_failed_count")) {
+            repository.update(
+                    """
+                    ALTER TABLE uploader_account
+                    ADD COLUMN staged_failed_count INT NOT NULL DEFAULT 0
                     """
             );
         }
