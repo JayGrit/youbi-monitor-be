@@ -345,6 +345,18 @@ public class ShipinhaoUploadService {
         RuntimeException lastException = null;
         boolean fileSet = false;
         int attemptedInputs = 0;
+        try {
+            if (selectVideoThroughChooser(page, videoPath, taskId)) {
+                fileSet = true;
+                if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(60))) {
+                    return;
+                }
+                dumpDiagnostics(page, taskId, "video-file-not-accepted-visible-chooser");
+            }
+        } catch (RuntimeException exception) {
+            lastException = exception;
+            log.warn("Shipinhao upload file chooser failed taskId={} message={}", taskId, exception.getMessage());
+        }
         for (Locator inputs : List.of(explicitVideoInputs, page.locator(FALLBACK_FILE_INPUT_SELECTOR))) {
             int count = inputs.count();
             for (int index = 0; index < count; index += 1) {
@@ -356,7 +368,7 @@ public class ShipinhaoUploadService {
                             taskId, attemptedInputs, accept);
                     input.setInputFiles(videoPath);
                     fileSet = true;
-                    if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(30))) {
+                    if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(60))) {
                         return;
                     }
                     dumpDiagnostics(page, taskId, "video-file-not-accepted-" + attemptedInputs);
@@ -366,15 +378,6 @@ public class ShipinhaoUploadService {
                             taskId, attemptedInputs, exception.getMessage());
                 }
             }
-        }
-        try {
-            if (selectVideoThroughChooser(page, videoPath, taskId)
-                    && waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(30))) {
-                return;
-            }
-        } catch (RuntimeException exception) {
-            lastException = exception;
-            log.warn("Shipinhao upload file chooser fallback failed taskId={} message={}", taskId, exception.getMessage());
         }
         dumpDiagnostics(page, taskId, "video-file-not-accepted");
         if (fileSet) {
