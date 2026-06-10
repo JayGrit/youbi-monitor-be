@@ -518,13 +518,28 @@ public class ShipinhaoUploadService {
         boolean uploadPreviewText = TextSupport.containsAny(body, UPLOADED_VIDEO_TEXTS.toArray(String[]::new))
                 || (body.contains("个人主页卡片") && body.contains("分享卡片"))
                 || (body.contains("删除") && body.contains("封面预览") && body.contains("短标题"));
-        boolean mediaVisible = domVideoPreviewVisible || domMediaPreviewVisible || uploadPreviewText;
+        boolean visiblePreviewControls = visibleText(page, "删除")
+                || visibleText(page, "封面预览")
+                || (visibleText(page, "个人主页卡片") && visibleText(page, "分享卡片"));
+        boolean visibleUploadPrompt = visibleText(page, "上传时长8小时内")
+                || visibleText(page, "大小不超过20GB")
+                || visibleText(page, "格式为MP4");
+        boolean mediaVisible = domVideoPreviewVisible || domMediaPreviewVisible || uploadPreviewText || (visiblePreviewControls && !visibleUploadPrompt);
         boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
         boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
         boolean missingVideo = TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new));
         boolean pageStateReadable = TextSupport.hasText(body);
         boolean ready = buttonEnabled && !uploading && !uploadFailed && !missingVideo && (mediaVisible || !pageStateReadable);
         return new UploadReadiness(ready, buttonEnabled, mediaVisible, fileSelected, uploading, uploadFailed, missingVideo, body);
+    }
+
+    private boolean visibleText(Page page, String text) {
+        try {
+            Locator locator = page.getByText(text).first();
+            return locator.count() > 0 && locator.isVisible();
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     private String clickVisibleText(Page page, String text) {
