@@ -11,7 +11,12 @@ final class PlaywrightDiagnostics {
         try {
             return page.locator("body").innerText(new Locator.InnerTextOptions().setTimeout(3000));
         } catch (Exception exception) {
-            return "";
+            try {
+                Object text = page.evaluate("() => document.body ? (document.body.innerText || document.body.textContent || '') : ''");
+                return text == null ? "" : text.toString();
+            } catch (Exception ignored) {
+                return "";
+            }
         }
     }
 

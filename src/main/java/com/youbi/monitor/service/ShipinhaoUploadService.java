@@ -432,7 +432,9 @@ public class ShipinhaoUploadService {
                             taskId, checks, state.fileSelected(), state.mediaVisible());
                     return true;
                 }
-            } catch (Exception ignored) {
+            } catch (Exception exception) {
+                log.debug("Shipinhao upload video acceptance check skipped taskId={} checks={} message={}",
+                        taskId, checks, exception.getMessage());
             }
             page.waitForTimeout(1000);
         }
@@ -472,10 +474,48 @@ public class ShipinhaoUploadService {
                 }
                 """
         ));
+        boolean domMediaPreviewVisible = Boolean.TRUE.equals(page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const rect = el.getBoundingClientRect();
+                    const style = getComputedStyle(el);
+                    return style.display !== 'none'
+                      && style.visibility !== 'hidden'
+                      && rect.width >= 80
+                      && rect.height >= 60;
+                  };
+                  const isLoadingIcon = (el) => {
+                    const cls = String(el.className || '');
+                    const alt = String(el.getAttribute('alt') || '');
+                    return /loading|加载中/i.test(cls) || /加载中/.test(alt);
+                  };
+                  const hasVisibleRenderedMedia = Array.from(document.querySelectorAll('canvas,img')).some((el) => {
+                    if (!visible(el) || isLoadingIcon(el)) return false;
+                    const rect = el.getBoundingClientRect();
+                    if (rect.width < 100 || rect.height < 100) return false;
+                    const src = el.getAttribute('src') || '';
+                    return el.tagName === 'CANVAS'
+                      || src.startsWith('blob:')
+                      || src.startsWith('data:')
+                      || src.startsWith('http');
+                  });
+                  if (hasVisibleRenderedMedia) return true;
+                  return Array.from(document.querySelectorAll('*')).some((el) => {
+                    if (!visible(el)) return false;
+                    const style = getComputedStyle(el);
+                    const bg = style.backgroundImage || '';
+                    if (!bg || bg === 'none') return false;
+                    const cls = String(el.className || '');
+                    return /preview|cover|poster|video|media|upload/i.test(cls) || /url\\(["']?(blob:|data:|http)/.test(bg);
+                  });
+                }
+                """
+        ));
         boolean uploadPreviewText = TextSupport.containsAny(body, UPLOADED_VIDEO_TEXTS.toArray(String[]::new))
                 || (body.contains("个人主页卡片") && body.contains("分享卡片"))
                 || (body.contains("删除") && body.contains("封面预览") && body.contains("短标题"));
-        boolean mediaVisible = domVideoPreviewVisible || uploadPreviewText;
+        boolean mediaVisible = domVideoPreviewVisible || domMediaPreviewVisible || uploadPreviewText;
         boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
         boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
         boolean missingVideo = TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new));
