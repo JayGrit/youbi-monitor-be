@@ -5,6 +5,7 @@ import com.youbi.monitor.dto.ShipinhaoUploadRequest;
 import com.youbi.monitor.dto.ShipinhaoUploadResult;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
+import com.microsoft.playwright.FileChooser;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.TimeoutError;
@@ -39,8 +40,12 @@ public class ShipinhaoUploadService {
             "请上传视频", "请选择视频", "上传视频后", "上传时长8小时内", "大小不超过20GB", "格式为MP4"
     );
     private static final List<String> UPLOADED_VIDEO_TEXTS = List.of(
-            "视频已上传", "当前浏览器暂不支持预览", "手机预览", "封面预览", "重新上传"
+            "视频已上传", "当前浏览器暂不支持预览", "重新上传"
     );
+    private static final String VIDEO_FILE_INPUT_SELECTOR =
+            "input[type='file'][accept*='video'], input[type='file'][accept*='mp4']";
+    private static final String FALLBACK_FILE_INPUT_SELECTOR =
+            "input[type='file']:not([accept]), input[type='file'][accept='']";
 
     private final ShipinhaoAccountService accountService;
     private final UploadMaterialResolver materialResolver;
@@ -335,38 +340,84 @@ public class ShipinhaoUploadService {
     }
 
     private void selectVideoFile(Page page, Path videoPath, String taskId) {
-        Locator inputs = page.locator("input[type='file'][accept*='video'], input[type='file'][accept*='mp4'], input[type='file'][accept='']");
-        inputs.first().waitFor(new Locator.WaitForOptions()
-                .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
-                .setTimeout(30000));
-        int count = inputs.count();
+        Locator explicitVideoInputs = page.locator(VIDEO_FILE_INPUT_SELECTOR);
+        waitForAnyFileInput(page, explicitVideoInputs);
         RuntimeException lastException = null;
         boolean fileSet = false;
-        for (int index = 0; index < count; index += 1) {
-            Locator input = inputs.nth(index);
-            try {
-                String accept = TextSupport.text(input.getAttribute("accept"));
-                log.info("Shipinhao upload set video input taskId={} index={} accept={}", taskId, index, accept);
-                input.setInputFiles(videoPath);
-                fileSet = true;
-                if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(30))) {
-                    return;
+        int attemptedInputs = 0;
+        for (Locator inputs : List.of(explicitVideoInputs, page.locator(FALLBACK_FILE_INPUT_SELECTOR))) {
+            int count = inputs.count();
+            for (int index = 0; index < count; index += 1) {
+                attemptedInputs += 1;
+                Locator input = inputs.nth(index);
+                try {
+                    String accept = TextSupport.text(input.getAttribute("accept"));
+                    log.info("Shipinhao upload set video input taskId={} candidate={} accept={}",
+                            taskId, attemptedInputs, accept);
+                    input.setInputFiles(videoPath);
+                    fileSet = true;
+                    if (waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(30))) {
+                        return;
+                    }
+                    dumpDiagnostics(page, taskId, "video-file-not-accepted-" + attemptedInputs);
+                } catch (RuntimeException exception) {
+                    lastException = exception;
+                    log.warn("Shipinhao upload video input rejected taskId={} candidate={} message={}",
+                            taskId, attemptedInputs, exception.getMessage());
                 }
-                dumpDiagnostics(page, taskId, "video-file-not-accepted-" + (index + 1));
-            } catch (RuntimeException exception) {
-                lastException = exception;
-                log.warn("Shipinhao upload video input rejected taskId={} index={} message={}", taskId, index, exception.getMessage());
             }
+        }
+        try {
+            if (selectVideoThroughChooser(page, videoPath, taskId)
+                    && waitForVideoFileAccepted(page, taskId, Duration.ofSeconds(30))) {
+                return;
+            }
+        } catch (RuntimeException exception) {
+            lastException = exception;
+            log.warn("Shipinhao upload file chooser fallback failed taskId={} message={}", taskId, exception.getMessage());
         }
         dumpDiagnostics(page, taskId, "video-file-not-accepted");
         if (fileSet) {
-            log.warn("Shipinhao upload selected video was not detected by early DOM check taskId={}, continue to metadata/upload readiness checks", taskId);
-            return;
+            throw new RuntimeException("Shipinhao video file was selected but the page did not show a video preview");
         }
         if (lastException != null) {
             throw new RuntimeException("Shipinhao video file was not accepted by any upload input", lastException);
         }
-        throw new RuntimeException("Shipinhao video file was not accepted by page");
+        throw new RuntimeException("Shipinhao video upload input was not found");
+    }
+
+    private void waitForAnyFileInput(Page page, Locator explicitVideoInputs) {
+        try {
+            explicitVideoInputs.first().waitFor(new Locator.WaitForOptions()
+                    .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
+                    .setTimeout(15000));
+        } catch (TimeoutError ignored) {
+            try {
+                page.locator(FALLBACK_FILE_INPUT_SELECTOR).first().waitFor(new Locator.WaitForOptions()
+                        .setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED)
+                        .setTimeout(15000));
+            } catch (TimeoutError ignoredAgain) {
+                log.warn("Shipinhao upload file input did not attach before fallback selection url={}", page.url());
+            }
+        }
+    }
+
+    private boolean selectVideoThroughChooser(Page page, Path videoPath, String taskId) {
+        Locator uploadArea = page.getByText("上传时长8小时内").first().locator("..");
+        if (uploadArea.count() == 0) {
+            uploadArea = page.getByText("大小不超过20GB").first().locator("..");
+        }
+        if (uploadArea.count() == 0) {
+            return false;
+        }
+        Locator trigger = uploadArea;
+        FileChooser chooser = page.waitForFileChooser(
+                new Page.WaitForFileChooserOptions().setTimeout(15000),
+                trigger::click
+        );
+        chooser.setFiles(videoPath);
+        log.info("Shipinhao upload selected video through visible upload area taskId={}", taskId);
+        return true;
     }
 
     private boolean waitForVideoFileAccepted(Page page, String taskId, Duration timeout) {
@@ -404,7 +455,7 @@ public class ShipinhaoUploadService {
                   .some((input) => input.files && input.files.length > 0)
                 """
         ));
-        boolean domMediaVisible = Boolean.TRUE.equals(page.evaluate(
+        boolean domVideoPreviewVisible = Boolean.TRUE.equals(page.evaluate(
                 """
                 () => {
                   const visible = (el) => {
@@ -412,21 +463,19 @@ public class ShipinhaoUploadService {
                     const style = getComputedStyle(el);
                     return style.display !== 'none' && style.visibility !== 'hidden' && rect.width >= 80 && rect.height >= 60;
                   };
-                  return Array.from(document.querySelectorAll('video, canvas, img')).some((el) => {
+                  return Array.from(document.querySelectorAll('video')).some((el) => {
                     if (!visible(el)) return false;
                     const src = el.getAttribute('src') || '';
                     const cls = el.className || '';
-                    const text = (el.closest('form, .post-create, .weui-desktop-form, .form') || document.body).innerText || '';
-                    return src.startsWith('blob:') || src.startsWith('data:') || /cover|poster|preview|thumb|video/i.test(cls) || text.includes('封面');
+                    return src.startsWith('blob:') || src.startsWith('data:') || /preview|video/i.test(cls);
                   });
                 }
                 """
         ));
         boolean uploadPreviewText = TextSupport.containsAny(body, UPLOADED_VIDEO_TEXTS.toArray(String[]::new))
                 || (body.contains("个人主页卡片") && body.contains("分享卡片"))
-                || (body.contains("删除") && body.contains("短标题"))
-                || body.contains("取消上传");
-        boolean mediaVisible = domMediaVisible || uploadPreviewText;
+                || (body.contains("删除") && body.contains("封面预览") && body.contains("短标题"));
+        boolean mediaVisible = domVideoPreviewVisible || uploadPreviewText;
         boolean uploading = TextSupport.containsAny(body, UPLOAD_IN_PROGRESS_TEXTS.toArray(String[]::new));
         boolean uploadFailed = TextSupport.containsAny(body, UPLOAD_FAILED_TEXTS.toArray(String[]::new));
         boolean missingVideo = TextSupport.containsAny(body, MISSING_VIDEO_TEXTS.toArray(String[]::new));
