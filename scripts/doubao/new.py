@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import shutil
 import tempfile
 import time
 from pathlib import Path
@@ -303,6 +304,7 @@ def wait_for_login(args: argparse.Namespace) -> tuple[dict[str, Any], str, str |
             raise SystemExit(f"等待豆包扫码登录超时：account_key={args.account_key}")
         finally:
             context.close()
+            shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 def main() -> int:
