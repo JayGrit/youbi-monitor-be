@@ -34,8 +34,8 @@ public class JinritoutiaoUploadService {
     private static final Logger log = LoggerFactory.getLogger(JinritoutiaoUploadService.class);
     private static final String DIAGNOSTIC_PLATFORM = "jinritoutiao";
     private static final String DIAGNOSTIC_SOURCE = "jinritoutiao-upload";
-    private static final int MIN_COVER_WIDTH = 412;
-    private static final int MIN_COVER_HEIGHT = 667;
+    private static final int MIN_COVER_WIDTH = 1920;
+    private static final int MIN_COVER_HEIGHT = 1080;
     private static final List<String> UPLOAD_IN_PROGRESS_TEXTS = List.of(
             "上传中", "正在上传", "视频上传中", "处理中", "视频处理中", "转码中", "上传进度", "解析中"
     );
@@ -253,7 +253,7 @@ public class JinritoutiaoUploadService {
             Locator coverInput = page.locator("input[type='file'][accept*='image'], input[type='file'][accept*='.png'], input[type='file'][accept*='.jpg'], input[type='file'][accept*='.jpeg']").last();
             coverInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
             coverInput.setInputFiles(preparedCoverPath);
-            page.waitForTimeout(3000);
+            waitForCoverEditorReady(page, taskId);
             dumpDiagnostics(page, taskId, "cover-uploaded");
             confirmCoverEditor(page, taskId);
             waitForCoverSelected(page, taskId);
@@ -276,20 +276,19 @@ public class JinritoutiaoUploadService {
         }
     }
 
-    private Path prepareCoverForUpload(Path coverPath, String taskId) throws IOException {
+    static Path prepareCoverForUpload(Path coverPath, String taskId) throws IOException {
         BufferedImage source = ImageIO.read(coverPath.toFile());
         if (source == null) {
-            log.warn("Jinritoutiao upload cover image cannot be decoded taskId={} cover={}, using original", taskId, coverPath);
-            return coverPath;
+            throw new IOException("Jinritoutiao cover image cannot be decoded: " + coverPath);
         }
         int width = source.getWidth();
         int height = source.getHeight();
-        if (width >= MIN_COVER_WIDTH && height >= MIN_COVER_HEIGHT) {
-            return coverPath;
-        }
-        double scale = Math.max((double) MIN_COVER_WIDTH / width, (double) MIN_COVER_HEIGHT / height);
-        int targetWidth = Math.max(MIN_COVER_WIDTH, (int) Math.ceil(width * scale));
-        int targetHeight = Math.max(MIN_COVER_HEIGHT, (int) Math.ceil(height * scale));
+        double scale = Math.max(1.0, Math.max(
+                (double) MIN_COVER_WIDTH / width,
+                (double) MIN_COVER_HEIGHT / height
+        ));
+        int targetWidth = (int) Math.ceil(width * scale);
+        int targetHeight = (int) Math.ceil(height * scale);
         BufferedImage target = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
         Graphics2D graphics = target.createGraphics();
         try {
@@ -306,9 +305,48 @@ public class JinritoutiaoUploadService {
         if (!ImageIO.write(target, "jpg", prepared.toFile())) {
             throw new IOException("No JPEG writer available for Jinritoutiao cover");
         }
-        log.info("Jinritoutiao upload cover upscaled taskId={} cover={} original={}x{} prepared={} preparedSize={}x{}",
+        log.info("Jinritoutiao upload cover normalized taskId={} cover={} original={}x{} prepared={} preparedSize={}x{}",
                 taskId, coverPath, width, height, prepared, targetWidth, targetHeight);
         return prepared;
+    }
+
+    private void waitForCoverEditorReady(Page page, String taskId) {
+        long deadline = System.currentTimeMillis() + Duration.ofSeconds(30).toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (isCoverImageEditorReady(page)) {
+                return;
+            }
+            page.waitForTimeout(1000);
+        }
+        dumpDiagnostics(page, taskId, "cover-file-not-accepted");
+        throw new RuntimeException(
+                "Jinritoutiao cover file was selected but the page did not load its preview, body="
+                        + TextSupport.truncate(visibleBodyText(page), 200)
+        );
+    }
+
+    private boolean isCoverImageEditorReady(Page page) {
+        return Boolean.TRUE.equals(page.evaluate(
+                """
+                () => {
+                  const visible = (el) => {
+                    const style = getComputedStyle(el);
+                    const rect = el.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+                  };
+                  return Array.from(document.querySelectorAll('.body, [role="dialog"], .m-content'))
+                    .some((el) => {
+                      if (!visible(el)) return false;
+                      const text = el.innerText || '';
+                      const hasEditorTitle = text.includes('封面编辑');
+                      const hasEditorAction = text.includes('重选封面') && text.includes('确定');
+                      const hasPreview = Array.from(el.querySelectorAll('canvas, img[src^="blob:"], img[src^="data:"]'))
+                        .some(visible);
+                      return hasEditorTitle && hasEditorAction && hasPreview;
+                    });
+                }
+                """
+        ));
     }
 
     private void selectGeneratedCover(Page page, String taskId) {
