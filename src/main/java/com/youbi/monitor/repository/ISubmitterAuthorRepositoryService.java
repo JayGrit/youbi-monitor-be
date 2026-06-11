@@ -17,7 +17,8 @@ public interface ISubmitterAuthorRepositoryService {
             Boolean needSeparation,
             String sourceLanguage,
             String targetLanguage,
-            Boolean resetCover
+            Boolean resetCover,
+            String coverOrientation
     );
 
     MonitorService.SubmitterAuthorDeleteResult deleteSubmitterAuthorType(String author);

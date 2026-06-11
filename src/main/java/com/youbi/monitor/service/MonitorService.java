@@ -191,7 +191,8 @@ public class MonitorService {
             Boolean needSeparation,
             String sourceLanguage,
             String targetLanguage,
-            Boolean resetCover
+            Boolean resetCover,
+            String coverOrientation
     ) {
         return submitterAuthorRepositoryService.saveSubmitterAuthorType(
                 author,
@@ -201,7 +202,8 @@ public class MonitorService {
                 needSeparation,
                 sourceLanguage,
                 targetLanguage,
-                resetCover
+                resetCover,
+                coverOrientation
         );
     }
 
@@ -685,6 +687,7 @@ public class MonitorService {
             String sourceLanguage,
             String targetLanguage,
             boolean resetCover,
+            String coverOrientation,
             int updatedSubmissionRows,
             int updatedVideoInfoRows
     ) {
@@ -698,7 +701,8 @@ public class MonitorService {
             Boolean needSeparation,
             String sourceLanguage,
             String targetLanguage,
-            Boolean resetCover
+            Boolean resetCover,
+            String coverOrientation
     ) {
     }
 

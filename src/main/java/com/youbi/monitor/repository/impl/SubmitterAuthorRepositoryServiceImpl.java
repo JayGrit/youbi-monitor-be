@@ -16,22 +16,23 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
 
     
     public MonitorService.SubmitterAuthorType findSubmitterAuthorType(String author) {
-        ensureResetCoverColumn();
+        ensureAuthorCoverColumns();
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false, 0, 0);
+            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false, "", 0, 0);
         }
         List<Map<String, Object>> rows = repository.queryForList("""
-                SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover
+                SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation
                 FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false, 0, 0);
+            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false, "", 0, 0);
         }
         Map<String, Object> row = rows.get(0);
         boolean needSubtitle = boolValue(row.get("need_subtitle"), true);
+        boolean resetCover = boolValue(row.get("reset_cover"), false);
         return new MonitorService.SubmitterAuthorType(
                 normalized,
                 stringValue(row.get("type")),
@@ -40,7 +41,8 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 boolValue(row.get("need_separation"), true),
                 defaultLanguage(row.get("source_language"), "英文"),
                 defaultLanguage(row.get("target_language"), "中文"),
-                boolValue(row.get("reset_cover"), false),
+                resetCover,
+                resetCover ? normalizeCoverOrientation(row.get("cover_orientation")) : "",
                 0,
                 0
         );
@@ -48,23 +50,27 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
 
     
     public List<MonitorService.SubmitterAuthorType> listSubmitterAuthorTypes() {
-        ensureResetCoverColumn();
+        ensureAuthorCoverColumns();
         return repository.query("""
-                SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover
+                SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation
                 FROM submitter_author
                 ORDER BY CASE WHEN COALESCE(NULLIF(type, ''), '') = '' THEN 1 ELSE 0 END, type, author
-                """, (rs, rowNum) -> new MonitorService.SubmitterAuthorType(
-                text(rs.getString("author")),
-                text(rs.getString("type")),
-                boolValue(rs.getObject("need_subtitle"), true),
-                boolValue(rs.getObject("need_subtitle"), true) && boolValue(rs.getObject("need_dubbing"), true),
-                boolValue(rs.getObject("need_separation"), true),
-                defaultLanguage(rs.getString("source_language"), "英文"),
-                defaultLanguage(rs.getString("target_language"), "中文"),
-                boolValue(rs.getObject("reset_cover"), false),
-                0,
-                0
-        ));
+                """, (rs, rowNum) -> {
+            boolean resetCover = boolValue(rs.getObject("reset_cover"), false);
+            return new MonitorService.SubmitterAuthorType(
+                    text(rs.getString("author")),
+                    text(rs.getString("type")),
+                    boolValue(rs.getObject("need_subtitle"), true),
+                    boolValue(rs.getObject("need_subtitle"), true) && boolValue(rs.getObject("need_dubbing"), true),
+                    boolValue(rs.getObject("need_separation"), true),
+                    defaultLanguage(rs.getString("source_language"), "英文"),
+                    defaultLanguage(rs.getString("target_language"), "中文"),
+                    resetCover,
+                    resetCover ? normalizeCoverOrientation(rs.getString("cover_orientation")) : "",
+                    0,
+                    0
+            );
+        });
     }
 
     
@@ -76,9 +82,10 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
             Boolean needSeparation,
             String sourceLanguage,
             String targetLanguage,
-            Boolean resetCover
+            Boolean resetCover,
+            String coverOrientation
     ) {
-        ensureResetCoverColumn();
+        ensureAuthorCoverColumns();
         String normalizedAuthor = text(author);
         String normalizedType = text(type);
         String normalizedSourceLanguage = defaultLanguage(sourceLanguage, "英文");
@@ -93,9 +100,10 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         boolean normalizedNeedDubbing = normalizedNeedSubtitle && !Boolean.FALSE.equals(needDubbing);
         boolean normalizedNeedSeparation = !Boolean.FALSE.equals(needSeparation);
         boolean normalizedResetCover = Boolean.TRUE.equals(resetCover);
+        String normalizedCoverOrientation = normalizedResetCover ? normalizeCoverOrientation(coverOrientation) : "";
         repository.update("""
-                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     type = VALUES(type),
                     need_subtitle = VALUES(need_subtitle),
@@ -104,6 +112,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                     source_language = VALUES(source_language),
                     target_language = VALUES(target_language),
                     reset_cover = VALUES(reset_cover),
+                    cover_orientation = VALUES(cover_orientation),
                     updated_at = NOW()
                 """,
                 normalizedAuthor,
@@ -113,7 +122,8 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 normalizedNeedSeparation ? 1 : 0,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
-                normalizedResetCover ? 1 : 0
+                normalizedResetCover ? 1 : 0,
+                normalizedCoverOrientation
         );
         int updatedSubmissionRows = syncDownloaderSubmissions(
                 normalizedAuthor,
@@ -140,6 +150,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
                 normalizedResetCover,
+                normalizedCoverOrientation,
                 updatedSubmissionRows,
                 updatedVideoInfoRows
         );
@@ -206,13 +217,30 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         );
     }
 
-    private void ensureResetCoverColumn() {
+    private void ensureAuthorCoverColumns() {
         if (!columnExists("submitter_author", "reset_cover")) {
             repository.update("""
                     ALTER TABLE submitter_author
                     ADD COLUMN reset_cover TINYINT(1) NOT NULL DEFAULT 0
                     """);
         }
+        if (!columnExists("submitter_author", "cover_orientation")) {
+            repository.update("""
+                    ALTER TABLE submitter_author
+                    ADD COLUMN cover_orientation VARCHAR(16) NOT NULL DEFAULT ''
+                    """);
+        }
+    }
+
+    private String normalizeCoverOrientation(Object value) {
+        String normalized = stringValue(value).toLowerCase();
+        if (normalized.equals("vertical")) {
+            return "vertical";
+        }
+        if (normalized.equals("horizontal")) {
+            return "horizontal";
+        }
+        return "horizontal";
     }
 
     
