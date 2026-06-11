@@ -27,7 +27,6 @@ from new import (
     ensure_schema,
     filter_doubao_state,
     has_login_cookie,
-    page_login_hint,
     profile_from_storage_state,
 )
 
@@ -142,7 +141,7 @@ def has_enough_profile_to_verify(account: Account, user_id: str | None, nickname
 
 
 def login_ready(state: dict[str, Any], page, user_id: str | None, nickname: str | None) -> bool:
-    return bool(user_id or nickname or has_login_cookie(state) or page_login_hint(page))
+    return bool(user_id or nickname or has_login_cookie(state))
 
 
 def wait_for_login(args: argparse.Namespace, account: Account) -> bool:

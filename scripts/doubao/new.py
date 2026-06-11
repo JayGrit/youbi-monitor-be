@@ -218,7 +218,7 @@ def page_login_hint(page) -> bool:
 def looks_logged_in(state: dict[str, Any], page, user_id: str | None, nickname: str | None) -> bool:
     if is_login_page(page):
         return False
-    return bool(nickname or has_login_cookie(state) or page_login_hint(page))
+    return bool(user_id or nickname or has_login_cookie(state))
 
 
 def ensure_schema(cursor) -> None:
