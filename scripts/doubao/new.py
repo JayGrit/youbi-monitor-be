@@ -10,6 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import mysql.connector
 from playwright.sync_api import sync_playwright
@@ -186,8 +187,8 @@ def has_login_cookie(state: dict[str, Any]) -> bool:
 
 
 def is_login_page(page) -> bool:
-    current_url = page.url.lower()
-    if any(marker in current_url for marker in ("/login", "login", "bind_mobile", "/register/")):
+    current_path = urlsplit(page.url).path.lower()
+    if any(marker in current_path for marker in ("/login", "bind_mobile", "/register/")):
         return True
     try:
         body_text = page.locator("body").inner_text(timeout=1_000)
