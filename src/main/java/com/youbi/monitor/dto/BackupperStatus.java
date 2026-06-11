@@ -13,6 +13,10 @@ public record BackupperStatus(
         BigDecimal availableGb,
         BigDecimal usedPercent,
         String statusText,
+        Long minioBytes,
+        Long dockerImageBytes,
+        Long dockerDanglingImageBytes,
+        Long dockerBuildCacheBytes,
         LocalDateTime createdAt
 ) {
 }

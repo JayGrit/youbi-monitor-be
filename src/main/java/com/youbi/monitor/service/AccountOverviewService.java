@@ -58,9 +58,12 @@ public class AccountOverviewService {
         if (!tableExists("backupper_status")) {
             return null;
         }
+        ensureBackupperStatusStorageColumns();
         List<BackupperStatus> rows = repository.query(
                 """
-                SELECT id, host, device, mount_point, total_gb, used_gb, available_gb, used_percent, total_label, created_at
+                SELECT id, host, device, mount_point, total_gb, used_gb, available_gb,
+                       used_percent, total_label, minio_bytes, docker_image_bytes,
+                       docker_dangling_image_bytes, docker_build_cache_bytes, created_at
                 FROM backupper_status
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
@@ -75,6 +78,10 @@ public class AccountOverviewService {
                         rs.getBigDecimal("available_gb"),
                         rs.getBigDecimal("used_percent"),
                         formatBackupperStatusText(rs.getBigDecimal("used_gb"), rs.getString("total_label")),
+                        nullableLong(rs, "minio_bytes"),
+                        nullableLong(rs, "docker_image_bytes"),
+                        nullableLong(rs, "docker_dangling_image_bytes"),
+                        nullableLong(rs, "docker_build_cache_bytes"),
                         toLocalDateTime(rs.getTimestamp("created_at"))
                 )
         );
@@ -394,6 +401,21 @@ public class AccountOverviewService {
                 table
         );
         return count != null && count > 0;
+    }
+
+    private void ensureBackupperStatusStorageColumns() {
+        ensureBackupperStatusColumn("minio_bytes");
+        ensureBackupperStatusColumn("docker_image_bytes");
+        ensureBackupperStatusColumn("docker_dangling_image_bytes");
+        ensureBackupperStatusColumn("docker_build_cache_bytes");
+    }
+
+    private void ensureBackupperStatusColumn(String column) {
+        if (!columnExists("backupper_status", column)) {
+            repository.update(
+                    "ALTER TABLE backupper_status ADD COLUMN " + column + " BIGINT UNSIGNED NULL"
+            );
+        }
     }
 
     private void ensureDownloaderStagingColumns() {
