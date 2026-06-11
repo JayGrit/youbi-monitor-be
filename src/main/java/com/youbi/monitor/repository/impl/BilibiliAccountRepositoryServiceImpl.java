@@ -38,7 +38,7 @@ public class BilibiliAccountRepositoryServiceImpl implements IBilibiliAccountRep
                        pa.mid, pa.uname, pa.login_info_json, pa.updated_at, pa.display_name, pa.avatar_url
                 FROM uploader_account ua
                 LEFT JOIN uploader_account_bilibili pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'bilibili'
+                WHERE ua.platform = 'bilibili' AND ua.is_deprecated = 0
                 ORDER BY ua.account_key
                 """).formatted(runningCountSql),
                 (rs, rowNum) -> {

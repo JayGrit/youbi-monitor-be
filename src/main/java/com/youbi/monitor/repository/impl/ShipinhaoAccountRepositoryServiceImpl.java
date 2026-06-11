@@ -39,7 +39,7 @@ public class ShipinhaoAccountRepositoryServiceImpl implements IShipinhaoAccountR
                        pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
                 FROM uploader_account ua
                 LEFT JOIN uploader_account_shipinhao pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'shipinhao'
+                WHERE ua.platform = 'shipinhao' AND ua.is_deprecated = 0
                 ORDER BY ua.account_key
                 """).formatted(runningCountSql),
                 (rs, rowNum) -> {

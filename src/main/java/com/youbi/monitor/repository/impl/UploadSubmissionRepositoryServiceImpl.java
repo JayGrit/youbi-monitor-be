@@ -196,7 +196,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 ) sent ON sent.task_id = task.id
                 LEFT JOIN %s target ON target.task_id = task.id AND target.account_key = ?
                 LEFT JOIN %s platform_account ON platform_account.account_key = ?
-                LEFT JOIN %s account ON account.platform = ? AND account.account_key = ?
+                LEFT JOIN %s account ON account.platform = ? AND account.account_key = ? AND account.is_deprecated = 0
                 WHERE video_info.type = ?
                 GROUP BY
                   task.id,
@@ -299,7 +299,11 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
                 JOIN yd_uploader uploader ON uploader.task_id = task.id
                 JOIN %s platform_account ON platform_account.account_key = ?
-                JOIN %s account ON account.platform = ? AND account.account_key = platform_account.account_key AND account.is_enabled = 1 AND account.is_available = 1
+                JOIN %s account ON account.platform = ?
+                    AND account.account_key = platform_account.account_key
+                    AND account.is_deprecated = 0
+                    AND account.is_enabled = 1
+                    AND account.is_available = 1
                 JOIN (
                   %s
                 ) sent ON sent.task_id = task.id

@@ -34,15 +34,19 @@ public class AccountOverviewService {
     }
 
     public List<String> types() {
+        ensureDeprecatedColumn();
         return repository.queryForList("""
                 SELECT DISTINCT account_key
                 FROM uploader_account
-                WHERE account_key IS NOT NULL AND TRIM(account_key) <> ''
+                WHERE account_key IS NOT NULL
+                  AND TRIM(account_key) <> ''
+                  AND is_deprecated = 0
                 ORDER BY account_key
                 """, String.class);
     }
 
     public Map<String, List<Map<String, Object>>> overview() {
+        ensureDeprecatedColumn();
         ensureQuietTimeColumns();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
@@ -98,7 +102,7 @@ public class AccountOverviewService {
                 """
                 UPDATE uploader_account
                 SET next_upload_allowed_at = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 nextUploadAllowedAt,
                 normalizedPlatform,
@@ -135,7 +139,7 @@ public class AccountOverviewService {
                 SET upload_quiet_start_time = ?,
                     upload_quiet_end_time = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 Time.valueOf(startTime),
                 Time.valueOf(endTime),
@@ -172,7 +176,7 @@ public class AccountOverviewService {
                 """
                 UPDATE uploader_account
                 SET downloader_max_staged_count = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 normalizedMax,
                 normalizedPlatform,
@@ -310,6 +314,7 @@ public class AccountOverviewService {
                 LEFT JOIN uploader_account_jinritoutiao j
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
                 WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
+                  AND ua.is_deprecated = 0
                 %s
                 """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
@@ -476,6 +481,17 @@ public class AccountOverviewService {
                     """
             );
         }
+    }
+
+    private void ensureDeprecatedColumn() {
+        if (!tableExists("uploader_account") || columnExists("uploader_account", "is_deprecated")) {
+            return;
+        }
+        repository.update("""
+                ALTER TABLE uploader_account
+                ADD COLUMN is_deprecated TINYINT(1) NOT NULL DEFAULT 0
+                AFTER staged_failed_count
+                """);
     }
 
     private static String formatBackupperStatusText(BigDecimal usedGb, String totalLabel) {

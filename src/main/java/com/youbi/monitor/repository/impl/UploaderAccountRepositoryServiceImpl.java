@@ -3,6 +3,7 @@ package com.youbi.monitor.repository.impl;
 import com.youbi.monitor.dto.UploaderAccountState;
 import com.youbi.monitor.repository.IUploaderAccountRepositoryService;
 import com.youbi.monitor.repository.UploaderAccountRepository;
+import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 
 import java.sql.ResultSet;
@@ -21,6 +22,11 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     public UploaderAccountRepositoryServiceImpl(UploaderAccountRepository repository) {
         this.repository = repository;
+    }
+
+    @PostConstruct
+    public void ensureSchema() {
+        ensureDeprecatedColumn();
     }
 
     @Override
@@ -65,7 +71,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                        %s,
                        is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
                 FROM uploader_account
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 LIMIT 1
                 """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
@@ -100,17 +106,95 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     @Override
     public boolean renameAccountKey(String platform, String oldAccountKey, String newAccountKey) {
-        int updated = repository.update(
+        ensureDeprecatedColumn();
+        String normalizedPlatform = normalizePlatform(platform);
+        String normalizedOldAccountKey = normalizeAccountKey(oldAccountKey);
+        String normalizedNewAccountKey = normalizeAccountKey(newAccountKey);
+        Integer existing = repository.queryForObject(
                 """
-                UPDATE uploader_account
-                SET account_key = ?, updated_at = NOW()
+                SELECT COUNT(*)
+                FROM uploader_account
                 WHERE platform = ? AND account_key = ?
                 """,
-                normalizeAccountKey(newAccountKey),
-                normalizePlatform(platform),
-                normalizeAccountKey(oldAccountKey)
+                Integer.class,
+                normalizedPlatform,
+                normalizedNewAccountKey
         );
-        return updated == 1;
+        if (existing != null && existing > 0) {
+            return false;
+        }
+        int inserted = repository.update(
+                """
+                INSERT INTO uploader_account (
+                    platform,
+                    account_key,
+                    source_table,
+                    source_updated_at,
+                    last_upload_at,
+                    next_upload_allowed_at,
+                    upload_cooldown_min_seconds,
+                    upload_cooldown_max_seconds,
+                    today_upload_count,
+                    cooldown_waiting_count,
+                    upload_running_task_id,
+                    is_enabled,
+                    is_available,
+                    metrics_updated_at,
+                    failed_upload_count,
+                    downloader_max_staged_count,
+                    downloader_pending_count,
+                    upload_quiet_start_time,
+                    upload_quiet_end_time,
+                    staged_running_count,
+                    staged_failed_count,
+                    is_deprecated,
+                    created_at,
+                    updated_at
+                )
+                SELECT platform,
+                       ?,
+                       source_table,
+                       source_updated_at,
+                       NULL,
+                       NULL,
+                       upload_cooldown_min_seconds,
+                       upload_cooldown_max_seconds,
+                       0,
+                       0,
+                       NULL,
+                       is_enabled,
+                       is_available,
+                       NULL,
+                       0,
+                       downloader_max_staged_count,
+                       0,
+                       upload_quiet_start_time,
+                       upload_quiet_end_time,
+                       0,
+                       0,
+                       0,
+                       NOW(),
+                       NOW()
+                FROM uploader_account
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                """,
+                normalizedNewAccountKey,
+                normalizedPlatform,
+                normalizedOldAccountKey
+        );
+        if (inserted != 1) {
+            return false;
+        }
+        int deprecated = repository.update(
+                """
+                UPDATE uploader_account
+                SET is_deprecated = 1, updated_at = NOW()
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                """,
+                normalizedPlatform,
+                normalizedOldAccountKey
+        );
+        return deprecated == 1;
     }
 
     @Override
@@ -119,7 +203,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 """
                 UPDATE uploader_account
                 SET is_enabled = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 enabled,
                 normalizePlatform(platform),
@@ -134,7 +218,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 """
                 UPDATE uploader_account
                 SET is_available = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 available,
                 normalizePlatform(platform),
@@ -151,7 +235,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 SET upload_cooldown_min_seconds = ?,
                     upload_cooldown_max_seconds = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 minSeconds,
                 maxSeconds,
@@ -170,7 +254,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 SET upload_quiet_start_time = ?,
                     upload_quiet_end_time = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 Time.valueOf(startTime),
                 Time.valueOf(endTime),
@@ -188,7 +272,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 UPDATE uploader_account
                 SET downloader_max_staged_count = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 """,
                 maxStagedCount,
                 normalizePlatform(platform),
@@ -208,9 +292,20 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 SET today_upload_count = 0,
                     metrics_updated_at = NOW(),
                     updated_at = NOW()
-                WHERE today_upload_count <> 0
+                WHERE today_upload_count <> 0 AND is_deprecated = 0
                 """
         );
+    }
+
+    private void ensureDeprecatedColumn() {
+        if (!tableExists(TABLE) || columnExists(TABLE, "is_deprecated")) {
+            return;
+        }
+        repository.update("""
+                ALTER TABLE uploader_account
+                ADD COLUMN is_deprecated TINYINT(1) NOT NULL DEFAULT 0
+                AFTER staged_failed_count
+                """);
     }
 
     private boolean tableExists(String table) {

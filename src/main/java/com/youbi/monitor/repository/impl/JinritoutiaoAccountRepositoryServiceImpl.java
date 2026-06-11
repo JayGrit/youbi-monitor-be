@@ -39,7 +39,7 @@ public class JinritoutiaoAccountRepositoryServiceImpl implements IJinritoutiaoAc
                        pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
                 FROM uploader_account ua
                 LEFT JOIN uploader_account_jinritoutiao pa ON pa.account_key = ua.account_key
-                WHERE ua.platform = 'jinritoutiao'
+                WHERE ua.platform = 'jinritoutiao' AND ua.is_deprecated = 0
                 ORDER BY ua.account_key
                 """).formatted(runningCountSql),
                 (rs, rowNum) -> {
