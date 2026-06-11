@@ -54,6 +54,15 @@ PLATFORMS: dict[str, PlatformConfig] = {
         user_expr="COALESCE(account.user_id, '')",
         name_expr="COALESCE(NULLIF(account.nickname, ''), NULLIF(account.display_name, ''), '')",
     ),
+    "doubao": PlatformConfig(
+        key="doubao",
+        label="Doubao",
+        table="publisher_account_doubao",
+        state_column="storage_state_json",
+        default_url="https://www.doubao.com/chat/",
+        user_expr="COALESCE(account.user_id, '')",
+        name_expr="COALESCE(NULLIF(account.nickname, ''), NULLIF(account.display_name, ''), '')",
+    ),
     "jinritoutiao": PlatformConfig(
         key="jinritoutiao",
         label="Jinri Toutiao",
@@ -138,11 +147,33 @@ def connect_mysql(args: argparse.Namespace):
     )
 
 
+def ensure_doubao_schema(cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS publisher_account_doubao (
+          id BIGINT NOT NULL AUTO_INCREMENT,
+          account_key VARCHAR(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+          user_id VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+          nickname VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+          storage_state_json MEDIUMTEXT COLLATE utf8mb4_unicode_ci NOT NULL,
+          created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          display_name VARCHAR(128) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+          avatar_url VARCHAR(1024) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+          PRIMARY KEY (id),
+          UNIQUE KEY uniq_publisher_account_doubao_account_key (account_key)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """
+    )
+
+
 def fetch_accounts(args: argparse.Namespace, config: PlatformConfig) -> list[Account]:
     selected = {value.strip() for value in args.account_key if value.strip()}
     connection = connect_mysql(args)
     try:
         cursor = connection.cursor(dictionary=True)
+        if config.key == "doubao":
+            ensure_doubao_schema(cursor)
         cursor.execute(
             f"""
             SELECT account.account_key,
