@@ -35,12 +35,12 @@ import java.util.Map;
 public class MonitorService {
     private static final List<StageDefinition> STAGES = List.of(
             new StageDefinition("downloader", "下载", "downloader_status", "downloader_started_at", "downloader_completed_at", "downloader_error"),
+            new StageDefinition("publisher", "发布准备", "publisher_status", "publisher_started_at", "publisher_completed_at", "publisher_error"),
             new StageDefinition("demucs", "人声分离", "demucs_status", "demucs_started_at", "demucs_completed_at", "demucs_error"),
             new StageDefinition("whisper", "语音识别", "whisper_status", "whisper_started_at", "whisper_completed_at", "whisper_error"),
             new StageDefinition("translator", "翻译", "translator_status", "translator_started_at", "translator_completed_at", "translator_error"),
             new StageDefinition("speaker", "配音", "speaker_status", "speaker_started_at", "speaker_completed_at", "speaker_error"),
             new StageDefinition("combiner", "音视频合成", "combiner_status", "combiner_started_at", "combiner_completed_at", "combiner_error"),
-            new StageDefinition("publisher", "发布准备", "publisher_status", "publisher_started_at", "publisher_completed_at", "publisher_error"),
             new StageDefinition("uploader", "上传", "uploader_status", "uploader_started_at", "uploader_completed_at", "uploader_error")
     );
     private static final int CHILD_ROW_LIMIT = 500;
