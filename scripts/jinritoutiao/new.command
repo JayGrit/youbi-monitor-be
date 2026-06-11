@@ -29,7 +29,7 @@ then
 fi
 
 echo "准备新增今日头条账号登录态。"
-echo "脚本会启动一个临时 Chrome，扫码成功后写入 uploader_account_jinritoutiao。"
+echo "脚本会启动一个临时 Chrome，扫码成功后登记账号并绑定默认占位手机号。"
 echo
 
 if ! "${PYTHON}" "${PY_SCRIPT}" "$@"; then

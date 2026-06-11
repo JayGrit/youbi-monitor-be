@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -13,6 +14,9 @@ from typing import Any
 
 import mysql.connector
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uploader_new_account_common import register_uploader_account
 
 
 DEFAULT_MYSQL_HOST = "120.53.92.66"
@@ -228,7 +232,12 @@ def ensure_schema(cursor) -> None:
 def ensure_surrogate_primary_key(cursor, table: str) -> None:
     return
 
-def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_id: str | None, nickname: str | None) -> None:
+def save_storage_state(
+    args: argparse.Namespace,
+    storage_state_json: str,
+    user_id: str | None,
+    nickname: str | None,
+) -> str:
     connection = connect_mysql(args)
     try:
         cursor = connection.cursor()
@@ -240,7 +249,18 @@ def save_storage_state(args: argparse.Namespace, storage_state_json: str, user_i
             """,
             (args.account_key, user_id, nickname, storage_state_json),
         )
+        phone_number = register_uploader_account(
+            cursor,
+            "jinritoutiao",
+            args.account_key,
+            "uploader_account_jinritoutiao",
+            cursor.lastrowid,
+        )
         connection.commit()
+        return phone_number
+    except Exception:
+        connection.rollback()
+        raise
     finally:
         connection.close()
 
@@ -306,12 +326,13 @@ def main() -> int:
         raise SystemExit(f"No Jinri Toutiao cookies or localStorage found after opening {final_url}.")
 
     storage_state_json = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
-    save_storage_state(args, storage_state_json, user_id, nickname)
+    phone_number = save_storage_state(args, storage_state_json, user_id, nickname)
     print(
         "Updated uploader_account_jinritoutiao "
         f"account_key={args.account_key} cookies={cookie_count} origins={origin_count} "
         f"bytes={len(storage_state_json.encode('utf-8'))} url={final_url}"
     )
+    print(f"Registered uploader_account and assigned phone={phone_number}")
     if user_id:
         print(f"Detected user_id={user_id}")
     if nickname:

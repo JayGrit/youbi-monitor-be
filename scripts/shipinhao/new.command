@@ -30,6 +30,7 @@ fi
 
 echo "准备新增视频号登录态到数据库。"
 echo "脚本会打开一个全新的临时 Chrome 窗口；如 default 已存在，会自动写入 default-1/default-2。"
+echo "登录成功后会登记通用账号并绑定默认占位手机号。"
 echo
 
 if ! "${PYTHON}" "${PY_SCRIPT}" "$@"; then

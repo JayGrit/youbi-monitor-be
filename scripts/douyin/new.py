@@ -5,10 +5,15 @@ import argparse
 import json
 import os
 import re
+import sys
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import mysql.connector
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uploader_new_account_common import register_uploader_account
 
 
 DEFAULT_MYSQL_HOST = "120.53.92.66"
@@ -178,7 +183,13 @@ def ensure_schema(cursor) -> None:
 def ensure_surrogate_primary_key(cursor, table: str) -> None:
     return
 
-def save_storage_state(args: argparse.Namespace, account_key: str, storage_state_json: str, user_id: str | None, nickname: str | None) -> None:
+def save_storage_state(
+    args: argparse.Namespace,
+    account_key: str,
+    storage_state_json: str,
+    user_id: str | None,
+    nickname: str | None,
+) -> str:
     connection = mysql.connector.connect(
         host=args.mysql_host,
         port=args.mysql_port,
@@ -195,6 +206,7 @@ def save_storage_state(args: argparse.Namespace, account_key: str, storage_state
             INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, updated_at)
             VALUES (%s, %s, %s, %s, NOW())
             ON DUPLICATE KEY UPDATE
+              id = LAST_INSERT_ID(id),
               user_id = VALUES(user_id),
               nickname = VALUES(nickname),
               storage_state_json = VALUES(storage_state_json),
@@ -202,7 +214,18 @@ def save_storage_state(args: argparse.Namespace, account_key: str, storage_state
             """,
             (account_key, user_id, nickname, storage_state_json),
         )
+        phone_number = register_uploader_account(
+            cursor,
+            "douyin",
+            account_key,
+            "uploader_account_douyin",
+            cursor.lastrowid,
+        )
         connection.commit()
+        return phone_number
+    except Exception:
+        connection.rollback()
+        raise
     finally:
         connection.close()
 
@@ -226,12 +249,15 @@ def main() -> int:
         user_id, nickname = profile_from_storage_state(state)
         storage_state_json = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
         account_key = account_key_for_index(args.account_key, output_index)
-        save_storage_state(args, account_key, storage_state_json, user_id, nickname)
+        phone_number = save_storage_state(
+            args, account_key, storage_state_json, user_id, nickname
+        )
         print(
             "Updated uploader_account_douyin "
             f"account_key={account_key} context={context_index} cookies={cookie_count} origins={origin_count} "
             f"bytes={len(storage_state_json.encode('utf-8'))}"
         )
+        print(f"Registered uploader_account and assigned phone={phone_number}")
         if nickname:
             print(f"Detected nickname={nickname}")
     return 0

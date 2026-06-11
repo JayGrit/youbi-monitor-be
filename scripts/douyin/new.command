@@ -34,6 +34,7 @@ then
 fi
 
 echo "准备同步抖音 Chrome 登录态到数据库。"
+echo "同步账号时会登记通用账号并绑定默认占位手机号。"
 echo
 
 wait_for_cdp() {
