@@ -34,11 +34,12 @@ public class MonitorTaskController {
             @RequestParam(defaultValue = "all") String status,
             @RequestParam(defaultValue = "all") String type,
             @RequestParam(defaultValue = "all") String stage,
-            @RequestParam(defaultValue = "") String taskId
+            @RequestParam(defaultValue = "") String taskId,
+            @RequestParam(defaultValue = "created_desc") String sort
     ) {
         int boundedPage = Math.max(1, page);
         int boundedLimit = Math.min(100, Math.max(1, limit));
-        return monitorService.listTasks(boundedPage, boundedLimit, status, type, stage, taskId);
+        return monitorService.listTasks(boundedPage, boundedLimit, status, type, stage, taskId, sort);
     }
 
     @GetMapping("/api/video-tasks/{taskId}/flow")

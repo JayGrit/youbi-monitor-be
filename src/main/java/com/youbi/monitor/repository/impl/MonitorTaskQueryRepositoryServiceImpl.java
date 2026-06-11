@@ -40,6 +40,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               vi.source_webpage_url,
               vi.source_thumbnail_url,
               vi.source_duration_seconds,
+              vi.minio_storage_bytes,
+              vi.minio_storage_object_count,
+              vi.minio_storage_updated_at,
               vi.type task_type,
               t.status,
               t.current_stage,
@@ -215,7 +218,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               GROUP BY task_id
             ) se ON se.task_id = t.id
             __TASK_MONITOR_WHERE__
-            ORDER BY t.created_at DESC
+            __TASK_MONITOR_ORDER_BY__
             LIMIT ? OFFSET ?
             """;
     private static final String MONITOR_COUNT_SQL = """
@@ -283,6 +286,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         ensurePublisherColumn("source_subtitle_txt_url", "TEXT NULL");
         ensurePublisherColumn("result_json", "MEDIUMTEXT NULL");
         ensurePublisherColumn("error_message", "TEXT NULL");
+        ensureVideoInfoColumn("minio_storage_bytes", "BIGINT UNSIGNED NULL");
+        ensureVideoInfoColumn("minio_storage_object_count", "INT UNSIGNED NULL");
+        ensureVideoInfoColumn("minio_storage_updated_at", "DATETIME NULL");
     }
 
     private void ensurePublisherColumn(String column, String definition) {
@@ -292,22 +298,28 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId) {
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort) {
         SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
-        return repository.query(monitorSql(MONITOR_SQL, filter), new TaskRowMapper(now), args.toArray());
+        return repository.query(monitorSql(MONITOR_SQL, filter, sort), new TaskRowMapper(now), args.toArray());
     }
 
     @Override
     public long countTaskMonitorItems(String status, String type, String stage, String taskId) {
         SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
-        Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter), Long.class, filter.args().toArray());
+        Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter, ""), Long.class, filter.args().toArray());
         return count == null ? 0 : count;
     }
 
-    private String monitorSql(String template, SqlFilter filter) {
+    private void ensureVideoInfoColumn(String column, String definition) {
+        if (tableExists("yd_video_info") && !columnExists("yd_video_info", column)) {
+            repository.update("ALTER TABLE yd_video_info ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+        }
+    }
+
+    private String monitorSql(String template, SqlFilter filter, String sort) {
         String progressSelect = "NULL downloader_progress_percent,";
         String progressJoin = "";
         if (tableExists("downloader_detail")) {
@@ -321,7 +333,16 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return template
                 .replace("__DOWNLOADER_PROGRESS_SELECT__", progressSelect)
                 .replace("__DOWNLOADER_PROGRESS_JOIN__", progressJoin)
-                .replace("__TASK_MONITOR_WHERE__", filter.clause());
+                .replace("__TASK_MONITOR_WHERE__", filter.clause())
+                .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
+    }
+
+    private static String monitorOrderBy(String sort) {
+        String normalized = text(sort);
+        if ("minio_storage_desc".equalsIgnoreCase(normalized)) {
+            return "ORDER BY COALESCE(vi.minio_storage_bytes, 0) DESC, t.created_at DESC";
+        }
+        return "ORDER BY t.created_at DESC";
     }
 
     private static SqlFilter taskMonitorFilter(String status, String type, String stage, String taskId) {
@@ -534,6 +555,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     rs.getString("source_webpage_url"),
                     rs.getString("source_thumbnail_url"),
                     doubleOrNull(rs, "source_duration_seconds"),
+                    nullableLong(rs, "minio_storage_bytes"),
+                    integerOrNull(rs, "minio_storage_object_count"),
+                    timestamp(rs, "minio_storage_updated_at"),
                     rs.getString("task_type"),
                     rs.getString("status"),
                     rs.getString("current_stage"),
@@ -555,6 +579,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
         private static Double doubleOrNull(ResultSet rs, String column) throws SQLException {
             double value = rs.getDouble(column);
+            return rs.wasNull() ? null : value;
+        }
+
+        private static Integer integerOrNull(ResultSet rs, String column) throws SQLException {
+            int value = rs.getInt(column);
             return rs.wasNull() ? null : value;
         }
 

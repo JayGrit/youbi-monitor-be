@@ -10,7 +10,7 @@ import java.util.Map;
 public interface IMonitorTaskQueryRepositoryService {
     void ensureMonitorSchema();
 
-    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId);
+    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort);
 
     long countTaskMonitorItems(String status, String type, String stage, String taskId);
 
