@@ -19,7 +19,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         ensureResetCoverColumn();
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false);
+            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false, 0, 0);
         }
         List<Map<String, Object>> rows = repository.queryForList("""
                 SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover
@@ -28,7 +28,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false);
+            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false, 0, 0);
         }
         Map<String, Object> row = rows.get(0);
         boolean needSubtitle = boolValue(row.get("need_subtitle"), true);
@@ -40,7 +40,9 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 boolValue(row.get("need_separation"), true),
                 defaultLanguage(row.get("source_language"), "英文"),
                 defaultLanguage(row.get("target_language"), "中文"),
-                boolValue(row.get("reset_cover"), false)
+                boolValue(row.get("reset_cover"), false),
+                0,
+                0
         );
     }
 
@@ -59,7 +61,9 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 boolValue(rs.getObject("need_separation"), true),
                 defaultLanguage(rs.getString("source_language"), "英文"),
                 defaultLanguage(rs.getString("target_language"), "中文"),
-                boolValue(rs.getObject("reset_cover"), false)
+                boolValue(rs.getObject("reset_cover"), false),
+                0,
+                0
         ));
     }
 
@@ -111,6 +115,22 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 normalizedTargetLanguage,
                 normalizedResetCover ? 1 : 0
         );
+        int updatedSubmissionRows = syncDownloaderSubmissions(
+                normalizedAuthor,
+                normalizedType,
+                normalizedNeedSubtitle,
+                normalizedNeedDubbing,
+                normalizedNeedSeparation
+        );
+        int updatedVideoInfoRows = syncVideoInfo(
+                normalizedAuthor,
+                normalizedType,
+                normalizedNeedSubtitle,
+                normalizedNeedDubbing,
+                normalizedNeedSeparation,
+                normalizedSourceLanguage,
+                normalizedTargetLanguage
+        );
         return new MonitorService.SubmitterAuthorType(
                 normalizedAuthor,
                 normalizedType,
@@ -119,7 +139,70 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 normalizedNeedSeparation,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
-                normalizedResetCover
+                normalizedResetCover,
+                updatedSubmissionRows,
+                updatedVideoInfoRows
+        );
+    }
+
+    private int syncDownloaderSubmissions(
+            String author,
+            String type,
+            boolean needSubtitle,
+            boolean needDubbing,
+            boolean needSeparation
+    ) {
+        if (!tableExists("submitter_video") || !tableExists("downloader_submission")) {
+            return 0;
+        }
+        return repository.update("""
+                UPDATE downloader_submission submission
+                JOIN submitter_video video ON video.ydbi_submission_id = submission.id
+                SET submission.type = ?,
+                    submission.need_subtitle = ?,
+                    submission.need_dubbing = ?,
+                    submission.need_separation = ?
+                WHERE video.uploader = ? OR video.import_author = ? OR video.channel_id = ?
+                """,
+                type,
+                needSubtitle ? 1 : 0,
+                needDubbing ? 1 : 0,
+                needSeparation ? 1 : 0,
+                author,
+                author,
+                author
+        );
+    }
+
+    private int syncVideoInfo(
+            String author,
+            String type,
+            boolean needSubtitle,
+            boolean needDubbing,
+            boolean needSeparation,
+            String sourceLanguage,
+            String targetLanguage
+    ) {
+        if (!tableExists("yd_video_info")) {
+            return 0;
+        }
+        return repository.update("""
+                UPDATE yd_video_info
+                SET type = ?,
+                    need_subtitle = ?,
+                    need_dubbing = ?,
+                    need_separation = ?,
+                    source_language = ?,
+                    target_language = ?
+                WHERE source_uploader = ?
+                """,
+                type,
+                needSubtitle ? 1 : 0,
+                needDubbing ? 1 : 0,
+                needSeparation ? 1 : 0,
+                sourceLanguage,
+                targetLanguage,
+                author
         );
     }
 

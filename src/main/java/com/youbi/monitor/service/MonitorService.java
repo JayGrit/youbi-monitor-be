@@ -684,7 +684,9 @@ public class MonitorService {
             boolean needSeparation,
             String sourceLanguage,
             String targetLanguage,
-            boolean resetCover
+            boolean resetCover,
+            int updatedSubmissionRows,
+            int updatedVideoInfoRows
     ) {
     }
 
