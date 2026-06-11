@@ -40,6 +40,7 @@ public class MonitorService {
             new StageDefinition("translator", "翻译", "translator_status", "translator_started_at", "translator_completed_at", "translator_error"),
             new StageDefinition("speaker", "配音", "speaker_status", "speaker_started_at", "speaker_completed_at", "speaker_error"),
             new StageDefinition("combiner", "音视频合成", "combiner_status", "combiner_started_at", "combiner_completed_at", "combiner_error"),
+            new StageDefinition("publisher", "发布准备", "publisher_status", "publisher_started_at", "publisher_completed_at", "publisher_error"),
             new StageDefinition("uploader", "上传", "uploader_status", "uploader_started_at", "uploader_completed_at", "uploader_error")
     );
     private static final int CHILD_ROW_LIMIT = 500;
@@ -50,6 +51,7 @@ public class MonitorService {
             "translator", "yd_translator",
             "speaker", "yd_speaker",
             "combiner", "yd_combiner",
+            "publisher", "yd_publisher",
             "uploader", "yd_uploader"
     );
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
@@ -67,6 +69,7 @@ public class MonitorService {
             "translator", List.of("asr_json_path", "target_language"),
             "speaker", List.of("audio_vocals_url", "translation_json_path", "target_language"),
             "combiner", List.of("video_source_url", "audio_bgm_url", "tts_segments_dir", "translation_json_path"),
+            "publisher", List.of("title", "source_description", "source_thumbnail_url", "source_subtitle_txt_url"),
             "uploader", List.of("final_video_url", "upload_title", "upload_desc", "upload_tag", "upload_cover_url")
     );
     private static final Map<String, List<String>> STAGE_OUTPUT_FIELDS = Map.of(
@@ -76,6 +79,7 @@ public class MonitorService {
             "translator", List.of("translation_json_path", "target_language"),
             "speaker", List.of("tts_segments_dir"),
             "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
+            "publisher", List.of("upload_title", "upload_description", "upload_tags", "cover_text", "clean_cover_url", "final_cover_url"),
             "uploader", List.of("bilibili_bvid", "bilibili_aid", "upload_result_json", "bilibili_upload_uid", "bilibili_upload_account_name", "shipinhao_upload_account_key", "shipinhao_upload_account_name", "shipinhao_upload_result_json", "kuaishou_upload_account_key", "kuaishou_upload_account_name", "kuaishou_upload_result_json")
     );
 
@@ -186,7 +190,8 @@ public class MonitorService {
             Boolean needDubbing,
             Boolean needSeparation,
             String sourceLanguage,
-            String targetLanguage
+            String targetLanguage,
+            Boolean resetCover
     ) {
         return submitterAuthorRepositoryService.saveSubmitterAuthorType(
                 author,
@@ -195,7 +200,8 @@ public class MonitorService {
                 needDubbing,
                 needSeparation,
                 sourceLanguage,
-                targetLanguage
+                targetLanguage,
+                resetCover
         );
     }
 
@@ -308,6 +314,7 @@ public class MonitorService {
                 addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
             }
             case "speaker" -> addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
+            case "publisher" -> addLimitedTable(tables, "publisher", taskId, "task_id", "task_id");
             case "uploader" -> {
                 addLimitedTable(tables, "yd_uploader", taskId, "task_id", "task_id");
                 UPLOADER_TASK_TABLES.forEach((platform, table) -> addUploaderTaskTable(tables, platform, table, taskId));
@@ -676,7 +683,8 @@ public class MonitorService {
             boolean needDubbing,
             boolean needSeparation,
             String sourceLanguage,
-            String targetLanguage
+            String targetLanguage,
+            boolean resetCover
     ) {
     }
 
@@ -687,7 +695,8 @@ public class MonitorService {
             Boolean needDubbing,
             Boolean needSeparation,
             String sourceLanguage,
-            String targetLanguage
+            String targetLanguage,
+            Boolean resetCover
     ) {
     }
 

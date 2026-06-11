@@ -35,7 +35,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
+              COALESCE(NULLIF(pr.upload_title, ''), NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
               t.source_url,
               vi.source_webpage_url,
               vi.source_thumbnail_url,
@@ -87,6 +87,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               m.completed_at combiner_completed_at,
               m.error_message combiner_error,
 
+              pub.status publisher_status,
+              pub.started_at publisher_started_at,
+              pub.completed_at publisher_completed_at,
+              COALESCE(NULLIF(pub.error_message, ''), pr.error_message) publisher_error,
+
               CASE WHEN (
                 CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
@@ -137,6 +142,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN yd_translator tr ON tr.task_id = t.id
             LEFT JOIN yd_speaker sp ON sp.task_id = t.id
             LEFT JOIN yd_combiner m ON m.task_id = t.id
+            LEFT JOIN yd_publisher pub ON pub.task_id = t.id
+            LEFT JOIN publisher pr ON pr.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
             LEFT JOIN yd_video_info vi ON vi.task_id = t.id
             __DOWNLOADER_PROGRESS_JOIN__
@@ -236,6 +243,52 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
     @Override
     public void ensureMonitorSchema() {
+        repository.update("""
+                CREATE TABLE IF NOT EXISTS yd_publisher (
+                    task_id VARCHAR(64) PRIMARY KEY,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    started_at DATETIME NULL,
+                    completed_at DATETIME NULL,
+                    error_message TEXT NULL,
+                    `operator` VARCHAR(128) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+                """);
+        repository.update("""
+                CREATE TABLE IF NOT EXISTS publisher (
+                    task_id VARCHAR(64) PRIMARY KEY,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    upload_title VARCHAR(512) NULL,
+                    upload_description TEXT NULL,
+                    upload_tags TEXT NULL,
+                    cover_text VARCHAR(128) NULL,
+                    clean_cover_url TEXT NULL,
+                    final_cover_url TEXT NULL,
+                    source_cover_url TEXT NULL,
+                    source_subtitle_txt_url TEXT NULL,
+                    result_json MEDIUMTEXT NULL,
+                    error_message TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                )
+                """);
+        ensurePublisherColumn("upload_title", "VARCHAR(512) NULL");
+        ensurePublisherColumn("upload_description", "TEXT NULL");
+        ensurePublisherColumn("upload_tags", "TEXT NULL");
+        ensurePublisherColumn("cover_text", "VARCHAR(128) NULL");
+        ensurePublisherColumn("clean_cover_url", "TEXT NULL");
+        ensurePublisherColumn("final_cover_url", "TEXT NULL");
+        ensurePublisherColumn("source_cover_url", "TEXT NULL");
+        ensurePublisherColumn("source_subtitle_txt_url", "TEXT NULL");
+        ensurePublisherColumn("result_json", "MEDIUMTEXT NULL");
+        ensurePublisherColumn("error_message", "TEXT NULL");
+    }
+
+    private void ensurePublisherColumn(String column, String definition) {
+        if (!columnExists("publisher", column)) {
+            repository.update("ALTER TABLE publisher ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+        }
     }
 
     @Override

@@ -45,7 +45,8 @@ public class SubmitterAuthorTypeController {
                     request == null ? null : request.needDubbing(),
                     request == null ? null : request.needSeparation(),
                     request == null ? null : request.sourceLanguage(),
-                    request == null ? null : request.targetLanguage()
+                    request == null ? null : request.targetLanguage(),
+                    request == null ? null : request.resetCover()
             );
         } catch (IllegalArgumentException exc) {
             throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);

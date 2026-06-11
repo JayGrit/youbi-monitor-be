@@ -21,6 +21,7 @@ abstract class MonitorRepositorySqlSupport {
             new StageDefinition("translator", "翻译", "translator_status", "translator_started_at", "translator_completed_at", "translator_error"),
             new StageDefinition("speaker", "配音", "speaker_status", "speaker_started_at", "speaker_completed_at", "speaker_error"),
             new StageDefinition("combiner", "音视频合成", "combiner_status", "combiner_started_at", "combiner_completed_at", "combiner_error"),
+            new StageDefinition("publisher", "发布准备", "publisher_status", "publisher_started_at", "publisher_completed_at", "publisher_error"),
             new StageDefinition("uploader", "上传", "uploader_status", "uploader_started_at", "uploader_completed_at", "uploader_error")
     );
     protected static final List<RetryStage> RETRY_STAGES = List.of(
@@ -30,6 +31,7 @@ abstract class MonitorRepositorySqlSupport {
             new RetryStage("translator", "yd_translator"),
             new RetryStage("speaker", "yd_speaker"),
             new RetryStage("combiner", "yd_combiner"),
+            new RetryStage("publisher", "yd_publisher"),
             new RetryStage("uploader", "yd_uploader")
     );
     protected static final List<String> RESET_CHILD_TABLES = List.of(
