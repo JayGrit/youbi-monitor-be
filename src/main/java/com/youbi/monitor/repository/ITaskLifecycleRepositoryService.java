@@ -17,7 +17,7 @@ public interface ITaskLifecycleRepositoryService {
 
     int deleteTaskRows(String taskId);
 
-    MonitorService.DownloaderFailureList listDownloaderFailures();
+    MonitorService.DownloaderFailureList listFailedTasks();
 
-    MonitorService.DownloaderRollbackDatabaseResult rollbackDownloaderFailures(List<Long> submissionIds);
+    MonitorService.DownloaderRollbackDatabaseResult rollbackFailedTasks(List<Long> submissionIds);
 }

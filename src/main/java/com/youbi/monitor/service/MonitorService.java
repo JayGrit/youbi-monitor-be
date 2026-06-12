@@ -166,19 +166,23 @@ public class MonitorService {
         return uploadSubmissionRepositoryService.retryFailedUploadSubmissions(platform, ids);
     }
 
-    public DownloaderFailureList downloaderFailures() {
-        return taskLifecycleRepositoryService.listDownloaderFailures();
+    public DownloaderFailureList failedTasks() {
+        return taskLifecycleRepositoryService.listFailedTasks();
     }
 
     public DownloaderRollbackResult rollbackDownloaderFailures(List<Long> submissionIds) throws IOException {
+        return rollbackFailedTasks(submissionIds);
+    }
+
+    public DownloaderRollbackResult rollbackFailedTasks(List<Long> submissionIds) throws IOException {
         List<Long> normalizedIds = submissionIds == null ? List.of() : submissionIds.stream()
                 .filter(id -> id != null && id > 0)
                 .distinct()
                 .toList();
         if (normalizedIds.isEmpty()) {
-            throw new IllegalArgumentException("No downloader failure selected.");
+            throw new IllegalArgumentException("No failed task selected.");
         }
-        DownloaderFailureList failures = taskLifecycleRepositoryService.listDownloaderFailures();
+        DownloaderFailureList failures = taskLifecycleRepositoryService.listFailedTasks();
         Map<Long, String> taskIdsBySubmission = failures.rows().stream()
                 .filter(row -> normalizedIds.contains(row.submissionId()))
                 .collect(java.util.stream.Collectors.toMap(
@@ -186,7 +190,7 @@ public class MonitorService {
                         DownloaderFailure::taskId
                 ));
         if (taskIdsBySubmission.size() != normalizedIds.size()) {
-            throw new IllegalArgumentException("Some selected downloader failures no longer exist or are not rollbackable.");
+            throw new IllegalArgumentException("Some selected failed tasks no longer exist or are not rollbackable.");
         }
 
         int deletedObjects = 0;
@@ -194,7 +198,7 @@ public class MonitorService {
             deletedObjects += deleteTaskObjects(taskIdsBySubmission.get(submissionId));
         }
         DownloaderRollbackDatabaseResult databaseResult =
-                taskLifecycleRepositoryService.rollbackDownloaderFailures(normalizedIds);
+                taskLifecycleRepositoryService.rollbackFailedTasks(normalizedIds);
         return new DownloaderRollbackResult(
                 databaseResult.restoredSubmissionCount(),
                 databaseResult.deletedDatabaseRows(),

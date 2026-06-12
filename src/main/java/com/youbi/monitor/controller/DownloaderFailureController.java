@@ -25,7 +25,12 @@ public class DownloaderFailureController {
 
     @GetMapping("/api/downloader-failures")
     public MonitorService.DownloaderFailureList downloaderFailures() {
-        return monitorService.downloaderFailures();
+        return monitorService.failedTasks();
+    }
+
+    @GetMapping("/api/task-failures")
+    public MonitorService.DownloaderFailureList taskFailures() {
+        return monitorService.failedTasks();
     }
 
     @PostMapping("/api/downloader-failures/rollback")
@@ -34,6 +39,21 @@ public class DownloaderFailureController {
     ) {
         try {
             return monitorService.rollbackDownloaderFailures(
+                    request == null ? List.of() : request.submissionIds()
+            );
+        } catch (IllegalArgumentException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
+        } catch (IOException exc) {
+            throw new ResponseStatusException(INTERNAL_SERVER_ERROR, exc.getMessage(), exc);
+        }
+    }
+
+    @PostMapping("/api/task-failures/rollback")
+    public MonitorService.DownloaderRollbackResult rollbackTaskFailures(
+            @RequestBody MonitorService.DownloaderRollbackRequest request
+    ) {
+        try {
+            return monitorService.rollbackFailedTasks(
                     request == null ? List.of() : request.submissionIds()
             );
         } catch (IllegalArgumentException exc) {

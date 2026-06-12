@@ -379,10 +379,9 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     @Override
-    public MonitorService.DownloaderFailureList listDownloaderFailures() {
+    public MonitorService.DownloaderFailureList listFailedTasks() {
         if (!tableExists("downloader_submission")
-                || !tableExists("yd_task")
-                || !tableExists("yd_downloader")) {
+                || !tableExists("yd_task")) {
             return new MonitorService.DownloaderFailureList(0, List.of());
         }
         List<MonitorService.DownloaderFailure> rows = repository.query("""
@@ -391,18 +390,15 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     submission.task_id,
                     COALESCE(NULLIF(task.title, ''), NULLIF(video_info.title, ''), submission.task_id) title,
                     submission.type,
-                    COALESCE(NULLIF(downloader.error_message, ''), NULLIF(task.error_message, '')) error_message,
-                    downloader.completed_at,
+                    NULLIF(task.error_message, '') error_message,
+                    task.completed_at,
                     submission.source_url
                 FROM downloader_submission submission
                 JOIN yd_task task ON task.id = submission.task_id
-                JOIN yd_downloader downloader ON downloader.task_id = submission.task_id
                 LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
                 WHERE submission.status = 'success'
                   AND task.status = 'failed'
-                  AND task.current_stage = 'downloader'
-                  AND downloader.status = 'failed'
-                ORDER BY downloader.completed_at DESC, submission.id DESC
+                ORDER BY task.completed_at DESC, submission.id DESC
                 """, (rs, rowNum) -> new MonitorService.DownloaderFailure(
                 rs.getLong("submission_id"),
                 rs.getString("task_id"),
@@ -417,13 +413,13 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
 
     @Override
     @Transactional
-    public MonitorService.DownloaderRollbackDatabaseResult rollbackDownloaderFailures(List<Long> submissionIds) {
+    public MonitorService.DownloaderRollbackDatabaseResult rollbackFailedTasks(List<Long> submissionIds) {
         List<Long> normalizedIds = submissionIds == null ? List.of() : submissionIds.stream()
                 .filter(id -> id != null && id > 0)
                 .distinct()
                 .toList();
         if (normalizedIds.isEmpty()) {
-            throw new IllegalArgumentException("No downloader failure selected.");
+            throw new IllegalArgumentException("No failed task selected.");
         }
 
         String placeholders = placeholders(normalizedIds.size());
@@ -431,19 +427,16 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 SELECT submission.id, submission.task_id
                 FROM downloader_submission submission
                 JOIN yd_task task ON task.id = submission.task_id
-                JOIN yd_downloader downloader ON downloader.task_id = submission.task_id
                 WHERE submission.id IN (%s)
                   AND submission.status = 'success'
                   AND task.status = 'failed'
-                  AND task.current_stage = 'downloader'
-                  AND downloader.status = 'failed'
                 FOR UPDATE
                 """.formatted(placeholders), (rs, rowNum) -> Map.of(
                 "submissionId", rs.getLong("id"),
                 "taskId", rs.getString("task_id")
         ), normalizedIds.toArray());
         if (candidates.size() != normalizedIds.size()) {
-            throw new IllegalArgumentException("Some selected downloader failures no longer exist or are not rollbackable.");
+            throw new IllegalArgumentException("Some selected failed tasks no longer exist or are not rollbackable.");
         }
 
         List<String> taskTables = taskScopedTablesForRollback();
