@@ -166,6 +166,42 @@ public class MonitorService {
         return uploadSubmissionRepositoryService.retryFailedUploadSubmissions(platform, ids);
     }
 
+    public DownloaderFailureList downloaderFailures() {
+        return taskLifecycleRepositoryService.listDownloaderFailures();
+    }
+
+    public DownloaderRollbackResult rollbackDownloaderFailures(List<Long> submissionIds) throws IOException {
+        List<Long> normalizedIds = submissionIds == null ? List.of() : submissionIds.stream()
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        if (normalizedIds.isEmpty()) {
+            throw new IllegalArgumentException("No downloader failure selected.");
+        }
+        DownloaderFailureList failures = taskLifecycleRepositoryService.listDownloaderFailures();
+        Map<Long, String> taskIdsBySubmission = failures.rows().stream()
+                .filter(row -> normalizedIds.contains(row.submissionId()))
+                .collect(java.util.stream.Collectors.toMap(
+                        DownloaderFailure::submissionId,
+                        DownloaderFailure::taskId
+                ));
+        if (taskIdsBySubmission.size() != normalizedIds.size()) {
+            throw new IllegalArgumentException("Some selected downloader failures no longer exist or are not rollbackable.");
+        }
+
+        int deletedObjects = 0;
+        for (Long submissionId : normalizedIds) {
+            deletedObjects += deleteTaskObjects(taskIdsBySubmission.get(submissionId));
+        }
+        DownloaderRollbackDatabaseResult databaseResult =
+                taskLifecycleRepositoryService.rollbackDownloaderFailures(normalizedIds);
+        return new DownloaderRollbackResult(
+                databaseResult.restoredSubmissionCount(),
+                databaseResult.deletedDatabaseRows(),
+                deletedObjects
+        );
+    }
+
     public UploadBackfillCandidateList uploadBackfillCandidates(String platform, String accountKey, String type) {
         return uploadSubmissionRepositoryService.listUploadBackfillCandidates(platform, accountKey, type);
     }
@@ -641,6 +677,33 @@ public class MonitorService {
     }
 
     public record UploadSubmissionRetryResult(String platform, int retriedCount, int uploaderTaskCount, int taskCount) {
+    }
+
+    public record DownloaderFailure(
+            long submissionId,
+            String taskId,
+            String title,
+            String type,
+            String errorMessage,
+            LocalDateTime completedAt,
+            String sourceUrl
+    ) {
+    }
+
+    public record DownloaderFailureList(int count, List<DownloaderFailure> rows) {
+    }
+
+    public record DownloaderRollbackRequest(List<Long> submissionIds) {
+    }
+
+    public record DownloaderRollbackDatabaseResult(int restoredSubmissionCount, int deletedDatabaseRows) {
+    }
+
+    public record DownloaderRollbackResult(
+            int restoredSubmissionCount,
+            int deletedDatabaseRows,
+            int deletedMinioObjects
+    ) {
     }
 
     public record UploadBackfillCandidate(

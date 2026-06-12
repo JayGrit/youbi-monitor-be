@@ -6,7 +6,9 @@ import com.youbi.monitor.service.MonitorService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupport implements ITaskLifecycleRepositoryService {
@@ -374,6 +376,147 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         deleted += repository.update("DELETE FROM yd_task WHERE id = ?", taskId);
         reconcileUploaderAccountStagedCounts();
         return deleted;
+    }
+
+    @Override
+    public MonitorService.DownloaderFailureList listDownloaderFailures() {
+        if (!tableExists("downloader_submission")
+                || !tableExists("yd_task")
+                || !tableExists("yd_downloader")) {
+            return new MonitorService.DownloaderFailureList(0, List.of());
+        }
+        List<MonitorService.DownloaderFailure> rows = repository.query("""
+                SELECT
+                    submission.id submission_id,
+                    submission.task_id,
+                    COALESCE(NULLIF(task.title, ''), NULLIF(video_info.title, ''), submission.task_id) title,
+                    submission.type,
+                    COALESCE(NULLIF(downloader.error_message, ''), NULLIF(task.error_message, '')) error_message,
+                    downloader.completed_at,
+                    submission.source_url
+                FROM downloader_submission submission
+                JOIN yd_task task ON task.id = submission.task_id
+                JOIN yd_downloader downloader ON downloader.task_id = submission.task_id
+                LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                WHERE submission.status = 'success'
+                  AND task.status = 'failed'
+                  AND task.current_stage = 'downloader'
+                  AND downloader.status = 'failed'
+                ORDER BY downloader.completed_at DESC, submission.id DESC
+                """, (rs, rowNum) -> new MonitorService.DownloaderFailure(
+                rs.getLong("submission_id"),
+                rs.getString("task_id"),
+                rs.getString("title"),
+                rs.getString("type"),
+                rs.getString("error_message"),
+                timestamp(rs, "completed_at"),
+                rs.getString("source_url")
+        ));
+        return new MonitorService.DownloaderFailureList(rows.size(), rows);
+    }
+
+    @Override
+    @Transactional
+    public MonitorService.DownloaderRollbackDatabaseResult rollbackDownloaderFailures(List<Long> submissionIds) {
+        List<Long> normalizedIds = submissionIds == null ? List.of() : submissionIds.stream()
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        if (normalizedIds.isEmpty()) {
+            throw new IllegalArgumentException("No downloader failure selected.");
+        }
+
+        String placeholders = placeholders(normalizedIds.size());
+        List<Map<String, Object>> candidates = repository.query("""
+                SELECT submission.id, submission.task_id
+                FROM downloader_submission submission
+                JOIN yd_task task ON task.id = submission.task_id
+                JOIN yd_downloader downloader ON downloader.task_id = submission.task_id
+                WHERE submission.id IN (%s)
+                  AND submission.status = 'success'
+                  AND task.status = 'failed'
+                  AND task.current_stage = 'downloader'
+                  AND downloader.status = 'failed'
+                FOR UPDATE
+                """.formatted(placeholders), (rs, rowNum) -> Map.of(
+                "submissionId", rs.getLong("id"),
+                "taskId", rs.getString("task_id")
+        ), normalizedIds.toArray());
+        if (candidates.size() != normalizedIds.size()) {
+            throw new IllegalArgumentException("Some selected downloader failures no longer exist or are not rollbackable.");
+        }
+
+        List<String> taskTables = taskScopedTablesForRollback();
+        int deletedRows = 0;
+        for (Map<String, Object> candidate : candidates) {
+            String taskId = stringValue(candidate.get("taskId"));
+            for (String table : taskTables) {
+                deletedRows += repository.update(
+                        "DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?",
+                        taskId
+                );
+            }
+            deletedRows += repository.update("DELETE FROM yd_task WHERE id = ?", taskId);
+        }
+
+        int restored = repository.update("""
+                UPDATE downloader_submission
+                SET task_id = NULL,
+                    status = 'ready',
+                    started_at = NULL,
+                    completed_at = NULL,
+                    error_message = NULL,
+                    `operator` = NULL
+                WHERE id IN (%s)
+                """.formatted(placeholders), normalizedIds.toArray());
+        reconcileDownloaderPendingCounts();
+        reconcileUploaderAccountStagedCounts();
+        return new MonitorService.DownloaderRollbackDatabaseResult(restored, deletedRows);
+    }
+
+    private List<String> taskScopedTablesForRollback() {
+        if (!tableExists("downloader_submission")) {
+            return List.of();
+        }
+        List<String> tables = repository.queryForList("""
+                SELECT DISTINCT columns_info.TABLE_NAME
+                FROM INFORMATION_SCHEMA.COLUMNS columns_info
+                JOIN INFORMATION_SCHEMA.TABLES tables_info
+                  ON tables_info.TABLE_SCHEMA = columns_info.TABLE_SCHEMA
+                 AND tables_info.TABLE_NAME = columns_info.TABLE_NAME
+                WHERE columns_info.TABLE_SCHEMA = DATABASE()
+                  AND columns_info.COLUMN_NAME = 'task_id'
+                  AND columns_info.TABLE_NAME <> 'downloader_submission'
+                  AND tables_info.TABLE_TYPE = 'BASE TABLE'
+                ORDER BY CASE
+                    WHEN columns_info.TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment') THEN 0
+                    WHEN columns_info.TABLE_NAME LIKE 'yd\\_%' THEN 1
+                    ELSE 2
+                  END,
+                  columns_info.TABLE_NAME
+                """, String.class);
+        return new ArrayList<>(tables);
+    }
+
+    private void reconcileDownloaderPendingCounts() {
+        if (!tableExists("uploader_account")
+                || !tableExists("downloader_submission")
+                || !columnExists("uploader_account", "downloader_pending_count")) {
+            return;
+        }
+        repository.update("""
+                UPDATE uploader_account account
+                LEFT JOIN (
+                    SELECT type account_key, COUNT(*) pending_count
+                    FROM downloader_submission
+                    WHERE status = 'ready'
+                      AND NULLIF(type, '') IS NOT NULL
+                    GROUP BY type
+                ) pending ON pending.account_key = account.account_key
+                SET account.downloader_pending_count = COALESCE(pending.pending_count, 0),
+                    account.metrics_updated_at = NOW(),
+                    account.updated_at = NOW()
+                """);
     }
 
     private List<String> taskScopedTables() {

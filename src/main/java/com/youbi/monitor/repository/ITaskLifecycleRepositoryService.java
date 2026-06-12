@@ -2,6 +2,8 @@ package com.youbi.monitor.repository;
 
 import com.youbi.monitor.service.MonitorService;
 
+import java.util.List;
+
 public interface ITaskLifecycleRepositoryService {
     boolean markTaskReady(String taskId);
 
@@ -14,4 +16,8 @@ public interface ITaskLifecycleRepositoryService {
     void resetTaskRowsForDownloader(String taskId);
 
     int deleteTaskRows(String taskId);
+
+    MonitorService.DownloaderFailureList listDownloaderFailures();
+
+    MonitorService.DownloaderRollbackDatabaseResult rollbackDownloaderFailures(List<Long> submissionIds);
 }
