@@ -62,4 +62,18 @@ class JinritoutiaoUploadServiceTest {
                 "温馨提示\n账号登录已失效\n重新登录"
         )).isFalse();
     }
+
+    @Test
+    void classifiesPublishRateLimitMessage() {
+        assertThat(JinritoutiaoUploadService.submitPlatformError(
+                "发布视频\n发文频繁，先休息一下吧"
+        )).isEqualTo("今日头条发布频控（RATE_LIMITED）：发文频繁，先休息一下吧");
+    }
+
+    @Test
+    void ignoresNormalPublishPageText() {
+        assertThat(JinritoutiaoUploadService.submitPlatformError(
+                "上传成功\n存草稿\n定时发布\n发布"
+        )).isNull();
+    }
 }

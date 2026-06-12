@@ -51,6 +51,9 @@ public class JinritoutiaoUploadService {
     private static final List<String> PUBLISH_CONFIRM_BUTTON_TEXTS = List.of(
             "继续发表", "继续发布"
     );
+    private static final List<String> RATE_LIMITED_TEXTS = List.of(
+            "发文频繁", "投稿频繁", "操作频繁", "请求频繁", "过于频繁", "稍后再试"
+    );
     private static final List<String> TITLE_SELECTORS = List.of(
             ".form-item-title input",
             "input[placeholder*='0～30']",
@@ -216,12 +219,43 @@ public class JinritoutiaoUploadService {
             input.waitFor(new Locator.WaitForOptions().setTimeout(3000));
             input.scrollIntoViewIfNeeded();
             input.click(new Locator.ClickOptions().setForce(true));
-            page.keyboard().type(tag);
-            page.keyboard().press("Enter");
+            input.fill("");
+            input.pressSequentially(tag);
+            page.waitForTimeout(500);
+            if (!clickTopicSuggestion(page, tag)) {
+                input.press("ArrowDown");
+                input.press("Enter");
+            }
+            page.waitForTimeout(500);
+            if (!TextSupport.text(input.inputValue()).isBlank()) {
+                input.press("ArrowDown");
+                input.press("Enter");
+                page.waitForTimeout(500);
+            }
+            String remaining = TextSupport.text(input.inputValue());
+            if (!remaining.isBlank()) {
+                input.fill("");
+                throw new RuntimeException("topic was not committed, remaining input=" + remaining);
+            }
             log.info("Jinritoutiao upload topic filled taskId={} tag={}", taskId, tag);
         } catch (Exception exception) {
             log.warn("Jinritoutiao upload topic skipped taskId={} tag={} message={}", taskId, tag, exception.getMessage());
         }
+    }
+
+    private boolean clickTopicSuggestion(Page page, String tag) {
+        for (String text : List.of("#" + tag, tag)) {
+            Locator candidates = page.getByText(text, new Page.GetByTextOptions().setExact(true));
+            for (int index = candidates.count() - 1; index >= 0; index -= 1) {
+                Locator candidate = candidates.nth(index);
+                if (!candidate.isVisible()) {
+                    continue;
+                }
+                candidate.click(new Locator.ClickOptions().setForce(true));
+                return true;
+            }
+        }
+        return false;
     }
 
     private void dismissKnownDialogs(Page page, String taskId) {
@@ -640,6 +674,11 @@ public class JinritoutiaoUploadService {
                 if ("发布".equals(buttonText)) {
                     confirmPublishWarningIfPresent(page, taskId, attempts);
                 }
+                String platformError = submitPlatformError(visibleBodyText(page));
+                if (platformError != null) {
+                    dumpDiagnostics(page, taskId, "submit-platform-error-" + attempts);
+                    throw new RuntimeException(platformError);
+                }
                 try {
                     page.waitForURL(successUrlPattern, new Page.WaitForURLOptions().setTimeout(30000));
                 } catch (TimeoutError exception) {
@@ -647,6 +686,11 @@ public class JinritoutiaoUploadService {
                 }
                 page.waitForTimeout(3000);
                 String body = PlaywrightDiagnostics.safeBodyText(page);
+                platformError = submitPlatformError(body);
+                if (platformError != null) {
+                    dumpDiagnostics(page, taskId, "submit-platform-error-" + attempts);
+                    throw new RuntimeException(platformError);
+                }
                 if (!page.url().contains("/profile_v4/xigua/upload-video")
                         || TextSupport.containsAny(body, "发布成功", "保存成功", "存草稿成功", "作品管理", "审核中")) {
                     return;
@@ -664,6 +708,9 @@ public class JinritoutiaoUploadService {
                 }
                 last = new RuntimeException("Jinritoutiao submit did not finish, currentUrl=" + page.url());
             } catch (RuntimeException exception) {
+                if (TextSupport.text(exception.getMessage()).contains("RATE_LIMITED")) {
+                    throw exception;
+                }
                 last = exception;
                 log.warn("Jinritoutiao upload submit retry taskId={} button={} attempt={} message={}",
                         taskId, buttonText, attempts, exception.getMessage());
@@ -713,6 +760,17 @@ public class JinritoutiaoUploadService {
         boolean hasContinueButton = PUBLISH_CONFIRM_BUTTON_TEXTS.stream().anyMatch(text::contains);
         return hasContinueButton
                 && TextSupport.containsAny(text, "温馨提示", "继续发布可能会影响推荐效果", "标题涉嫌夸张");
+    }
+
+    static String submitPlatformError(String pageText) {
+        String text = TextSupport.text(pageText);
+        for (String keyword : RATE_LIMITED_TEXTS) {
+            if (text.contains(keyword)) {
+                return "今日头条发布频控（RATE_LIMITED）："
+                        + ("发文频繁".equals(keyword) ? "发文频繁，先休息一下吧" : keyword);
+            }
+        }
+        return null;
     }
 
     private void waitForVideoFileAccepted(Page page, String taskId) {

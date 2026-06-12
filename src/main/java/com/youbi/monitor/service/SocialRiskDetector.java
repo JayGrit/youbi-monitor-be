@@ -32,7 +32,7 @@ public class SocialRiskDetector {
             return state;
         }
         state = match("rate_limited", "error", "平台返回操作频繁/风控限制", true, haystack,
-                "操作频繁", "投稿频繁", "请求频繁", "过于频繁", "风控", "限流", "稍后再试", "rate limit", "too frequent");
+                "操作频繁", "投稿频繁", "发文频繁", "请求频繁", "过于频繁", "风控", "限流", "稍后再试", "rate limit", "too frequent");
         if (state != null) {
             return state;
         }
