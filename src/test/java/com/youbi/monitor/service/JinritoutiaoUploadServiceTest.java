@@ -41,4 +41,25 @@ class JinritoutiaoUploadServiceTest {
             Files.deleteIfExists(prepared);
         }
     }
+
+    @Test
+    void recognizesNewPublishWarning() {
+        assertThat(JinritoutiaoUploadService.isPublishConfirmation(
+                "温馨提示\n视频标题涉嫌夸张，继续发布可能会影响推荐效果\n返回修改\n继续发表"
+        )).isTrue();
+    }
+
+    @Test
+    void recognizesLegacyPublishWarningButton() {
+        assertThat(JinritoutiaoUploadService.isPublishConfirmation(
+                "温馨提示\n标题涉嫌夸张\n返回修改\n继续发布"
+        )).isTrue();
+    }
+
+    @Test
+    void ignoresUnrelatedDialog() {
+        assertThat(JinritoutiaoUploadService.isPublishConfirmation(
+                "温馨提示\n账号登录已失效\n重新登录"
+        )).isFalse();
+    }
 }

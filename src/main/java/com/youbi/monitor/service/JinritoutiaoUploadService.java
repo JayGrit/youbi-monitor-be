@@ -48,6 +48,9 @@ public class JinritoutiaoUploadService {
     private static final List<String> MISSING_COVER_TEXTS = List.of(
             "该视频需要上传一个封面", "请上传封面", "请选择封面"
     );
+    private static final List<String> PUBLISH_CONFIRM_BUTTON_TEXTS = List.of(
+            "继续发表", "继续发布"
+    );
     private static final List<String> TITLE_SELECTORS = List.of(
             ".form-item-title input",
             "input[placeholder*='0～30']",
@@ -634,6 +637,9 @@ public class JinritoutiaoUploadService {
                     button.click(new Locator.ClickOptions().setForce(true));
                 }
                 dumpDiagnostics(page, taskId, "after-click-" + buttonText + "-" + attempts);
+                if ("发布".equals(buttonText)) {
+                    confirmPublishWarningIfPresent(page, taskId, attempts);
+                }
                 try {
                     page.waitForURL(successUrlPattern, new Page.WaitForURLOptions().setTimeout(30000));
                 } catch (TimeoutError exception) {
@@ -666,6 +672,47 @@ public class JinritoutiaoUploadService {
         }
         dumpDiagnostics(page, taskId, "submit-failed");
         throw last == null ? new RuntimeException("Jinritoutiao submit did not finish") : last;
+    }
+
+    private void confirmPublishWarningIfPresent(Page page, String taskId, int attempt) {
+        long deadline = System.currentTimeMillis() + Duration.ofSeconds(5).toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            if (!page.url().contains("/profile_v4/xigua/upload-video")) {
+                return;
+            }
+            Locator modal = page.locator(".byte-modal:visible, [role='dialog']:visible").last();
+            if (modal.count() > 0 && modal.isVisible()) {
+                String modalText = TextSupport.text(modal.innerText());
+                if (!isPublishConfirmation(modalText)) {
+                    return;
+                }
+                dumpDiagnostics(page, taskId, "publish-confirmation-" + attempt);
+                for (String text : PUBLISH_CONFIRM_BUTTON_TEXTS) {
+                    Locator buttons = modal.locator("button:visible");
+                    for (int index = 0; index < buttons.count(); index += 1) {
+                        Locator candidate = buttons.nth(index);
+                        if (!text.equals(TextSupport.text(candidate.innerText()))) {
+                            continue;
+                        }
+                        candidate.click(new Locator.ClickOptions().setForce(true));
+                        log.info("Jinritoutiao upload publish confirmation clicked taskId={} attempt={} text={}",
+                                taskId, attempt, text);
+                        page.waitForTimeout(1000);
+                        dumpDiagnostics(page, taskId, "after-publish-confirmation-" + attempt);
+                        return;
+                    }
+                }
+                return;
+            }
+            page.waitForTimeout(250);
+        }
+    }
+
+    static boolean isPublishConfirmation(String modalText) {
+        String text = TextSupport.text(modalText);
+        boolean hasContinueButton = PUBLISH_CONFIRM_BUTTON_TEXTS.stream().anyMatch(text::contains);
+        return hasContinueButton
+                && TextSupport.containsAny(text, "温馨提示", "继续发布可能会影响推荐效果", "标题涉嫌夸张");
     }
 
     private void waitForVideoFileAccepted(Page page, String taskId) {
