@@ -90,7 +90,7 @@ public class KuaishouUploadService {
                 BrowserContext context = accountService.newContext(browser, storageState);
                 try {
                     Page page = context.newPage();
-                    uploadVideoContent(page, request, videoPath, taskId);
+                    uploadVideoContent(page, request, videoPath, taskId, accountKey);
                     accountService.saveStorageState(accountKey, context.storageState());
                 } finally {
                     context.close();
@@ -115,12 +115,19 @@ public class KuaishouUploadService {
         }
     }
 
-    private void uploadVideoContent(Page page, KuaishouUploadRequest request, Path videoPath, String taskId) {
-        openPublishPage(page, taskId);
+    private void uploadVideoContent(Page page, KuaishouUploadRequest request, Path videoPath, String taskId, String accountKey) {
+        openPublishPage(page, taskId, accountKey);
         dumpDiagnostics(page, taskId, "create-page-ready");
 
         Locator fileInput = page.locator("input[type='file']").first();
-        fileInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
+        try {
+            fileInput.waitFor(new Locator.WaitForOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.ATTACHED).setTimeout(30000));
+        } catch (TimeoutError exception) {
+            if (hasVisibleLoginGate(page)) {
+                markLoginRequired(accountKey, page, taskId, exception);
+            }
+            throw exception;
+        }
         fileInput.setInputFiles(videoPath);
         waitForVideoFileAccepted(page, taskId);
         dumpDiagnostics(page, taskId, "after-set-video-file");
@@ -139,7 +146,7 @@ public class KuaishouUploadService {
         dumpDiagnostics(page, taskId, "submit-result");
     }
 
-    private void openPublishPage(Page page, String taskId) {
+    private void openPublishPage(Page page, String taskId, String accountKey) {
         page.navigate(KuaishouAccountService.PUBLISH_VIDEO_URL);
         page.waitForTimeout(5000);
         dumpDiagnostics(page, taskId, "publish-page");
@@ -149,8 +156,7 @@ public class KuaishouUploadService {
             log.warn("Kuaishou upload publish URL wait timed out taskId={} url={}", taskId, page.url());
         }
         if (hasVisibleLoginGate(page)) {
-            dumpDiagnostics(page, taskId, "login-required");
-            throw new RuntimeException("Kuaishou login state is expired or rejected by the publish page. url=" + page.url());
+            markLoginRequired(accountKey, page, taskId, null);
         }
     }
 
@@ -406,9 +412,37 @@ public class KuaishouUploadService {
     }
 
     private boolean hasVisibleLoginGate(Page page) {
+        String url = TextSupport.text(page.url()).toLowerCase();
         String body = PlaywrightDiagnostics.safeBodyText(page);
-        return TextSupport.containsAny(body, "扫码登录", "登录/注册", "请使用快手扫码", "手机号登录")
-                && !TextSupport.containsAny(body, "发布视频", "上传视频", "作品管理");
+        boolean hasLoginText = TextSupport.containsAny(body,
+                "扫码登录", "登录/注册", "请使用快手扫码", "手机号登录", "立即登录", "去登录");
+        boolean hasLoginLink = Boolean.TRUE.equals(page.evaluate(
+                """
+                () => Array.from(document.querySelectorAll('a[href], button, [role="button"]')).some((el) => {
+                  const text = (el.innerText || el.textContent || '').trim();
+                  const href = el.getAttribute('href') || '';
+                  return /登录|login/i.test(text) || /passport\\.kuaishou\\.com|account\\/login/i.test(href);
+                })
+                """
+        ));
+        boolean hasUploadInput = Boolean.TRUE.equals(page.evaluate(
+                "() => document.querySelectorAll('input[type=\"file\"]').length > 0"
+        ));
+        boolean hasPublishForm = TextSupport.containsAny(body, "作品管理")
+                || (TextSupport.containsAny(body, "发布视频", "视频标题", "添加封面") && hasUploadInput);
+        return url.contains("passport.kuaishou.com")
+                || url.contains("/account/login")
+                || ((hasLoginText || hasLoginLink) && !hasUploadInput && !hasPublishForm);
+    }
+
+    private void markLoginRequired(String accountKey, Page page, String taskId, RuntimeException cause) {
+        dumpDiagnostics(page, taskId, "login-required");
+        accountService.markUnavailable(accountKey);
+        String message = "Kuaishou 登录态失效: " + accountKey + ", url=" + page.url();
+        if (cause == null) {
+            throw new PlaywrightUploadException(PlaywrightUploadErrorCode.LOGIN_REQUIRED, message);
+        }
+        throw new PlaywrightUploadException(PlaywrightUploadErrorCode.LOGIN_REQUIRED, message, cause);
     }
 
     private void dumpDiagnostics(Page page, String taskId, String label) {

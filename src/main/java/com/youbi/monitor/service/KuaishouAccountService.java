@@ -162,6 +162,16 @@ public class KuaishouAccountService {
                 firstText(profile.nickname(), loadProfile(normalized).nickname()),
                 storageState
         );
+        if (!uploaderAccountService.updateAvailable("kuaishou", normalized, true)) {
+            throw new IOException("Kuaishou uploader account key not found: " + normalized);
+        }
+    }
+
+    void markUnavailable(String accountKey) {
+        String normalized = normalizeAccountKey(accountKey);
+        if (!uploaderAccountService.updateAvailable("kuaishou", normalized, false)) {
+            throw new IllegalStateException("Kuaishou uploader account key not found: " + normalized);
+        }
     }
 
     private boolean isStorageStateValid(String storageState) {

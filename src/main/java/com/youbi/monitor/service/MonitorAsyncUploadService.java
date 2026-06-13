@@ -136,7 +136,7 @@ public class MonitorAsyncUploadService {
             boolean updated = repositoryService.markFailed(
                     uploadTaskId,
                     toJson(payload),
-                    classifyErrorCode(message),
+                    classifyErrorCode(exception, message),
                     message
             );
             if (!updated) {
@@ -248,7 +248,11 @@ public class MonitorAsyncUploadService {
         );
     }
 
-    private String classifyErrorCode(String message) {
+    private String classifyErrorCode(Exception exception, String message) {
+        PlaywrightUploadException playwrightException = playwrightUploadException(exception);
+        if (playwrightException != null) {
+            return playwrightException.errorCode().code();
+        }
         String text = message == null ? "" : message.toLowerCase();
         if (text.contains("not logged in") || text.contains("login") || text.contains("登录") || text.contains("未登录")) {
             return "LOGIN_REQUIRED";
@@ -260,6 +264,17 @@ public class MonitorAsyncUploadService {
             return "RATE_LIMITED";
         }
         return "UPLOAD_FAILED";
+    }
+
+    private PlaywrightUploadException playwrightUploadException(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof PlaywrightUploadException playwrightException) {
+                return playwrightException;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 
     private Map<String, Object> uploadResult(Map<String, Object> result) {
