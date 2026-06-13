@@ -122,7 +122,7 @@ jobs:
 
           MONITOR_HEALTHY=false
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8200/health >/dev/null; then
+            if curl -fsS http://127.0.0.1:8200/health >/dev/null 2>&1; then
               MONITOR_HEALTHY=true
               break
             fi
@@ -138,11 +138,11 @@ jobs:
             && [ "${OLD_MONITOR_BE_IMAGE}" != "${CURRENT_MONITOR_BE_IMAGE}" ]; then
             docker rmi -f "${OLD_MONITOR_BE_IMAGE}" || true
           fi
-          docker image prune -f --filter "until=24h"
+          docker image prune -f --filter "until=24h" || true
           docker buildx prune -af \
-            --builder default \
+            --builder monitor-be-builder \
             --max-used-space 5gb \
             --min-free-space 10gb \
-            --reserved-space 2gb
-          docker system df
+            --reserved-space 2gb || echo "Warning: docker buildx prune failed; deploy already completed."
+          docker system df || true
           EOF
