@@ -21,6 +21,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         String table = UPLOADER_TASK_TABLES.get(normalized);
         String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
         boolean accountTableExists = tableExists(accountTable);
+        String submissionTitleSql = submissionTitleSql(table);
         String accountJoin = accountTableExists
                 ? "LEFT JOIN " + quotedIdentifier(accountTable) + " account ON account.account_key = submission.account_key"
                 : "";
@@ -29,7 +30,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 SELECT
                   submission.id,
                   submission.task_id,
-                  COALESCE(NULLIF(submission.title, ''), NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), submission.task_id) title,
+                  %s title,
                   submission.account_key,
                   submission.error_message,
                   submission.completed_at,
@@ -47,7 +48,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 WHERE submission.status = 'failed'
                 ORDER BY submission.updated_at DESC, submission.id DESC
                 LIMIT 200
-                """.formatted(accountExistsSql, quotedIdentifier(table), accountJoin), (rs, rowNum) -> {
+                """.formatted(submissionTitleSql, accountExistsSql, quotedIdentifier(table), accountJoin), (rs, rowNum) -> {
             boolean accountExists = rs.getBoolean("account_exists");
             String retryBlockedReason = accountExists ? "" : "账号表中不存在该 account_key，worker 不会拉取";
             return new MonitorService.FailedUploadSubmission(
@@ -68,6 +69,22 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
             );
         });
         return new MonitorService.FailedUploadSubmissionList(normalized, rows.size(), rows);
+    }
+
+    private String submissionTitleSql(String table) {
+        return "COALESCE("
+                + nullableTextColumnSql(table, "submission", "title")
+                + ", "
+                + nullableTextColumnSql("yd_video_info", "video_info", "upload_title")
+                + ", "
+                + nullableTextColumnSql("yd_video_info", "video_info", "title")
+                + ", "
+                + nullableTextColumnSql("yd_task", "task", "title")
+                + ", submission.task_id)";
+    }
+
+    private String nullableTextColumnSql(String table, String alias, String column) {
+        return columnExists(table, column) ? "NULLIF(" + alias + "." + column + ", '')" : "NULL";
     }
 
     @Transactional
