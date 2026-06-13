@@ -331,20 +331,72 @@ public class BilibiliPlaywrightUploadService {
                 log.info("Bilibili Playwright creation statement not required taskId={}", taskId);
                 return;
             }
-            String value = text(input.inputValue(new Locator.InputValueOptions().setTimeout(1000)));
+            String value = creationStatementValue(input);
             if (!value.isBlank()) {
                 log.info("Bilibili Playwright creation statement already set taskId={} value={}", taskId, value);
                 return;
             }
             humanActions.click(page, input);
             page.waitForTimeout(500);
-            Locator option = page.locator(".bcc-select-list-wrap:visible .bcc-option:has-text('内容无需标注'), .bcc-option:has-text('内容无需标注'):visible").last();
-            option.waitFor(new Locator.WaitForOptions().setTimeout(5000));
-            humanActions.click(page, option);
-            log.info("Bilibili Playwright creation statement selected taskId={} value=内容无需标注", taskId);
+            if (!clickCreationStatementOption(page, taskId)) {
+                throw new RuntimeException("Bilibili creation statement option not found: 内容无需标注");
+            }
+            page.waitForTimeout(800);
+            value = creationStatementValue(input);
+            if (value.isBlank()) {
+                throw new RuntimeException("Bilibili creation statement value is still blank after selecting 内容无需标注");
+            }
+            log.info("Bilibili Playwright creation statement selected taskId={} value={}", taskId, value);
         } catch (Exception exception) {
             log.warn("Bilibili Playwright creation statement skipped taskId={} message={}", taskId, exception.getMessage());
             dumpDiagnostics(page, taskId, "creation-statement-skipped");
+        }
+    }
+
+    private boolean clickCreationStatementOption(Page page, String taskId) {
+        for (String selector : List.of(
+                ".creation-statement-container .bcc-select-list-wrap:visible li.bcc-option:has-text('内容无需标注')",
+                ".creation-statement-container .bcc-select-list-wrap:visible .bcc-option:has-text('内容无需标注')",
+                ".bcc-select-list-wrap:visible li.bcc-option:has-text('内容无需标注')",
+                ".bcc-select-list-wrap:visible .bcc-option:has-text('内容无需标注')",
+                "li.bcc-option:has-text('内容无需标注'):visible",
+                ".bcc-option:has-text('内容无需标注'):visible",
+                "text=内容无需标注"
+        )) {
+            try {
+                Locator option = page.locator(selector).last();
+                if (option.count() > 0 && option.isVisible()) {
+                    humanActions.click(page, option);
+                    log.info("Bilibili Playwright creation statement option clicked taskId={} selector={}", taskId, selector);
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return false;
+    }
+
+    private String creationStatementValue(Locator input) {
+        try {
+            return text(input.inputValue(new Locator.InputValueOptions().setTimeout(1000)));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private boolean ensureCreationStatementSelected(Page page, String taskId) {
+        try {
+            Locator input = page.locator("input[placeholder='请选择符合您视频内容的创作声明']").first();
+            if (input.count() == 0 || !input.isVisible()) {
+                return true;
+            }
+            if (!creationStatementValue(input).isBlank()) {
+                return true;
+            }
+            setCreationStatement(page, taskId);
+            return !creationStatementValue(input).isBlank();
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
@@ -679,6 +731,10 @@ public class BilibiliPlaywrightUploadService {
     }
 
     private boolean clickPublishButton(Page page, String taskId) {
+        if (!ensureCreationStatementSelected(page, taskId)) {
+            dumpDiagnostics(page, taskId, "creation-statement-required");
+            throw new RuntimeException("Bilibili publish validation failed: 请选择创作声明");
+        }
         for (String text : List.of("立即投稿", "投稿", "发布")) {
             try {
                 Locator button = page.locator("button:has-text('" + text + "'):visible, span.submit-add:has-text('" + text + "'):visible, .submit-add:has-text('" + text + "'):visible").last();
@@ -707,6 +763,10 @@ public class BilibiliPlaywrightUploadService {
             if (handleCreationStatementPublishDialog(page, body, taskId)) {
                 page.waitForTimeout(1000);
                 continue;
+            }
+            if (hasEditableTitle(page) && hasVisiblePublishButton(page) && !ensureCreationStatementSelected(page, taskId)) {
+                dumpDiagnostics(page, taskId, "publish-creation-statement-required");
+                throw new RuntimeException("Bilibili publish validation failed: 请选择创作声明");
             }
             if (hasSubmitValidationError(body)) {
                 dumpDiagnostics(page, taskId, "publish-validation-error");
