@@ -388,7 +388,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 SELECT
                     submission.id submission_id,
                     submission.task_id,
-                    COALESCE(NULLIF(task.title, ''), NULLIF(video_info.title, ''), submission.task_id) title,
+                    COALESCE(NULLIF(source_video.title, ''), submission.task_id) title,
                     submission.type,
                     NULLIF(task.error_message, '') error_message,
                     task.completed_at,
@@ -396,6 +396,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 FROM downloader_submission submission
                 JOIN yd_task task ON task.id = submission.task_id
                 LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 WHERE submission.status = 'success'
                   AND task.status = 'failed'
                 ORDER BY task.completed_at DESC, submission.id DESC
@@ -545,13 +546,14 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
 
     private void restoreVideoInfoSource(String taskId) {
         repository.update("""
-                INSERT INTO yd_video_info (task_id, source_url, source_platform)
-                SELECT id, source_url, source_platform
-                FROM yd_task
-                WHERE id = ?
+                INSERT INTO yd_video_info (task_id, source_url)
+                SELECT task_id, source_url
+                FROM downloader_submission
+                WHERE task_id = ?
+                ORDER BY id DESC
+                LIMIT 1
                 ON DUPLICATE KEY UPDATE
-                    source_url = COALESCE(yd_video_info.source_url, VALUES(source_url)),
-                    source_platform = COALESCE(yd_video_info.source_platform, VALUES(source_platform))
+                    source_url = COALESCE(yd_video_info.source_url, VALUES(source_url))
                 """, taskId);
     }
 
@@ -570,8 +572,13 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         if (tableExists("submitter_author")) {
             repository.update("""
                     UPDATE yd_video_info video_info
+                    JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                     JOIN submitter_author author
-                      ON author.author = video_info.source_uploader
+                      ON author.author = COALESCE(
+                           NULLIF(source_video.uploader, ''),
+                           NULLIF(source_video.import_author, ''),
+                           NULLIF(source_video.channel_id, '')
+                         )
                      AND author.type = video_info.type
                     SET video_info.need_subtitle = COALESCE(video_info.need_subtitle, author.need_subtitle),
                         video_info.need_dubbing = COALESCE(video_info.need_dubbing, author.need_dubbing),

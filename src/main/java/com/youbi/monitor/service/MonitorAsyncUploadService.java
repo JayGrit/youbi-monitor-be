@@ -92,7 +92,6 @@ public class MonitorAsyncUploadService {
                 normalizedPlatform,
                 taskId(request),
                 defaultText(accountKey(request), "default"),
-                toJson(request),
                 requestVideoUrl(request)
         );
         executor.submit(() -> execute(uploadTaskId, normalizedPlatform, request));

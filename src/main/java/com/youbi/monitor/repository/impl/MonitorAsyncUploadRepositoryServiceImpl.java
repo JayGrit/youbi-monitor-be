@@ -32,20 +32,19 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
     }
 
     @Override
-    public void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey, String requestJson, String videoUrl) {
+    public void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey, String videoUrl) {
         repository.update(
                 """
                 INSERT INTO monitor_upload_task (
                     upload_task_id, platform, upstream_task_id, account_key, status,
-                    request_json, video_url, started_at
+                    video_url, started_at
                 )
-                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', ?, ?, NOW())
+                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', ?, NOW())
                 """,
                 uploadTaskId,
                 platform,
                 upstreamTaskId,
                 accountKey,
-                requestJson,
                 videoUrl
         );
     }

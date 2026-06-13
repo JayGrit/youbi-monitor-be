@@ -60,9 +60,8 @@ abstract class MonitorRepositorySqlSupport {
     protected static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
             "task_id",
             "source_url",
-            "source_platform",
+            "submitter_video_id",
             "type",
-            "source_uploader",
             "need_subtitle",
             "need_dubbing",
             "need_separation",

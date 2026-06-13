@@ -63,7 +63,7 @@ public class MonitorService {
             "jinritoutiao", "uploader_task_jinritoutiao"
     );
     private static final Map<String, List<String>> STAGE_INPUT_FIELDS = Map.of(
-            "downloader", List.of("source_url", "source_platform"),
+            "downloader", List.of("source_url"),
             "demucs", List.of("audio_source_url", "audio_source_path"),
             "whisper", List.of("audio_vocals_url", "audio_vocals_path"),
             "translator", List.of("asr_json_path", "target_language"),
@@ -137,12 +137,34 @@ public class MonitorService {
         }
 
         Map<String, Object> videoInfo = taskQueryRepositoryService.findTaskFlowRow("yd_video_info", "task_id", taskId);
+        enrichSourceMetadata(videoInfo);
         List<TaskFlowDetail.TaskFlowAsset> minioObjects = listTaskAssets(taskId);
         List<TaskFlowDetail.TaskFlowStage> stages = new ArrayList<>();
         for (StageDefinition definition : STAGES) {
             stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
         }
         return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
+    }
+
+    private void enrichSourceMetadata(Map<String, Object> videoInfo) {
+        Object submitterVideoId = videoInfo.get("submitter_video_id");
+        if (submitterVideoId == null) {
+            return;
+        }
+        Map<String, Object> source = taskQueryRepositoryService.findTaskFlowRow(
+                "submitter_video",
+                "id",
+                String.valueOf(submitterVideoId)
+        );
+        if (source.isEmpty()) {
+            return;
+        }
+        videoInfo.put("title", source.get("title"));
+        videoInfo.put("source_description", source.get("description"));
+        videoInfo.put("source_uploader", source.get("uploader"));
+        videoInfo.put("source_webpage_url", source.get("webpage_url"));
+        videoInfo.put("source_tags_json", source.get("tags"));
+        videoInfo.put("source_duration_seconds", source.get("duration"));
     }
 
     public List<WhisperWordTimestamp> whisperWordTimestamps(String taskId) {

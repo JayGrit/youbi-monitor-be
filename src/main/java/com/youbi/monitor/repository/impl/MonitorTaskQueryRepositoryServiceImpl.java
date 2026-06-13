@@ -35,11 +35,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(vi.upload_title, ''), NULLIF(vi.title, ''), NULLIF(t.title, '')) title,
-              t.source_url,
-              vi.source_webpage_url,
+              COALESCE(NULLIF(vi.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
+              vi.source_url,
+              sv.webpage_url source_webpage_url,
               vi.source_thumbnail_url,
-              vi.source_duration_seconds,
+              sv.duration source_duration_seconds,
               vi.minio_storage_bytes,
               vi.minio_storage_object_count,
               vi.minio_storage_updated_at,
@@ -149,6 +149,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN publisher pr ON pr.task_id = t.id
             LEFT JOIN yd_uploader u ON u.task_id = t.id
             LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count

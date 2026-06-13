@@ -44,6 +44,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 JOIN yd_task task ON task.id = submission.task_id
                 JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
                 LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 %s
                 WHERE submission.status = 'failed'
                 ORDER BY submission.updated_at DESC, submission.id DESC
@@ -77,9 +78,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 + ", "
                 + nullableTextColumnSql("yd_video_info", "video_info", "upload_title")
                 + ", "
-                + nullableTextColumnSql("yd_video_info", "video_info", "title")
-                + ", "
-                + nullableTextColumnSql("yd_task", "task", "title")
+                + nullableTextColumnSql("submitter_video", "source_video", "title")
                 + ", submission.task_id)";
     }
 
@@ -194,9 +193,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         String candidateTitleSql = "COALESCE("
                 + nullableTextColumnSql("yd_video_info", "video_info", "upload_title")
                 + ", "
-                + nullableTextColumnSql("yd_video_info", "video_info", "title")
-                + ", "
-                + nullableTextColumnSql("yd_task", "task", "title")
+                + nullableTextColumnSql("submitter_video", "source_video", "title")
                 + ", task.id)";
         String candidateCoverSql = "COALESCE("
                 + nullableTextColumnSql("yd_video_info", "video_info", "final_cover_url")
@@ -223,6 +220,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                   COALESCE(account.is_available, 0) account_available
                 FROM yd_task task
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
+                LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 JOIN yd_uploader uploader ON uploader.task_id = task.id
                 JOIN (
                   %s
