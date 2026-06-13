@@ -126,16 +126,20 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
             raise RuntimeError(f"Kuaishou account key not found: {account.account_key}")
         cursor.execute(
             """
-            UPDATE uploader_account
-            SET is_available = 1,
+            INSERT INTO uploader_account (
+                platform, account_key, source_table, source_updated_at,
+                is_enabled, is_available, is_deprecated, updated_at
+            )
+            VALUES ('kuaishou', %s, 'uploader_account_kuaishou', NOW(), 1, 1, 0, NOW())
+            ON DUPLICATE KEY UPDATE
+                source_table = VALUES(source_table),
+                source_updated_at = VALUES(source_updated_at),
+                is_available = 1,
+                is_deprecated = 0,
                 updated_at = NOW()
-            WHERE platform = 'kuaishou'
-              AND account_key = %s
             """,
             (account.account_key,),
         )
-        if cursor.rowcount == 0:
-            raise RuntimeError(f"Kuaishou uploader account key not found: {account.account_key}")
         connection.commit()
     finally:
         connection.close()
