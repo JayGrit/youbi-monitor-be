@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -14,6 +15,9 @@ from typing import Any
 
 import mysql.connector
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uploader_new_account_common import mark_uploader_account_available
 
 from new import (
     CHROME_BIN,
@@ -119,6 +123,7 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"Doubao account key not found: {account.account_key}")
+        mark_uploader_account_available(cursor, "doubao", account.account_key, "publisher_account_doubao")
         connection.commit()
     finally:
         connection.close()

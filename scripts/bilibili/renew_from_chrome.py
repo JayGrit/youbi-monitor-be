@@ -5,12 +5,17 @@ import argparse
 import json
 import os
 import re
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 import mysql.connector
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uploader_new_account_common import mark_uploader_account_available
 
 
 DEFAULT_MYSQL_HOST = "120.53.92.66"
@@ -270,18 +275,7 @@ def save_storage_state(args: argparse.Namespace, account_key: str, profile: Prof
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"Bilibili account key not found: {account_key}")
-        cursor.execute(
-            """
-            UPDATE uploader_account
-            SET is_available = 1,
-                updated_at = NOW()
-            WHERE platform = 'bilibili'
-              AND account_key = %s
-            """,
-            (account_key,),
-        )
-        if cursor.rowcount == 0:
-            raise RuntimeError(f"Bilibili uploader account key not found: {account_key}")
+        mark_uploader_account_available(cursor, "bilibili", account_key, "uploader_account_bilibili")
         connection.commit()
     finally:
         connection.close()

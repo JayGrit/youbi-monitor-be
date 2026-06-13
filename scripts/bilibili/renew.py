@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -14,6 +15,9 @@ from urllib.request import Request, urlopen
 
 import mysql.connector
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uploader_new_account_common import mark_uploader_account_available
 
 
 DEFAULT_MYSQL_HOST = "120.53.92.66"
@@ -175,18 +179,7 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"No matching DB row for account_key={account.account_key} mid={account.mid}")
-        cursor.execute(
-            """
-            UPDATE uploader_account
-            SET is_available = 1,
-                updated_at = NOW()
-            WHERE platform = 'bilibili'
-              AND account_key = %s
-            """,
-            (account.account_key,),
-        )
-        if cursor.rowcount == 0:
-            raise RuntimeError(f"Bilibili uploader account key not found: {account.account_key}")
+        mark_uploader_account_available(cursor, "bilibili", account.account_key, "uploader_account_bilibili")
         connection.commit()
     finally:
         connection.close()

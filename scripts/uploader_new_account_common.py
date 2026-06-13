@@ -6,13 +6,12 @@ from typing import Any
 DEFAULT_PHONE = "00000000000"
 
 
-def register_uploader_account(
+def mark_uploader_account_available(
     cursor: Any,
     platform: str,
     account_key: str,
     source_table: str,
-    platform_account_id: int,
-) -> str:
+) -> None:
     cursor.execute(
         """
         INSERT INTO uploader_account (
@@ -23,12 +22,31 @@ def register_uploader_account(
         ON DUPLICATE KEY UPDATE
             source_table = VALUES(source_table),
             source_updated_at = VALUES(source_updated_at),
-            is_enabled = 1,
             is_available = 1,
             is_deprecated = 0,
             updated_at = NOW()
         """,
         (platform, account_key, source_table),
+    )
+
+
+def register_uploader_account(
+    cursor: Any,
+    platform: str,
+    account_key: str,
+    source_table: str,
+    platform_account_id: int,
+) -> str:
+    mark_uploader_account_available(cursor, platform, account_key, source_table)
+    cursor.execute(
+        """
+        UPDATE uploader_account
+        SET is_enabled = 1,
+            updated_at = NOW()
+        WHERE platform = %s
+          AND account_key = %s
+        """,
+        (platform, account_key),
     )
     cursor.execute(
         """

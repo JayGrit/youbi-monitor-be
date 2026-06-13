@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sys
 import tempfile
 import time
 from dataclasses import dataclass
@@ -14,6 +15,9 @@ from typing import Any
 
 import mysql.connector
 from playwright.sync_api import sync_playwright
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from uploader_new_account_common import mark_uploader_account_available
 
 from new import (
     CHROME_BIN,
@@ -124,22 +128,7 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
         )
         if cursor.rowcount == 0:
             raise RuntimeError(f"Kuaishou account key not found: {account.account_key}")
-        cursor.execute(
-            """
-            INSERT INTO uploader_account (
-                platform, account_key, source_table, source_updated_at,
-                is_enabled, is_available, is_deprecated, updated_at
-            )
-            VALUES ('kuaishou', %s, 'uploader_account_kuaishou', NOW(), 1, 1, 0, NOW())
-            ON DUPLICATE KEY UPDATE
-                source_table = VALUES(source_table),
-                source_updated_at = VALUES(source_updated_at),
-                is_available = 1,
-                is_deprecated = 0,
-                updated_at = NOW()
-            """,
-            (account.account_key,),
-        )
+        mark_uploader_account_available(cursor, "kuaishou", account.account_key, "uploader_account_kuaishou")
         connection.commit()
     finally:
         connection.close()
