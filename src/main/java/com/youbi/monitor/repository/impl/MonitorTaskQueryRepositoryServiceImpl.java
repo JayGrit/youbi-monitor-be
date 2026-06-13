@@ -35,7 +35,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(pr.upload_title, ''), NULLIF(u.upload_title, ''), NULLIF(t.title, '')) title,
+              COALESCE(NULLIF(vi.upload_title, ''), NULLIF(vi.title, ''), NULLIF(t.title, '')) title,
               t.source_url,
               vi.source_webpage_url,
               vi.source_thumbnail_url,
@@ -262,30 +262,22 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CREATE TABLE IF NOT EXISTS publisher (
                     task_id VARCHAR(64) PRIMARY KEY,
                     status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                    upload_title VARCHAR(512) NULL,
-                    upload_description TEXT NULL,
-                    upload_tags TEXT NULL,
-                    cover_text VARCHAR(128) NULL,
-                    clean_cover_url TEXT NULL,
-                    final_cover_url TEXT NULL,
-                    source_cover_url TEXT NULL,
-                    source_subtitle_txt_url TEXT NULL,
                     result_json MEDIUMTEXT NULL,
                     error_message TEXT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 )
                 """);
-        ensurePublisherColumn("upload_title", "VARCHAR(512) NULL");
-        ensurePublisherColumn("upload_description", "TEXT NULL");
-        ensurePublisherColumn("upload_tags", "TEXT NULL");
-        ensurePublisherColumn("cover_text", "VARCHAR(128) NULL");
-        ensurePublisherColumn("clean_cover_url", "TEXT NULL");
-        ensurePublisherColumn("final_cover_url", "TEXT NULL");
-        ensurePublisherColumn("source_cover_url", "TEXT NULL");
-        ensurePublisherColumn("source_subtitle_txt_url", "TEXT NULL");
         ensurePublisherColumn("result_json", "MEDIUMTEXT NULL");
         ensurePublisherColumn("error_message", "TEXT NULL");
+        ensureVideoInfoColumn("upload_title", "VARCHAR(512) NULL");
+        ensureVideoInfoColumn("upload_description", "TEXT NULL");
+        ensureVideoInfoColumn("upload_tags", "TEXT NULL");
+        ensureVideoInfoColumn("cover_text", "VARCHAR(128) NULL");
+        ensureVideoInfoColumn("clean_cover_url", "TEXT NULL");
+        ensureVideoInfoColumn("final_cover_url", "TEXT NULL");
+        ensureVideoInfoColumn("source_cover_url", "TEXT NULL");
+        ensureVideoInfoColumn("source_subtitle_txt_url", "TEXT NULL");
         ensureVideoInfoColumn("minio_storage_bytes", "BIGINT UNSIGNED NULL");
         ensureVideoInfoColumn("minio_storage_object_count", "INT UNSIGNED NULL");
         ensureVideoInfoColumn("minio_storage_updated_at", "DATETIME NULL");
