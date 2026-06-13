@@ -29,7 +29,7 @@ then
 fi
 
 echo "准备逐个扫码同步快手登录态。"
-echo "每个窗口都会提示要登录的 key/user_id/nickname，账号信息匹配后才写入数据库。"
+echo "每个窗口都会提示要登录的 key/user_id/nickname；如已保存 nickname，则 nickname 匹配后才写入数据库。"
 echo
 
 if ! "${PYTHON}" "${PY_SCRIPT}" "$@"; then

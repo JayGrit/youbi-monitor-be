@@ -41,7 +41,7 @@ class Account:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Open one temporary Chrome profile per Kuaishou account, wait for scan login, verify known profile info, then save storage state to MySQL."
+        description="Open one temporary Chrome profile per Kuaishou account, wait for scan login, verify known nickname when available, then save storage state to MySQL."
     )
     parser.add_argument("--account-key", action="append", default=[], help="Only update selected account_key. Can be specified multiple times.")
     parser.add_argument("--keep-all-origins", action="store_true", help="Store the full Chrome context state instead of only Kuaishou domains.")
@@ -138,19 +138,15 @@ def save_storage_state(args: argparse.Namespace, account: Account, state_json: s
 
 
 def profile_matches(account: Account, user_id: str | None, nickname: str | None) -> bool:
-    if account.user_id and user_id and account.user_id != user_id:
-        return False
     if account.nickname and nickname and account.nickname != nickname:
         return False
     return True
 
 
 def has_enough_profile_to_verify(account: Account, user_id: str | None, nickname: str | None) -> bool:
-    if account.user_id and user_id == account.user_id:
-        return True
     if account.nickname and nickname == account.nickname:
         return True
-    return not account.user_id and not account.nickname
+    return not account.nickname
 
 
 def login_ready(state: dict[str, Any], page, user_id: str | None, nickname: str | None) -> bool:
@@ -167,7 +163,7 @@ def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
         "请在弹出的 Chrome 窗口扫码登录快手账号："
         f"key={account.account_key} user_id={account.user_id or '-'} nickname={account.nickname or '-'}"
     )
-    print("脚本会轮询登录态；已保存的 user_id/nickname 匹配后才写入数据库。")
+    print("脚本会轮询登录态；如已保存 nickname，则 nickname 匹配后才写入数据库；user_id 不参与一致性校验。")
     print(f"使用全新临时 Chrome profile：{profile_dir}")
     print("=" * 72, flush=True)
 
@@ -208,7 +204,7 @@ def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
                             flush=True,
                         )
                     elif not has_enough_profile_to_verify(account, user_id, nickname):
-                        print("已看到登录态，但暂未提取到足够的账号信息用于校验，继续等待...", flush=True)
+                        print("已看到登录态，但暂未提取到 nickname 用于校验，继续等待...", flush=True)
                     else:
                         state_json = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
                         save_storage_state(args, account, state_json, user_id, nickname)
