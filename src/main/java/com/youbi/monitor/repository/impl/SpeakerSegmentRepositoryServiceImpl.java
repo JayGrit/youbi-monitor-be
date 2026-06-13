@@ -18,7 +18,7 @@ public class SpeakerSegmentRepositoryServiceImpl extends MonitorRepositorySqlSup
     public MonitorService.SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(String taskId, long segmentId, String dstText) {
         String normalizedText = dstText == null ? "" : dstText;
         int updated = repository.update("""
-                UPDATE yd_speaker_segment
+                UPDATE speaker_segment
                 SET dst_text = ?
                 WHERE task_id = ? AND id = ?
                 """, normalizedText, taskId, segmentId);
@@ -27,7 +27,7 @@ public class SpeakerSegmentRepositoryServiceImpl extends MonitorRepositorySqlSup
         }
         List<Map<String, Object>> rows = repository.queryForList("""
                 SELECT *
-                FROM yd_speaker_segment
+                FROM speaker_segment
                 WHERE task_id = ? AND id = ?
                 LIMIT 1
                 """, taskId, segmentId);

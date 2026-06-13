@@ -138,27 +138,27 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               u.bilibili_upload_uid,
               u.bilibili_upload_account_name,
               u.error_message uploader_error
-            FROM yd_task t
-            LEFT JOIN yd_downloader d ON d.task_id = t.id
-            LEFT JOIN yd_demucs de ON de.task_id = t.id
-            LEFT JOIN yd_whisper w ON w.task_id = t.id
-            LEFT JOIN yd_translator tr ON tr.task_id = t.id
-            LEFT JOIN yd_speaker sp ON sp.task_id = t.id
-            LEFT JOIN yd_combiner m ON m.task_id = t.id
-            LEFT JOIN yd_publisher pub ON pub.task_id = t.id
-            LEFT JOIN publisher pr ON pr.task_id = t.id
-            LEFT JOIN yd_uploader u ON u.task_id = t.id
-            LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            FROM task t
+            LEFT JOIN downloader d ON d.task_id = t.id
+            LEFT JOIN demucs de ON de.task_id = t.id
+            LEFT JOIN whisper w ON w.task_id = t.id
+            LEFT JOIN translator tr ON tr.task_id = t.id
+            LEFT JOIN speaker sp ON sp.task_id = t.id
+            LEFT JOIN combiner m ON m.task_id = t.id
+            LEFT JOIN publisher pub ON pub.task_id = t.id
+            LEFT JOIN publisher_result pr ON pr.task_id = t.id
+            LEFT JOIN uploader u ON u.task_id = t.id
+            LEFT JOIN video_info vi ON vi.task_id = t.id
             LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
-              FROM yd_asr_segment
+              FROM asr_segment
               GROUP BY task_id
             ) fa ON fa.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(*) translated_count
-              FROM yd_speaker_segment
+              FROM speaker_segment
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
             LEFT JOIN (
@@ -173,7 +173,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   COUNT(*) normal_count,
                   COUNT(s.id) translated_count
                 FROM `translator-chunk` ch
-                LEFT JOIN yd_speaker_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
+                LEFT JOIN speaker_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
                 WHERE ch.row_role = 'normal'
                 GROUP BY ch.task_id, ch.chunk_index
               ) chunk_progress
@@ -181,7 +181,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             ) tc ON tc.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(DISTINCT item_index) translator_failed_count
-              FROM yd_translator_api_task
+              FROM translator_api_task
               WHERE status = 'failed' AND request_key LIKE 'chunk:%'
               GROUP BY task_id
             ) tf ON tf.task_id = t.id
@@ -191,7 +191,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) speaker_completed_count,
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) speaker_failed_count,
                 COUNT(*) speaker_total_count
-              FROM yd_speaker_segment
+              FROM speaker_segment
               GROUP BY task_id
             ) ss ON ss.task_id = t.id
             LEFT JOIN (
@@ -202,7 +202,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   ORDER BY id
                   SEPARATOR 0x0A
                 ) child_error_message
-              FROM yd_translator_api_task
+              FROM translator_api_task
               WHERE status = 'failed'
               GROUP BY task_id
             ) te ON te.task_id = t.id
@@ -214,7 +214,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   ORDER BY item_index
                   SEPARATOR 0x0A
                 ) child_error_message
-              FROM yd_speaker_segment
+              FROM speaker_segment
               WHERE status = 'failed'
               GROUP BY task_id
             ) se ON se.task_id = t.id
@@ -224,11 +224,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             """;
     private static final String MONITOR_COUNT_SQL = """
             SELECT COUNT(*)
-            FROM yd_task t
-            LEFT JOIN yd_video_info vi ON vi.task_id = t.id
+            FROM task t
+            LEFT JOIN video_info vi ON vi.task_id = t.id
             __TASK_MONITOR_WHERE__
             """;
-    private static final String HEARTBEAT_TABLE = "yd_service_heartbeat";
+    private static final String HEARTBEAT_TABLE = "service_heartbeat";
     private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
             SELECT COUNT(*)
             FROM INFORMATION_SCHEMA.TABLES
@@ -248,7 +248,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     @Override
     public void ensureMonitorSchema() {
         repository.update("""
-                CREATE TABLE IF NOT EXISTS yd_publisher (
+                CREATE TABLE IF NOT EXISTS publisher (
                     task_id VARCHAR(64) PRIMARY KEY,
                     status VARCHAR(32) NOT NULL DEFAULT 'pending',
                     started_at DATETIME NULL,
@@ -260,7 +260,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 )
                 """);
         repository.update("""
-                CREATE TABLE IF NOT EXISTS publisher (
+                CREATE TABLE IF NOT EXISTS publisher_result (
                     task_id VARCHAR(64) PRIMARY KEY,
                     status VARCHAR(32) NOT NULL DEFAULT 'pending',
                     result_json MEDIUMTEXT NULL,
@@ -285,8 +285,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     private void ensurePublisherColumn(String column, String definition) {
-        if (!columnExists("publisher", column)) {
-            repository.update("ALTER TABLE publisher ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+        if (!columnExists("publisher_result", column)) {
+            repository.update("ALTER TABLE publisher_result ADD COLUMN " + quotedIdentifier(column) + " " + definition);
         }
     }
 
@@ -307,8 +307,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     private void ensureVideoInfoColumn(String column, String definition) {
-        if (tableExists("yd_video_info") && !columnExists("yd_video_info", column)) {
-            repository.update("ALTER TABLE yd_video_info ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+        if (tableExists("video_info") && !columnExists("video_info", column)) {
+            repository.update("ALTER TABLE video_info ADD COLUMN " + quotedIdentifier(column) + " " + definition);
         }
     }
 

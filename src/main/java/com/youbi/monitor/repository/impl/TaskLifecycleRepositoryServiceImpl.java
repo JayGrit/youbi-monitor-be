@@ -30,7 +30,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         resetStageChildren(taskId, failedStage);
         resetExhaustedTranslatorApiTasks(taskId);
         repository.update("""
-                UPDATE yd_task
+                UPDATE task
                 SET status = 'ready',
                     current_stage = ?,
                     completed_at = NULL,
@@ -43,7 +43,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     @Override
     public String findTaskStatus(String taskId) {
         List<String> statuses = repository.queryForList(
-                "SELECT status FROM yd_task WHERE id = ?",
+                "SELECT status FROM task WHERE id = ?",
                 String.class,
                 taskId
         );
@@ -54,7 +54,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     
     public MonitorService.TaskStopResult stopTask(String taskId) {
         List<String> statuses = repository.queryForList(
-                "SELECT status FROM yd_task WHERE id = ?",
+                "SELECT status FROM task WHERE id = ?",
                 String.class,
                 taskId
         );
@@ -86,10 +86,10 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             }
         }
 
-        if (tableExists("yd_translator_api_task")) {
-            ensureOperatorColumn("yd_translator_api_task");
+        if (tableExists("translator_api_task")) {
+            ensureOperatorColumn("translator_api_task");
             stoppedStages += repository.update("""
-                    UPDATE yd_translator_api_task
+                    UPDATE translator_api_task
                     SET status = 'failed',
                         completed_at = NOW(),
                         error_message = ?,
@@ -97,10 +97,10 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     WHERE task_id = ? AND status IN ('pending', 'running')
                     """, message, taskId);
         }
-        if (tableExists("yd_speaker_segment")) {
-            ensureOperatorColumn("yd_speaker_segment");
+        if (tableExists("speaker_segment")) {
+            ensureOperatorColumn("speaker_segment");
             stoppedStages += repository.update("""
-                    UPDATE yd_speaker_segment
+                    UPDATE speaker_segment
                     SET status = 'failed',
                         completed_at = NOW(),
                         error_message = ?,
@@ -114,7 +114,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         }
 
         repository.update("""
-                UPDATE yd_task
+                UPDATE task
                 SET status = 'failed',
                     current_stage = COALESCE(NULLIF(?, ''), current_stage),
                     completed_at = NOW(),
@@ -147,7 +147,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
 
         List<String> currentStages = repository.queryForList("""
                 SELECT current_stage
-                FROM yd_task
+                FROM task
                 WHERE id = ? AND status = 'failed'
                 """, String.class, taskId);
         if (currentStages.isEmpty()) {
@@ -163,12 +163,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private boolean hasExhaustedTranslatorApiTasks(String taskId) {
-        if (!tableExists("yd_translator_api_task")) {
+        if (!tableExists("translator_api_task")) {
             return false;
         }
         Integer count = repository.queryForObject("""
                 SELECT COUNT(*)
-                FROM yd_translator_api_task
+                FROM translator_api_task
                 WHERE task_id = ?
                   AND status = 'failed'
                   AND attempt_count >= max_attempts
@@ -208,10 +208,10 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
 
     private void resetStageChildren(String taskId, RetryStage failedStage) {
         if ("translator".equals(failedStage.key())) {
-            if (tableExists("yd_translator_api_task")) {
-                ensureOperatorColumn("yd_translator_api_task");
+            if (tableExists("translator_api_task")) {
+                ensureOperatorColumn("translator_api_task");
                 repository.update("""
-                        UPDATE yd_translator_api_task
+                        UPDATE translator_api_task
                         SET status = 'pending',
                             attempt_count = 0,
                             started_at = NULL,
@@ -226,10 +226,10 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             return;
         }
 
-        if ("speaker".equals(failedStage.key()) && tableExists("yd_speaker_segment")) {
-            ensureOperatorColumn("yd_speaker_segment");
+        if ("speaker".equals(failedStage.key()) && tableExists("speaker_segment")) {
+            ensureOperatorColumn("speaker_segment");
             repository.update("""
-                    UPDATE yd_speaker_segment
+                    UPDATE speaker_segment
                     SET status = 'ready',
                         attempt_count = 0,
                         started_at = NULL,
@@ -248,8 +248,8 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 List<UploadAccountStatusChange> accountStatusChanges = repository.query("""
                         SELECT submission.task_id, submission.account_key, submission.status
                         FROM %s submission
-                        JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
-                        LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
+                        JOIN video_info video_info ON video_info.task_id = submission.task_id
+                        LEFT JOIN uploader uploader ON uploader.task_id = submission.task_id
                         WHERE submission.task_id = ?
                           AND submission.status IN ('failed', 'running')
                           AND submission.account_key = video_info.type
@@ -270,8 +270,8 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 );
                 repository.update("""
                         UPDATE %s submission
-                        JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
-                        LEFT JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
+                        JOIN video_info video_info ON video_info.task_id = submission.task_id
+                        LEFT JOIN uploader uploader ON uploader.task_id = submission.task_id
                         SET submission.status = 'ready',
                             submission.started_at = NULL,
                             submission.completed_at = NULL,
@@ -286,7 +286,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         """.formatted(quotedIdentifier(table)), taskId, platform);
                 applyUploaderAccountStatusChanges(platform, accountStatusChanges);
                 repository.update("""
-                        UPDATE yd_uploader
+                        UPDATE uploader
                         SET %s = 'ready'
                         WHERE task_id = ?
                         """.formatted(quotedIdentifier(uploadStatusColumn(platform))), taskId);
@@ -295,12 +295,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private void resetExhaustedTranslatorApiTasks(String taskId) {
-        if (!tableExists("yd_translator_api_task")) {
+        if (!tableExists("translator_api_task")) {
             return;
         }
-        ensureOperatorColumn("yd_translator_api_task");
+        ensureOperatorColumn("translator_api_task");
         repository.update("""
-                UPDATE yd_translator_api_task
+                UPDATE translator_api_task
                 SET status = 'pending',
                     attempt_count = 0,
                     started_at = NULL,
@@ -330,9 +330,9 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 return true;
             }
         }
-        if (tableExists("yd_speaker_segment")) {
+        if (tableExists("speaker_segment")) {
             Integer count = repository.queryForObject(
-                    "SELECT COUNT(*) FROM yd_speaker_segment WHERE task_id = ? AND status = 'running'",
+                    "SELECT COUNT(*) FROM speaker_segment WHERE task_id = ? AND status = 'running'",
                     Integer.class,
                     taskId
             );
@@ -355,7 +355,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         }
 
         repository.update("""
-                UPDATE yd_task
+                UPDATE task
                 SET status = 'ready',
                     current_stage = 'downloader',
                     started_at = NULL,
@@ -373,7 +373,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         for (String table : taskScopedTables()) {
             deleted += repository.update("DELETE FROM " + quotedIdentifier(table) + " WHERE task_id = ?", taskId);
         }
-        deleted += repository.update("DELETE FROM yd_task WHERE id = ?", taskId);
+        deleted += repository.update("DELETE FROM task WHERE id = ?", taskId);
         reconcileUploaderAccountStagedCounts();
         return deleted;
     }
@@ -381,7 +381,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     @Override
     public MonitorService.DownloaderFailureList listFailedTasks() {
         if (!tableExists("downloader_submission")
-                || !tableExists("yd_task")) {
+                || !tableExists("task")) {
             return new MonitorService.DownloaderFailureList(0, List.of());
         }
         List<MonitorService.DownloaderFailure> rows = repository.query("""
@@ -394,8 +394,8 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     task.completed_at,
                     submission.source_url
                 FROM downloader_submission submission
-                JOIN yd_task task ON task.id = submission.task_id
-                LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                JOIN task task ON task.id = submission.task_id
+                LEFT JOIN video_info video_info ON video_info.task_id = submission.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 WHERE submission.status = 'success'
                   AND task.status = 'failed'
@@ -427,7 +427,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         List<Map<String, Object>> candidates = repository.query("""
                 SELECT submission.id, submission.task_id
                 FROM downloader_submission submission
-                JOIN yd_task task ON task.id = submission.task_id
+                JOIN task task ON task.id = submission.task_id
                 WHERE submission.id IN (%s)
                   AND submission.status = 'success'
                   AND task.status = 'failed'
@@ -450,7 +450,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         taskId
                 );
             }
-            deletedRows += repository.update("DELETE FROM yd_task WHERE id = ?", taskId);
+            deletedRows += repository.update("DELETE FROM task WHERE id = ?", taskId);
         }
 
         int restored = repository.update("""
@@ -483,7 +483,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                   AND columns_info.TABLE_NAME <> 'downloader_submission'
                   AND tables_info.TABLE_TYPE = 'BASE TABLE'
                 ORDER BY CASE
-                    WHEN columns_info.TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment') THEN 0
+                    WHEN columns_info.TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'asr_segment') THEN 0
                     WHEN columns_info.TABLE_NAME LIKE 'yd\\_%' THEN 1
                     ELSE 2
                   END,
@@ -521,7 +521,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                   AND COLUMN_NAME = 'task_id'
                   AND (TABLE_NAME LIKE 'yd\\_%' OR TABLE_NAME = 'downloader_submission')
                 ORDER BY CASE
-                    WHEN TABLE_NAME IN ('yd_translator_api_task', 'yd_speaker_segment', 'yd_asr_segment') THEN 0
+                    WHEN TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'asr_segment') THEN 0
                     WHEN TABLE_NAME = 'downloader_submission' THEN 2
                     ELSE 1
                   END,
@@ -530,37 +530,37 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private void resetVideoInfo(String taskId) {
-        if (!tableExists("yd_video_info")) {
+        if (!tableExists("video_info")) {
             return;
         }
-        List<String> resetColumns = resettableColumns("yd_video_info", PRESERVED_VIDEO_INFO_COLUMNS);
+        List<String> resetColumns = resettableColumns("video_info", PRESERVED_VIDEO_INFO_COLUMNS);
         if (resetColumns.isEmpty()) {
             restoreVideoInfoSource(taskId);
             restoreVideoInfoProcessingOptions(taskId);
             return;
         }
-        repository.update("UPDATE yd_video_info SET " + nullAssignments(resetColumns) + " WHERE task_id = ?", taskId);
+        repository.update("UPDATE video_info SET " + nullAssignments(resetColumns) + " WHERE task_id = ?", taskId);
         restoreVideoInfoSource(taskId);
         restoreVideoInfoProcessingOptions(taskId);
     }
 
     private void restoreVideoInfoSource(String taskId) {
         repository.update("""
-                INSERT INTO yd_video_info (task_id, source_url)
+                INSERT INTO video_info (task_id, source_url)
                 SELECT task_id, source_url
                 FROM downloader_submission
                 WHERE task_id = ?
                 ORDER BY id DESC
                 LIMIT 1
                 ON DUPLICATE KEY UPDATE
-                    source_url = COALESCE(yd_video_info.source_url, VALUES(source_url))
+                    source_url = COALESCE(video_info.source_url, VALUES(source_url))
                 """, taskId);
     }
 
     private void restoreVideoInfoProcessingOptions(String taskId) {
         if (tableExists("downloader_submission")) {
             repository.update("""
-                    UPDATE yd_video_info video_info
+                    UPDATE video_info video_info
                     JOIN downloader_submission submission ON submission.task_id = video_info.task_id
                     SET video_info.type = COALESCE(video_info.type, submission.type),
                         video_info.need_subtitle = COALESCE(video_info.need_subtitle, submission.need_subtitle),
@@ -571,7 +571,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         }
         if (tableExists("submitter_author")) {
             repository.update("""
-                    UPDATE yd_video_info video_info
+                    UPDATE video_info video_info
                     JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                     JOIN submitter_author author
                       ON author.author = COALESCE(

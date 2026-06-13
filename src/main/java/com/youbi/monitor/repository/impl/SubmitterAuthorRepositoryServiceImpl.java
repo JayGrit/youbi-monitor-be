@@ -194,11 +194,11 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
             String sourceLanguage,
             String targetLanguage
     ) {
-        if (!tableExists("yd_video_info")) {
+        if (!tableExists("video_info")) {
             return 0;
         }
         return repository.update("""
-                UPDATE yd_video_info
+                UPDATE video_info
                 SET type = ?,
                     need_subtitle = ?,
                     need_dubbing = ?,

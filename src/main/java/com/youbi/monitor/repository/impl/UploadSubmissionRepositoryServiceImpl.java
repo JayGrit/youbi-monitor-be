@@ -41,9 +41,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                   video_info.type routed_account_key,
                   %s account_exists
                 FROM %s submission
-                JOIN yd_task task ON task.id = submission.task_id
-                JOIN yd_uploader uploader ON uploader.task_id = submission.task_id
-                LEFT JOIN yd_video_info video_info ON video_info.task_id = submission.task_id
+                JOIN task task ON task.id = submission.task_id
+                JOIN uploader uploader ON uploader.task_id = submission.task_id
+                LEFT JOIN video_info video_info ON video_info.task_id = submission.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 %s
                 WHERE submission.status = 'failed'
@@ -76,7 +76,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         return "COALESCE("
                 + nullableTextColumnSql(table, "submission", "title")
                 + ", "
-                + nullableTextColumnSql("yd_video_info", "video_info", "upload_title")
+                + nullableTextColumnSql("video_info", "video_info", "upload_title")
                 + ", "
                 + nullableTextColumnSql("submitter_video", "source_video", "title")
                 + ", submission.task_id)";
@@ -152,7 +152,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         String taskPlaceholders = placeholders(taskIds.size());
         Object[] taskArgs = taskIds.toArray();
         int uploaderUpdated = repository.update("""
-                UPDATE yd_uploader
+                UPDATE uploader
                 SET status = 'running',
                     %s = 'ready',
                     started_at = COALESCE(started_at, NOW()),
@@ -162,7 +162,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 WHERE task_id IN (%s)
                 """.formatted(quotedIdentifier(uploadStatusColumn(normalized)), taskPlaceholders), taskArgs);
         int taskUpdated = repository.update("""
-                UPDATE yd_task
+                UPDATE task
                 SET status = 'running',
                     current_stage = 'uploader',
                     started_at = COALESCE(started_at, NOW()),
@@ -191,18 +191,18 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
             throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
         }
         String candidateTitleSql = "COALESCE("
-                + nullableTextColumnSql("yd_video_info", "video_info", "upload_title")
+                + nullableTextColumnSql("video_info", "video_info", "upload_title")
                 + ", "
                 + nullableTextColumnSql("submitter_video", "source_video", "title")
                 + ", task.id)";
         String candidateCoverSql = "COALESCE("
-                + nullableTextColumnSql("yd_video_info", "video_info", "final_cover_url")
+                + nullableTextColumnSql("video_info", "video_info", "final_cover_url")
                 + ", "
-                + nullableTextColumnSql("yd_video_info", "video_info", "clean_cover_url")
+                + nullableTextColumnSql("video_info", "video_info", "clean_cover_url")
                 + ", "
-                + nullableTextColumnSql("yd_video_info", "video_info", "source_cover_url")
+                + nullableTextColumnSql("video_info", "video_info", "source_cover_url")
                 + ", "
-                + nullableTextColumnSql("yd_video_info", "video_info", "source_thumbnail_url")
+                + nullableTextColumnSql("video_info", "video_info", "source_thumbnail_url")
                 + ", NULL)";
 
         List<MonitorService.UploadBackfillCandidate> rows = repository.query("""
@@ -218,10 +218,10 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                   platform_account.account_key IS NOT NULL account_exists,
                   COALESCE(account.is_enabled, 0) account_enabled,
                   COALESCE(account.is_available, 0) account_available
-                FROM yd_task task
-                JOIN yd_video_info video_info ON video_info.task_id = task.id
+                FROM task task
+                JOIN video_info video_info ON video_info.task_id = task.id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
-                JOIN yd_uploader uploader ON uploader.task_id = task.id
+                JOIN uploader uploader ON uploader.task_id = task.id
                 JOIN (
                   %s
                 ) sent ON sent.task_id = task.id
@@ -320,9 +320,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         List<UploadBackfillInsertRow> rows = repository.query("""
                 SELECT
                   task.id task_id
-                FROM yd_task task
-                JOIN yd_video_info video_info ON video_info.task_id = task.id
-                JOIN yd_uploader uploader ON uploader.task_id = task.id
+                FROM task task
+                JOIN video_info video_info ON video_info.task_id = task.id
+                JOIN uploader uploader ON uploader.task_id = task.id
                 JOIN %s platform_account ON platform_account.account_key = ?
                 JOIN %s account ON account.platform = ?
                     AND account.account_key = platform_account.account_key
@@ -377,7 +377,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         Object[] registeredArgs = registeredTaskIds.toArray();
         String registeredPlaceholders = placeholders(registeredTaskIds.size());
         int uploaderUpdated = repository.update("""
-                UPDATE yd_uploader
+                UPDATE uploader
                 SET status = 'running',
                     %s = 'ready',
                     started_at = COALESCE(started_at, NOW()),
@@ -387,7 +387,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 WHERE task_id IN (%s)
                 """.formatted(quotedIdentifier(uploadStatusColumn(normalized)), registeredPlaceholders), registeredArgs);
         int taskUpdated = repository.update("""
-                UPDATE yd_task
+                UPDATE task
                 SET status = 'running',
                     current_stage = 'uploader',
                     started_at = COALESCE(started_at, NOW()),

@@ -25,20 +25,20 @@ abstract class MonitorRepositorySqlSupport {
             new StageDefinition("uploader", "上传", "uploader_status", "uploader_started_at", "uploader_completed_at", "uploader_error")
     );
     protected static final List<RetryStage> RETRY_STAGES = List.of(
-            new RetryStage("downloader", "yd_downloader"),
-            new RetryStage("publisher", "yd_publisher"),
-            new RetryStage("demucs", "yd_demucs"),
-            new RetryStage("whisper", "yd_whisper"),
-            new RetryStage("translator", "yd_translator"),
-            new RetryStage("speaker", "yd_speaker"),
-            new RetryStage("combiner", "yd_combiner"),
-            new RetryStage("uploader", "yd_uploader")
+            new RetryStage("downloader", "downloader"),
+            new RetryStage("publisher", "publisher"),
+            new RetryStage("demucs", "demucs"),
+            new RetryStage("whisper", "whisper"),
+            new RetryStage("translator", "translator"),
+            new RetryStage("speaker", "speaker"),
+            new RetryStage("combiner", "combiner"),
+            new RetryStage("uploader", "uploader")
     );
     protected static final List<String> RESET_CHILD_TABLES = List.of(
-            "yd_speaker_segment",
-            "yd_translator_api_task",
+            "speaker_segment",
+            "translator_api_task",
             "whisper_word_timestamp",
-            "yd_asr_segment"
+            "asr_segment"
     );
     protected static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
             "bilibili", "uploader_task_bilibili",
@@ -386,7 +386,7 @@ abstract class MonitorRepositorySqlSupport {
     protected int reconcileUploaderAccountStagedCounts() {
         if (!tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)
                 || !tableExists("downloader_submission")
-                || !tableExists("yd_task")) {
+                || !tableExists("task")) {
             return 0;
         }
         ensureUnifiedUploaderStagingColumns();
@@ -397,7 +397,7 @@ abstract class MonitorRepositorySqlSupport {
                     SUM(CASE WHEN task.status = 'failed' THEN 0 ELSE 1 END) AS staged_count,
                     SUM(CASE WHEN task.status = 'failed' THEN 1 ELSE 0 END) AS failed_count
                 FROM downloader_submission submission
-                JOIN yd_task task ON task.id = submission.task_id
+                JOIN task task ON task.id = submission.task_id
                 WHERE submission.status = 'success'
                   AND NULLIF(submission.type, '') IS NOT NULL
                   AND NULLIF(submission.task_id, '') IS NOT NULL
@@ -442,14 +442,14 @@ abstract class MonitorRepositorySqlSupport {
     private String stagedAccountKeyForTask(String taskId) {
         if (!tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)
                 || !tableExists("downloader_submission")
-                || !tableExists("yd_task")) {
+                || !tableExists("task")) {
             return "";
         }
         String uploadExistsSql = uploadSubmissionExistsSql("submission");
         List<String> accountKeys = repository.queryForList("""
                 SELECT submission.type
                 FROM downloader_submission submission
-                JOIN yd_task task ON task.id = submission.task_id
+                JOIN task task ON task.id = submission.task_id
                 WHERE submission.task_id = ?
                   AND submission.status = 'success'
                   AND NULLIF(submission.type, '') IS NOT NULL

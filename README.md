@@ -44,5 +44,5 @@ Override Spring datasource settings with environment variables such as
 - `POST /api/xiaohongshu/upload` with `videoUrl` or `minioUrl` pointing to the
   final video in MinIO. `videoPath` remains accepted for local/manual upload.
 
-The service only reads existing `yd_task` and stage tables. It does not create,
+The service only reads existing `task` and stage tables. It does not create,
 resume, or mutate processing tasks.

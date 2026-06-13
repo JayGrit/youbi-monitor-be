@@ -45,14 +45,14 @@ public class MonitorService {
     );
     private static final int CHILD_ROW_LIMIT = 500;
     private static final Map<String, String> STAGE_TABLES = Map.of(
-            "downloader", "yd_downloader",
-            "demucs", "yd_demucs",
-            "whisper", "yd_whisper",
-            "translator", "yd_translator",
-            "speaker", "yd_speaker",
-            "combiner", "yd_combiner",
-            "publisher", "yd_publisher",
-            "uploader", "yd_uploader"
+            "downloader", "downloader",
+            "demucs", "demucs",
+            "whisper", "whisper",
+            "translator", "translator",
+            "speaker", "speaker",
+            "combiner", "combiner",
+            "publisher", "publisher",
+            "uploader", "uploader"
     );
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
             "bilibili", "uploader_task_bilibili",
@@ -131,12 +131,12 @@ public class MonitorService {
 
     public TaskFlowDetail getTaskFlow(String taskId) {
         LocalDateTime now = LocalDateTime.now();
-        Map<String, Object> task = taskQueryRepositoryService.findTaskFlowRow("yd_task", "id", taskId);
+        Map<String, Object> task = taskQueryRepositoryService.findTaskFlowRow("task", "id", taskId);
         if (task.isEmpty()) {
             return null;
         }
 
-        Map<String, Object> videoInfo = taskQueryRepositoryService.findTaskFlowRow("yd_video_info", "task_id", taskId);
+        Map<String, Object> videoInfo = taskQueryRepositoryService.findTaskFlowRow("video_info", "task_id", taskId);
         enrichSourceMetadata(videoInfo);
         List<TaskFlowDetail.TaskFlowAsset> minioObjects = listTaskAssets(taskId);
         List<TaskFlowDetail.TaskFlowStage> stages = new ArrayList<>();
@@ -369,18 +369,18 @@ public class MonitorService {
         switch (stageKey) {
             case "downloader" -> addLimitedTable(tables, "downloader_detail", taskId, "task_id", "kind, id");
             case "whisper" -> {
-                addLimitedTable(tables, "yd_asr_segment", taskId, "task_id", "item_index, id");
+                addLimitedTable(tables, "asr_segment", taskId, "task_id", "item_index, id");
                 addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_index, word_index, id");
             }
             case "translator" -> {
-                addLimitedTable(tables, "yd_translator_api_task", taskId, "task_id", "id");
+                addLimitedTable(tables, "translator_api_task", taskId, "task_id", "id");
                 addLimitedTable(tables, "translator-chunk", taskId, "task_id", "chunk_index, row_order, id");
-                addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
+                addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
             }
-            case "speaker" -> addLimitedTable(tables, "yd_speaker_segment", taskId, "task_id", "item_index, id");
-            case "publisher" -> addLimitedTable(tables, "publisher", taskId, "task_id", "task_id");
+            case "speaker" -> addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
+            case "publisher" -> addLimitedTable(tables, "publisher_result", taskId, "task_id", "task_id");
             case "uploader" -> {
-                addLimitedTable(tables, "yd_uploader", taskId, "task_id", "task_id");
+                addLimitedTable(tables, "uploader", taskId, "task_id", "task_id");
                 UPLOADER_TASK_TABLES.forEach((platform, table) -> addUploaderTaskTable(tables, platform, table, taskId));
             }
             default -> {
