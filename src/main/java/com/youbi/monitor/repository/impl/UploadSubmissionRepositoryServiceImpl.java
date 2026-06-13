@@ -167,8 +167,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                     current_stage = 'uploader',
                     started_at = COALESCE(started_at, NOW()),
                     completed_at = NULL,
-                    error_message = NULL,
-                    `operator` = NULL
+                    error_message = NULL
                 WHERE id IN (%s)
                 """.formatted(taskPlaceholders), taskArgs);
         return new MonitorService.UploadSubmissionRetryResult(normalized, retried, uploaderUpdated, taskUpdated);
@@ -392,8 +391,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                     current_stage = 'uploader',
                     started_at = COALESCE(started_at, NOW()),
                     completed_at = NULL,
-                    error_message = NULL,
-                    `operator` = NULL
+                    error_message = NULL
                 WHERE id IN (%s)
                 """.formatted(registeredPlaceholders), registeredArgs);
         return new MonitorService.UploadBackfillRegisterResult(

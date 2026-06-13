@@ -83,7 +83,7 @@ public class MonitorAsyncUploadService {
         if (running > 0) {
             return new MonitorUploadTaskResponse(false, null, normalizedPlatform, taskId(request), accountKey(request),
                     "rejected", false, "已有上传任务正在执行", "UPLOAD_RUNNING", "已有上传任务正在执行",
-                    null, requestVideoUrl(request), null, null, null, null, Map.of(), null, null);
+                    null, null, null, null, null, Map.of(), null, null);
         }
 
         String uploadTaskId = UUID.randomUUID().toString();
@@ -91,8 +91,7 @@ public class MonitorAsyncUploadService {
                 uploadTaskId,
                 normalizedPlatform,
                 taskId(request),
-                defaultText(accountKey(request), "default"),
-                requestVideoUrl(request)
+                defaultText(accountKey(request), "default")
         );
         executor.submit(() -> execute(uploadTaskId, normalizedPlatform, request));
         return status(uploadTaskId);
@@ -104,7 +103,7 @@ public class MonitorAsyncUploadService {
         return repositoryService.findByUploadTaskId(uploadTaskId)
                 .map(this::response)
                 .orElseGet(() -> new MonitorUploadTaskResponse(false, uploadTaskId, null, null, null, "missing", false,
-                        "上传任务不存在", "TASK_NOT_FOUND", "上传任务不存在", null, null, null, null, null, null, Map.of(), null, null));
+                        "上传任务不存在", "TASK_NOT_FOUND", "上传任务不存在", null, null, null, null, null, Map.of(), null, null));
     }
 
     private void execute(String uploadTaskId, String platform, Object request) {
@@ -236,7 +235,6 @@ public class MonitorAsyncUploadService {
                 row.errorCode(),
                 firstText(row.errorMessage(), stringValue(upload.get("message")), status),
                 durationMs(result, row.startedAt(), row.completedAt()),
-                row.videoUrl(),
                 stringValue(upload.get("bvid")),
                 longValue(upload.get("aid")),
                 longValue(upload.get("accountUid")),
@@ -313,28 +311,6 @@ public class MonitorAsyncUploadService {
         } catch (Exception exception) {
             return Map.of("rawResultJson", json);
         }
-    }
-
-    private String requestVideoUrl(Object request) {
-        if (request instanceof BilibiliUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
-        }
-        if (request instanceof XiaohongshuUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
-        }
-        if (request instanceof DouyinUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
-        }
-        if (request instanceof ShipinhaoUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
-        }
-        if (request instanceof KuaishouUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
-        }
-        if (request instanceof JinritoutiaoUploadRequest item) {
-            return firstText(item.videoUrl(), item.minioUrl(), item.alidriveFileId(), item.alidriveRemotePath(), item.videoPath());
-        }
-        return "";
     }
 
     private String taskId(Object request) {

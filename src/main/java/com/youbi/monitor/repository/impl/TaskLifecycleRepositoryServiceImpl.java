@@ -118,8 +118,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 SET status = 'failed',
                     current_stage = COALESCE(NULLIF(?, ''), current_stage),
                     completed_at = NOW(),
-                    error_message = ?,
-                    `operator` = NULL
+                    error_message = ?
                 WHERE id = ?
                 """, stoppedStage, message, taskId);
         applyStagedPipelineFailure(taskId, statuses.get(0));
@@ -360,8 +359,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     current_stage = 'downloader',
                     started_at = NULL,
                     completed_at = NULL,
-                    error_message = NULL,
-                    `operator` = NULL
+                    error_message = NULL
                 WHERE id = ?
                 """, taskId);
         reconcileUploaderAccountStagedCounts();

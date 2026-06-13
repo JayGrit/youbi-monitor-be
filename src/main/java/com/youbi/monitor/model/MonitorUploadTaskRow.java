@@ -11,7 +11,6 @@ public record MonitorUploadTaskRow(
         String resultJson,
         String errorCode,
         String errorMessage,
-        String videoUrl,
         LocalDateTime startedAt,
         LocalDateTime completedAt
 ) {

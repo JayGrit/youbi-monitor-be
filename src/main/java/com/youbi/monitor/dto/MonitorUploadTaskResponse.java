@@ -15,7 +15,6 @@ public record MonitorUploadTaskResponse(
         String errorCode,
         String message,
         Long durationMs,
-        String videoUrl,
         String bvid,
         Long aid,
         Long accountUid,

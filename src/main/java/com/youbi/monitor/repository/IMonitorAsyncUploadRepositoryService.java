@@ -9,7 +9,7 @@ public interface IMonitorAsyncUploadRepositoryService {
 
     long countActiveTasks();
 
-    void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey, String videoUrl);
+    void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey);
 
     Optional<MonitorUploadTaskRow> findByUploadTaskId(String uploadTaskId);
 

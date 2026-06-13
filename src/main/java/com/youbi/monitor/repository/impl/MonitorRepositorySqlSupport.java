@@ -108,6 +108,12 @@ abstract class MonitorRepositorySqlSupport {
     protected void ensureOperatorColumn(String table) {
     }
 
+    protected void dropColumnIfExists(String table, String column) {
+        if (tableExists(table) && columnExists(table, column)) {
+            repository.update("ALTER TABLE " + quotedIdentifier(table) + " DROP COLUMN " + quotedIdentifier(column));
+        }
+    }
+
     protected static String quotedIdentifier(String identifier) {
         return "`" + identifier.replace("`", "``") + "`";
     }

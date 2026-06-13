@@ -247,6 +247,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
     @Override
     public void ensureMonitorSchema() {
+        dropColumnIfExists("task", "operator");
         repository.update("""
                 CREATE TABLE IF NOT EXISTS publisher (
                     task_id VARCHAR(64) PRIMARY KEY,

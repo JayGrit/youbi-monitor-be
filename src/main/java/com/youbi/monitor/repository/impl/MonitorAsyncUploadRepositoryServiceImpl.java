@@ -21,6 +21,7 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
 
     @Override
     public void ensureSchema() {
+        dropVideoUrlColumnIfExists();
     }
 
     @Override
@@ -32,20 +33,18 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
     }
 
     @Override
-    public void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey, String videoUrl) {
+    public void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey) {
         repository.update(
                 """
                 INSERT INTO monitor_upload_task (
-                    upload_task_id, platform, upstream_task_id, account_key, status,
-                    video_url, started_at
+                    upload_task_id, platform, upstream_task_id, account_key, status, started_at
                 )
-                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', ?, NOW())
+                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', NOW())
                 """,
                 uploadTaskId,
                 platform,
                 upstreamTaskId,
-                accountKey,
-                videoUrl
+                accountKey
         );
     }
 
@@ -62,7 +61,6 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
                         rs.getString("result_json"),
                         rs.getString("error_code"),
                         rs.getString("error_message"),
-                        rs.getString("video_url"),
                         toLocalDateTime(rs.getTimestamp("started_at")),
                         toLocalDateTime(rs.getTimestamp("completed_at"))
                 ),
@@ -120,5 +118,21 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
 
     private LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toLocalDateTime();
+    }
+
+    private void dropVideoUrlColumnIfExists() {
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'monitor_upload_task'
+                  AND COLUMN_NAME = 'video_url'
+                """,
+                Integer.class
+        );
+        if (count != null && count > 0) {
+            repository.update("ALTER TABLE monitor_upload_task DROP COLUMN video_url");
+        }
     }
 }
