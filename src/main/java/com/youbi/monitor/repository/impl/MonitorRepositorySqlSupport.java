@@ -545,12 +545,7 @@ abstract class MonitorRepositorySqlSupport {
     }
 
     protected record UploadBackfillInsertRow(
-            String taskId,
-            String title,
-            String finalVideoUrl,
-            String coverUrl,
-            String description,
-            String tags
+            String taskId
     ) {
     }
 

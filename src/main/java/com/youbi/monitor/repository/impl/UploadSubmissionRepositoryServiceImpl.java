@@ -191,12 +191,28 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         if (!tableExists(accountTable)) {
             throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
         }
+        String candidateTitleSql = "COALESCE("
+                + nullableTextColumnSql("yd_video_info", "video_info", "upload_title")
+                + ", "
+                + nullableTextColumnSql("yd_video_info", "video_info", "title")
+                + ", "
+                + nullableTextColumnSql("yd_task", "task", "title")
+                + ", task.id)";
+        String candidateCoverSql = "COALESCE("
+                + nullableTextColumnSql("yd_video_info", "video_info", "final_cover_url")
+                + ", "
+                + nullableTextColumnSql("yd_video_info", "video_info", "clean_cover_url")
+                + ", "
+                + nullableTextColumnSql("yd_video_info", "video_info", "source_cover_url")
+                + ", "
+                + nullableTextColumnSql("yd_video_info", "video_info", "source_thumbnail_url")
+                + ", NULL)";
 
         List<MonitorService.UploadBackfillCandidate> rows = repository.query("""
                 SELECT
                   task.id task_id,
-                  COALESCE(NULLIF(target.title, ''), NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), task.id) title,
-                  COALESCE(NULLIF(target.cover_url, ''), NULLIF(uploader.upload_cover_url, ''), NULLIF(video_info.source_thumbnail_url, '')) cover_url,
+                  %s title,
+                  %s cover_url,
                   %s final_video_ref,
                   COALESCE(uploader.completed_at, task.completed_at, task.created_at) completed_at,
                   GROUP_CONCAT(DISTINCT sent.platform ORDER BY sent.platform SEPARATOR ',') uploaded_platforms,
@@ -228,7 +244,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                   account_available
                 ORDER BY completed_at DESC
                 LIMIT 500
-                """.formatted(finalVideoRefSql(), successfulUploadUnion(normalized), quotedIdentifier(table), quotedIdentifier(accountTable), UNIFIED_UPLOADER_ACCOUNT_TABLE),
+                """.formatted(candidateTitleSql, candidateCoverSql, finalVideoRefSql(), successfulUploadUnion(normalized), quotedIdentifier(table), quotedIdentifier(accountTable), UNIFIED_UPLOADER_ACCOUNT_TABLE),
                 (rs, rowNum) -> {
                     boolean accountExists = rs.getBoolean("account_exists");
                     boolean accountEnabled = rs.getBoolean("account_enabled");
@@ -305,12 +321,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
 
         List<UploadBackfillInsertRow> rows = repository.query("""
                 SELECT
-                  task.id task_id,
-                  COALESCE(NULLIF(uploader.upload_title, ''), NULLIF(task.title, ''), task.id) title,
-                  %s final_video_ref,
-                  COALESCE(NULLIF(uploader.upload_cover_url, ''), NULLIF(video_info.source_thumbnail_url, '')) cover_url,
-                  uploader.upload_desc,
-                  uploader.upload_tag
+                  task.id task_id
                 FROM yd_task task
                 JOIN yd_video_info video_info ON video_info.task_id = task.id
                 JOIN yd_uploader uploader ON uploader.task_id = task.id
@@ -329,14 +340,8 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                   AND COALESCE(NULLIF(%s, ''), '') <> ''
                   AND target.id IS NULL
                 GROUP BY
-                  task.id,
-                  title,
-                  final_video_ref,
-                  cover_url,
-                  uploader.upload_desc,
-                  uploader.upload_tag
+                  task.id
                 """.formatted(
-                        finalVideoRefSql(),
                         quotedIdentifier(accountTable),
                         UNIFIED_UPLOADER_ACCOUNT_TABLE,
                         successfulUploadUnion(normalized),
@@ -344,14 +349,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                         taskPlaceholders,
                         finalVideoRefSql()
                 ),
-                (rs, rowNum) -> new UploadBackfillInsertRow(
-                        rs.getString("task_id"),
-                        rs.getString("title"),
-                        rs.getString("final_video_ref"),
-                        rs.getString("cover_url"),
-                        rs.getString("upload_desc"),
-                        rs.getString("upload_tag")
-                ),
+                (rs, rowNum) -> new UploadBackfillInsertRow(rs.getString("task_id")),
                 queryArgs
         );
         if (rows.isEmpty()) {
@@ -363,17 +361,12 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         for (UploadBackfillInsertRow row : rows) {
             int inserted = repository.update("""
                     INSERT INTO %s (
-                        task_id, account_key, status, title, video_url, cover_url, description, tags
+                        task_id, account_key, status
                     )
-                    VALUES (?, ?, 'ready', ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 'ready')
                     """.formatted(quotedIdentifier(table)),
                     row.taskId(),
-                    normalizedAccountKey,
-                    row.title(),
-                    row.finalVideoUrl(),
-                    row.coverUrl(),
-                    row.description(),
-                    row.tags()
+                    normalizedAccountKey
             );
             registered += inserted;
             if (inserted > 0) {
