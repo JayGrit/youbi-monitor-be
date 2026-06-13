@@ -216,9 +216,14 @@ def load_accounts(args: argparse.Namespace) -> list[AccountRow]:
         cursor = connection.cursor(dictionary=True)
         cursor.execute(
             """
-            SELECT account_key, mid, uname, playwright_mid, playwright_uname
-            FROM uploader_account_bilibili
-            ORDER BY account_key
+            SELECT account.account_key, account.mid, account.uname, account.playwright_mid, account.playwright_uname
+            FROM uploader_account_bilibili account
+            LEFT JOIN uploader_account unified
+              ON unified.platform = 'bilibili'
+             AND unified.account_key = account.account_key
+            ORDER BY
+              CASE WHEN unified.is_available = 1 THEN 1 ELSE 0 END,
+              account.account_key
             """
         )
         return [

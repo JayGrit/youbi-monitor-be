@@ -91,7 +91,12 @@ def load_accounts(args: argparse.Namespace) -> list[Account]:
             """
             SELECT account.account_key, account.user_id, account.nickname
             FROM uploader_account_kuaishou account
-            ORDER BY account.account_key
+            LEFT JOIN uploader_account unified
+              ON unified.platform = 'kuaishou'
+             AND unified.account_key = account.account_key
+            ORDER BY
+              CASE WHEN unified.is_available = 1 THEN 1 ELSE 0 END,
+              account.account_key
             """
         )
         accounts = []
