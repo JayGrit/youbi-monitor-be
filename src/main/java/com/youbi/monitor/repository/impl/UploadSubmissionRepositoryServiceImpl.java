@@ -298,9 +298,8 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         Object[] queryArgs = new Object[3 + normalizedTaskIds.size()];
         queryArgs[0] = normalizedAccountKey;
         queryArgs[1] = normalized;
-        queryArgs[2] = normalizedAccountKey;
         for (int i = 0; i < normalizedTaskIds.size(); i++) {
-            queryArgs[i + 3] = normalizedTaskIds.get(i);
+            queryArgs[i + 2] = normalizedTaskIds.get(i);
         }
         queryArgs[queryArgs.length - 1] = normalizedType;
 
