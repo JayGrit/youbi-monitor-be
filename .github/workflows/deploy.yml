@@ -51,14 +51,42 @@ jobs:
               --driver docker-container
           fi
           docker buildx inspect --bootstrap monitor-be-builder
-          docker buildx build \
-            --builder monitor-be-builder \
-            --load \
-            --label youbi.service=monitor-be \
-            --label "youbi.revision=${RELEASE_TAG}" \
-            -t "${RELEASE_IMAGE}" \
-            -t monitor-be:latest \
-            .
+          DOCKER_HUB_MIRRORS=(
+            docker.m.daocloud.io
+            docker.1ms.run
+            docker.1panel.live
+            ""
+          )
+          BUILD_OK=false
+          for DOCKER_HUB_MIRROR in "${DOCKER_HUB_MIRRORS[@]}"; do
+            if [ -n "${DOCKER_HUB_MIRROR}" ]; then
+              MAVEN_IMAGE="${DOCKER_HUB_MIRROR}/library/maven:3.9-eclipse-temurin-17"
+              RUNTIME_IMAGE="${DOCKER_HUB_MIRROR}/library/eclipse-temurin:17-jre"
+              echo "Building monitor-be with Docker Hub mirror: ${DOCKER_HUB_MIRROR}"
+            else
+              MAVEN_IMAGE="maven:3.9-eclipse-temurin-17"
+              RUNTIME_IMAGE="eclipse-temurin:17-jre"
+              echo "Building monitor-be with Docker Hub directly."
+            fi
+
+            if docker buildx build \
+              --builder monitor-be-builder \
+              --load \
+              --label youbi.service=monitor-be \
+              --label "youbi.revision=${RELEASE_TAG}" \
+              --build-arg "MAVEN_IMAGE=${MAVEN_IMAGE}" \
+              --build-arg "RUNTIME_IMAGE=${RUNTIME_IMAGE}" \
+              -t "${RELEASE_IMAGE}" \
+              -t monitor-be:latest \
+              .; then
+              BUILD_OK=true
+              break
+            fi
+          done
+          if [ "${BUILD_OK}" != "true" ]; then
+            echo "Failed to build monitor-be with all configured image sources."
+            exit 1
+          fi
 
           DOUYIN_CDP_URL=""
           if curl -fsS http://127.0.0.1:9333/json/version >/tmp/douyin-cdp-version.json 2>/dev/null; then

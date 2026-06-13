@@ -1,10 +1,13 @@
-FROM maven:3.9-eclipse-temurin-17 AS builder
+ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-17
+ARG RUNTIME_IMAGE=eclipse-temurin:17-jre
+
+FROM ${MAVEN_IMAGE} AS builder
 WORKDIR /app
 COPY pom.xml .
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 mvn package -DskipTests -q
 
-FROM eclipse-temurin:17-jre
+FROM ${RUNTIME_IMAGE}
 WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
