@@ -44,7 +44,16 @@ jobs:
           printf 'nameserver 183.60.82.98\nnameserver 183.60.83.19\nnameserver 8.8.8.8\n' > /etc/resolv.conf
           OLD_MONITOR_BE_IMAGE="$(docker inspect -f '{{.Image}}' monitor-be 2>/dev/null || true)"
           RELEASE_IMAGE="monitor-be:${RELEASE_TAG}"
-          DOCKER_BUILDKIT=1 docker build \
+
+          if ! docker buildx inspect monitor-be-builder >/dev/null 2>&1; then
+            docker buildx create \
+              --name monitor-be-builder \
+              --driver docker-container
+          fi
+          docker buildx inspect --bootstrap monitor-be-builder
+          docker buildx build \
+            --builder monitor-be-builder \
+            --load \
             --label youbi.service=monitor-be \
             --label "youbi.revision=${RELEASE_TAG}" \
             -t "${RELEASE_IMAGE}" \
@@ -103,6 +112,7 @@ jobs:
           fi
           docker image prune -f --filter "until=24h"
           docker buildx prune -af \
+            --builder default \
             --max-used-space 5gb \
             --min-free-space 10gb \
             --reserved-space 2gb
