@@ -9,7 +9,7 @@ public interface IMonitorAsyncUploadRepositoryService {
 
     long countActiveTasks();
 
-    void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey);
+    void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey, int timeoutSeconds);
 
     Optional<MonitorUploadTaskRow> findByUploadTaskId(String uploadTaskId);
 
@@ -19,5 +19,5 @@ public interface IMonitorAsyncUploadRepositoryService {
 
     boolean markFailed(String uploadTaskId, String resultJson, String errorCode, String errorMessage);
 
-    void failStaleRunningTasks(String errorMessage, int timeoutSeconds);
+    void failStaleRunningTasks();
 }

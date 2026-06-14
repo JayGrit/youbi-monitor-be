@@ -21,6 +21,7 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
 
     @Override
     public void ensureSchema() {
+        addTimeoutSecondsColumnIfMissing();
         dropVideoUrlColumnIfExists();
     }
 
@@ -33,18 +34,19 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
     }
 
     @Override
-    public void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey) {
+    public void insertAcceptedTask(String uploadTaskId, String platform, String upstreamTaskId, String accountKey, int timeoutSeconds) {
         repository.update(
                 """
                 INSERT INTO monitor_upload_task (
-                    upload_task_id, platform, upstream_task_id, account_key, status, started_at
+                    upload_task_id, platform, upstream_task_id, account_key, status, started_at, timeout_seconds
                 )
-                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', NOW())
+                VALUES (?, ?, NULLIF(?, ''), ?, 'accepted', NOW(), ?)
                 """,
                 uploadTaskId,
                 platform,
                 upstreamTaskId,
-                accountKey
+                accountKey,
+                timeoutSeconds
         );
     }
 
@@ -113,19 +115,17 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
     }
 
     @Override
-    public void failStaleRunningTasks(String errorMessage, int timeoutSeconds) {
+    public void failStaleRunningTasks() {
         repository.update("""
                 UPDATE monitor_upload_task
                 SET status = 'failed',
                     error_code = 'MONITOR_UPLOAD_TIMEOUT',
-                    error_message = ?,
+                    error_message = CONCAT('monitor upload task timed out after ', timeout_seconds, 's'),
                     completed_at = NOW()
                 WHERE status IN ('accepted', 'running')
                   AND started_at IS NOT NULL
-                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) > ?
-                """,
-                errorMessage,
-                timeoutSeconds);
+                  AND TIMESTAMPDIFF(SECOND, started_at, NOW()) >= timeout_seconds
+                """);
     }
 
     private LocalDateTime toLocalDateTime(java.sql.Timestamp timestamp) {
@@ -145,6 +145,24 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
         );
         if (count != null && count > 0) {
             repository.update("ALTER TABLE monitor_upload_task DROP COLUMN video_url");
+        }
+    }
+
+    private void addTimeoutSecondsColumnIfMissing() {
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'monitor_upload_task'
+                  AND COLUMN_NAME = 'timeout_seconds'
+                """,
+                Integer.class
+        );
+        if (count == null || count == 0) {
+            repository.update(
+                    "ALTER TABLE monitor_upload_task ADD COLUMN timeout_seconds INT NOT NULL DEFAULT 480 AFTER status"
+            );
         }
     }
 }

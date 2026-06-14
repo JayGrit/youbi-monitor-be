@@ -17,7 +17,8 @@ management:
         include: health
 
 youbi:
-  upload-task-timeout-seconds: ${YDBI_UPLOAD_TASK_TIMEOUT_SECONDS:1800}
+  upload-task-timeout-seconds: ${YDBI_UPLOAD_TASK_TIMEOUT_SECONDS:480}
+  alidrive-upload-task-timeout-seconds: ${YDBI_ALIDRIVE_UPLOAD_TASK_TIMEOUT_SECONDS:900}
   playwright:
     default-locale: ${YDBI_PLAYWRIGHT_DEFAULT_LOCALE:zh-CN}
     default-timezone: ${YDBI_PLAYWRIGHT_DEFAULT_TIMEZONE:Asia/Shanghai}

@@ -42,7 +42,8 @@ public class MonitorAsyncUploadService {
     private final JinritoutiaoUploadService jinritoutiaoUploadService;
     private final IMonitorAsyncUploadRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
-    private final int uploadTaskTimeoutSeconds;
+    private final int defaultUploadTaskTimeoutSeconds;
+    private final int alidriveUploadTaskTimeoutSeconds;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "monitor-upload-task");
         thread.setDaemon(true);
@@ -59,7 +60,8 @@ public class MonitorAsyncUploadService {
             JinritoutiaoUploadService jinritoutiaoUploadService,
             IMonitorAsyncUploadRepositoryService repositoryService,
             ObjectMapper objectMapper,
-            @Value("${youbi.upload-task-timeout-seconds:1800}") int uploadTaskTimeoutSeconds
+            @Value("${youbi.upload-task-timeout-seconds:480}") int defaultUploadTaskTimeoutSeconds,
+            @Value("${youbi.alidrive-upload-task-timeout-seconds:900}") int alidriveUploadTaskTimeoutSeconds
     ) {
         this.bilibiliUploadService = bilibiliUploadService;
         this.bilibiliPlaywrightUploadService = bilibiliPlaywrightUploadService;
@@ -70,7 +72,8 @@ public class MonitorAsyncUploadService {
         this.jinritoutiaoUploadService = jinritoutiaoUploadService;
         this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
-        this.uploadTaskTimeoutSeconds = Math.max(60, uploadTaskTimeoutSeconds);
+        this.defaultUploadTaskTimeoutSeconds = Math.max(60, defaultUploadTaskTimeoutSeconds);
+        this.alidriveUploadTaskTimeoutSeconds = Math.max(this.defaultUploadTaskTimeoutSeconds, alidriveUploadTaskTimeoutSeconds);
     }
 
     @PostConstruct
@@ -94,7 +97,8 @@ public class MonitorAsyncUploadService {
                 uploadTaskId,
                 normalizedPlatform,
                 taskId(request),
-                defaultText(accountKey(request), "default")
+                defaultText(accountKey(request), "default"),
+                uploadTimeoutSeconds(request)
         );
         executor.submit(() -> execute(uploadTaskId, normalizedPlatform, request));
         return status(uploadTaskId);
@@ -218,10 +222,49 @@ public class MonitorAsyncUploadService {
     }
 
     private void failStaleRunningTasks() {
-        repositoryService.failStaleRunningTasks(
-                "monitor upload task timed out after " + uploadTaskTimeoutSeconds + "s",
-                uploadTaskTimeoutSeconds
-        );
+        repositoryService.failStaleRunningTasks();
+    }
+
+    private int uploadTimeoutSeconds(Object request) {
+        return usesAliDrive(request) ? alidriveUploadTaskTimeoutSeconds : defaultUploadTaskTimeoutSeconds;
+    }
+
+    private boolean usesAliDrive(Object request) {
+        String videoLocation = "";
+        String alidriveFileId = "";
+        String alidriveRemotePath = "";
+        if (request instanceof BilibiliUploadRequest value) {
+            videoLocation = value.videoLocation();
+            alidriveFileId = value.alidriveFileId();
+            alidriveRemotePath = value.alidriveRemotePath();
+        } else if (request instanceof XiaohongshuUploadRequest value) {
+            videoLocation = value.videoLocation();
+            alidriveFileId = value.alidriveFileId();
+            alidriveRemotePath = value.alidriveRemotePath();
+        } else if (request instanceof DouyinUploadRequest value) {
+            videoLocation = value.videoLocation();
+            alidriveFileId = value.alidriveFileId();
+            alidriveRemotePath = value.alidriveRemotePath();
+        } else if (request instanceof ShipinhaoUploadRequest value) {
+            videoLocation = value.videoLocation();
+            alidriveFileId = value.alidriveFileId();
+            alidriveRemotePath = value.alidriveRemotePath();
+        } else if (request instanceof KuaishouUploadRequest value) {
+            videoLocation = value.videoLocation();
+            alidriveFileId = value.alidriveFileId();
+            alidriveRemotePath = value.alidriveRemotePath();
+        } else if (request instanceof JinritoutiaoUploadRequest value) {
+            videoLocation = value.videoLocation();
+            alidriveFileId = value.alidriveFileId();
+            alidriveRemotePath = value.alidriveRemotePath();
+        }
+        String location = text(videoLocation).toLowerCase();
+        return location.equals("adrive")
+                || location.equals("alidrive")
+                || location.equals("aliyun")
+                || location.equals("aliyundrive")
+                || !text(alidriveFileId).isBlank()
+                || !text(alidriveRemotePath).isBlank();
     }
 
     private MonitorUploadTaskResponse response(MonitorUploadTaskRow row) {
