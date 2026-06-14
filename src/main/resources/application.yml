@@ -17,6 +17,7 @@ management:
         include: health
 
 youbi:
+  upload-task-timeout-seconds: ${YDBI_UPLOAD_TASK_TIMEOUT_SECONDS:1800}
   playwright:
     default-locale: ${YDBI_PLAYWRIGHT_DEFAULT_LOCALE:zh-CN}
     default-timezone: ${YDBI_PLAYWRIGHT_DEFAULT_TIMEZONE:Asia/Shanghai}

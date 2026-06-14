@@ -81,7 +81,19 @@ public class MonitorAsyncUploadRepositoryServiceImpl implements IMonitorAsyncUpl
     @Override
     public boolean markSuccess(String uploadTaskId, String resultJson) {
         int updated = repository.update(
-                "UPDATE " + TABLE + " SET status = 'success', result_json = ?, error_code = NULL, error_message = NULL, completed_at = NOW() WHERE upload_task_id = ? AND status = 'running'",
+                """
+                UPDATE monitor_upload_task
+                SET status = 'success',
+                    result_json = ?,
+                    error_code = NULL,
+                    error_message = NULL,
+                    completed_at = NOW()
+                WHERE upload_task_id = ?
+                  AND (
+                      status = 'running'
+                      OR (status = 'failed' AND error_code = 'MONITOR_UPLOAD_TIMEOUT')
+                  )
+                """,
                 resultJson,
                 uploadTaskId
         );

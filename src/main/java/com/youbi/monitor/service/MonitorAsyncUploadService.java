@@ -15,6 +15,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import com.youbi.monitor.repository.IMonitorAsyncUploadRepositoryService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -29,7 +30,6 @@ import java.util.concurrent.Executors;
 public class MonitorAsyncUploadService {
     private static final Logger log = LoggerFactory.getLogger(MonitorAsyncUploadService.class);
     private static final String TABLE = "monitor_upload_task";
-    private static final int UPLOAD_TASK_TIMEOUT_SECONDS = 8 * 60;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -42,6 +42,7 @@ public class MonitorAsyncUploadService {
     private final JinritoutiaoUploadService jinritoutiaoUploadService;
     private final IMonitorAsyncUploadRepositoryService repositoryService;
     private final ObjectMapper objectMapper;
+    private final int uploadTaskTimeoutSeconds;
     private final ExecutorService executor = Executors.newCachedThreadPool(runnable -> {
         Thread thread = new Thread(runnable, "monitor-upload-task");
         thread.setDaemon(true);
@@ -57,7 +58,8 @@ public class MonitorAsyncUploadService {
             KuaishouUploadService kuaishouUploadService,
             JinritoutiaoUploadService jinritoutiaoUploadService,
             IMonitorAsyncUploadRepositoryService repositoryService,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            @Value("${youbi.upload-task-timeout-seconds:1800}") int uploadTaskTimeoutSeconds
     ) {
         this.bilibiliUploadService = bilibiliUploadService;
         this.bilibiliPlaywrightUploadService = bilibiliPlaywrightUploadService;
@@ -68,6 +70,7 @@ public class MonitorAsyncUploadService {
         this.jinritoutiaoUploadService = jinritoutiaoUploadService;
         this.repositoryService = repositoryService;
         this.objectMapper = objectMapper;
+        this.uploadTaskTimeoutSeconds = Math.max(60, uploadTaskTimeoutSeconds);
     }
 
     @PostConstruct
@@ -215,7 +218,10 @@ public class MonitorAsyncUploadService {
     }
 
     private void failStaleRunningTasks() {
-        repositoryService.failStaleRunningTasks("monitor upload task timed out after " + UPLOAD_TASK_TIMEOUT_SECONDS + "s", UPLOAD_TASK_TIMEOUT_SECONDS);
+        repositoryService.failStaleRunningTasks(
+                "monitor upload task timed out after " + uploadTaskTimeoutSeconds + "s",
+                uploadTaskTimeoutSeconds
+        );
     }
 
     private MonitorUploadTaskResponse response(MonitorUploadTaskRow row) {

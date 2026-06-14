@@ -15,6 +15,8 @@ import org.bouncycastle.crypto.signers.ECDSASigner;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.bouncycastle.math.ec.FixedPointCombMultiplier;
 import org.bouncycastle.util.encoders.Hex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -38,9 +40,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class AliDriveService {
+    private static final Logger log = LoggerFactory.getLogger(AliDriveService.class);
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
     private static final String API = "https://api.aliyundrive.com/";
@@ -48,6 +52,7 @@ public class AliDriveService {
     private static final String USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36";
     private static final String APP_ID = "5dde4e1bdf9e4966b387ba58f4b3fdc3";
     private static final int CHUNK_SIZE = 10 * 1024 * 1024;
+    private static final int DOWNLOAD_URL_ATTEMPTS = 3;
     private final ObjectMapper objectMapper;
     private final IAliDriveRepositoryService repositoryService;
     private final HttpClient httpClient;
@@ -188,6 +193,14 @@ public class AliDriveService {
         Path destination = resolveDownloadDestination(request, meta.path("name").asText(fileId));
         Files.createDirectories(destination.getParent());
 
+        long startedAt = System.currentTimeMillis();
+        URI downloadUri = URI.create(downloadUrl);
+        log.info(
+                "AliDrive direct download start fileId={} host={} destination={}",
+                fileId,
+                downloadUri.getHost(),
+                destination
+        );
         HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(downloadUrl))
                 .timeout(Duration.ofMinutes(30))
                 .header("User-Agent", USER_AGENT)
@@ -199,6 +212,13 @@ public class AliDriveService {
             Files.deleteIfExists(destination);
             throw new IOException("AliDrive download failed: HTTP " + response.statusCode());
         }
+        log.info(
+                "AliDrive direct download done fileId={} host={} bytes={} elapsedMs={}",
+                fileId,
+                downloadUri.getHost(),
+                Files.size(destination),
+                System.currentTimeMillis() - startedAt
+        );
         return new AliDriveTransferResult(true, "downloaded", fileId, meta.path("name").asText(), meta.path("path").asText(text(request.remotePath())), destination.toString(), Files.size(destination), safeRaw(meta));
     }
 
@@ -284,11 +304,28 @@ public class AliDriveService {
     }
 
     private String downloadUrl(String fileId) throws IOException, InterruptedException {
-        JsonNode root = postJson("v2/file/get_download_url", Map.of(
-                "drive_id", defaultDriveId(),
-                "file_id", fileId
-        ), true);
-        return required(firstText(root.path("url").asText(""), root.path("download_url").asText("")), "download_url");
+        JsonNode lastResponse = null;
+        for (int attempt = 1; attempt <= DOWNLOAD_URL_ATTEMPTS; attempt++) {
+            lastResponse = postJson("v2/file/get_download_url", Map.of(
+                    "drive_id", defaultDriveId(),
+                    "file_id", fileId
+            ), true);
+            String url = firstText(lastResponse.path("url").asText(""), lastResponse.path("download_url").asText(""));
+            if (!url.isBlank()) {
+                return url;
+            }
+            if (attempt < DOWNLOAD_URL_ATTEMPTS) {
+                log.warn(
+                        "AliDrive download URL missing fileId={} attempt={}/{} responseFieldCount={}",
+                        fileId,
+                        attempt,
+                        DOWNLOAD_URL_ATTEMPTS,
+                        lastResponse.size()
+                );
+                TimeUnit.SECONDS.sleep(attempt);
+            }
+        }
+        throw new IOException("Missing field: download_url after " + DOWNLOAD_URL_ATTEMPTS + " attempts; response=" + safeRaw(lastResponse));
     }
 
     private void putUploadSlice(String uploadUrl, byte[] bytes) throws IOException, InterruptedException {
