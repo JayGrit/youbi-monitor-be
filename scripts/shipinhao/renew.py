@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -139,6 +140,27 @@ def login_ready(state: dict[str, Any], page, user_id: str | None, nickname: str 
     return bool(user_id or nickname or has_login_cookie(state) or page_login_hint(page))
 
 
+class CloseTimeout(Exception):
+    pass
+
+
+def close_context(context, timeout_seconds: int = 10) -> bool:
+    def timeout_handler(signum, frame):
+        raise CloseTimeout()
+
+    previous_handler = signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(timeout_seconds)
+    try:
+        context.close()
+        return True
+    except CloseTimeout:
+        print(f"关闭 Chrome 超过 {timeout_seconds} 秒，跳过本次清理并继续下一个账号。", flush=True)
+        return False
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
 def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
     PROFILE_ROOT.mkdir(parents=True, exist_ok=True)
     profile_dir = Path(tempfile.mkdtemp(prefix=f"{account.account_key}-", dir=str(PROFILE_ROOT)))
@@ -194,8 +216,12 @@ def wait_for_login(args: argparse.Namespace, account: Account) -> bool:
             print(f"等待超时：account_key={account.account_key}", flush=True)
             return False
         finally:
-            context.close()
-            shutil.rmtree(profile_dir, ignore_errors=True)
+            try:
+                page.close()
+            except Exception:
+                pass
+            if close_context(context):
+                shutil.rmtree(profile_dir, ignore_errors=True)
 
 
 def main() -> int:
