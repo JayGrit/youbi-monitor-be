@@ -5,6 +5,7 @@ public record UploaderPhoneAccountOption(
         String accountKey,
         String displayName,
         String remark,
-        String avatarUrl
+        String avatarUrl,
+        Boolean isAvailable
 ) {
 }

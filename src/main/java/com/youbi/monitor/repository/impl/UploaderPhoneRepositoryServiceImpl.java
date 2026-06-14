@@ -165,22 +165,31 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
         ensureAccountColumn(platform.table(), "display_name", "VARCHAR(128) NULL");
         ensureAccountColumn(platform.table(), "avatar_url", "VARCHAR(1024) NULL");
-        String nameExpression = "COALESCE(NULLIF(nickname, ''), account_key)";
+        String nameExpression = "COALESCE(NULLIF(account.nickname, ''), account.account_key)";
         if ("bilibili".equals(platform.key())) {
-            nameExpression = "COALESCE(NULLIF(uname, ''), account_key)";
+            nameExpression = "COALESCE(NULLIF(account.uname, ''), account.account_key)";
         }
         return repository.query(
                 ("""
-                SELECT id, account_key, %s AS display_name, display_name AS remark, avatar_url
-                FROM %s
-                ORDER BY account_key
-                """).formatted(nameExpression, platform.table()),
+                SELECT account.id,
+                       account.account_key,
+                       %s AS resolved_display_name,
+                       account.display_name AS remark,
+                       account.avatar_url,
+                       state.is_available
+                FROM %s account
+                LEFT JOIN uploader_account state
+                  ON state.platform = '%s'
+                 AND state.account_key = account.account_key
+                ORDER BY account.account_key
+                """).formatted(nameExpression, platform.table(), platform.key()),
                 (rs, rowNum) -> new UploaderPhoneAccountOption(
                         rs.getLong("id"),
                         rs.getString("account_key"),
-                        rs.getString("display_name"),
+                        rs.getString("resolved_display_name"),
                         rs.getString("remark"),
-                        rs.getString("avatar_url")
+                        rs.getString("avatar_url"),
+                        rs.getObject("is_available", Boolean.class)
                 )
         );
     }
