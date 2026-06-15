@@ -30,6 +30,9 @@ import java.util.concurrent.Executors;
 public class MonitorAsyncUploadService {
     private static final Logger log = LoggerFactory.getLogger(MonitorAsyncUploadService.class);
     private static final String TABLE = "monitor_upload_task";
+    private static final int MAX_BROWSER_SESSION_UPLOAD_ATTEMPTS = 3;
+    private static final long BROWSER_SESSION_RETRY_WINDOW_MS = 30_000L;
+    private static final long BROWSER_SESSION_RETRY_DELAY_MS = 3_000L;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -121,13 +124,15 @@ public class MonitorAsyncUploadService {
             return;
         }
         try {
-            Object result = upload(platform, request);
+            UploadAttemptResult attemptResult = uploadWithBrowserSessionRetry(uploadTaskId, platform, request, startedAt);
+            Object result = attemptResult.result();
             Map<String, Object> resultMap = objectMapper.convertValue(result, MAP_TYPE);
             if (!Boolean.TRUE.equals(resultMap.get("success"))) {
                 throw new IllegalStateException(stringValue(resultMap.get("message")));
             }
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("durationMs", System.currentTimeMillis() - startedAt);
+            payload.put("attempts", attemptResult.attempts());
             payload.put("result", resultMap);
             if (!repositoryService.markSuccess(uploadTaskId, toJson(payload))) {
                 log.warn("Async upload finished after task status changed uploadTaskId={} platform={} taskId={}",
@@ -151,6 +156,50 @@ public class MonitorAsyncUploadService {
             }
             log.warn("Async upload failed uploadTaskId={} platform={} taskId={} accountKey={} message={}",
                     uploadTaskId, platform, taskId(request), accountKey(request), message, exception);
+        }
+    }
+
+    private UploadAttemptResult uploadWithBrowserSessionRetry(String uploadTaskId, String platform, Object request, long startedAt) throws Exception {
+        int attempt = 1;
+        while (true) {
+            try {
+                return new UploadAttemptResult(upload(platform, request), attempt);
+            } catch (Exception exception) {
+                if (!shouldRetryBrowserSessionLoss(exception, startedAt, attempt)) {
+                    throw exception;
+                }
+                log.warn(
+                        "Async upload browser session lost, retrying uploadTaskId={} platform={} taskId={} accountKey={} attempt={} nextAttempt={} message={}",
+                        uploadTaskId,
+                        platform,
+                        taskId(request),
+                        accountKey(request),
+                        attempt,
+                        attempt + 1,
+                        firstText(exception.getMessage(), exception.getClass().getSimpleName())
+                );
+                sleepBeforeBrowserSessionRetry();
+                attempt += 1;
+            }
+        }
+    }
+
+    private boolean shouldRetryBrowserSessionLoss(Exception exception, long startedAt, int attempt) {
+        if (attempt >= MAX_BROWSER_SESSION_UPLOAD_ATTEMPTS) {
+            return false;
+        }
+        if (System.currentTimeMillis() - startedAt > BROWSER_SESSION_RETRY_WINDOW_MS) {
+            return false;
+        }
+        return isBrowserSessionLost(exception);
+    }
+
+    private void sleepBeforeBrowserSessionRetry() {
+        try {
+            Thread.sleep(BROWSER_SESSION_RETRY_DELAY_MS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted before retrying browser session upload", interrupted);
         }
     }
 
@@ -299,6 +348,9 @@ public class MonitorAsyncUploadService {
         if (playwrightException != null) {
             return playwrightException.errorCode().code();
         }
+        if (isBrowserSessionLost(exception) || isBrowserSessionLost(message)) {
+            return PlaywrightUploadErrorCode.BROWSER_SESSION_LOST.code();
+        }
         String text = message == null ? "" : message.toLowerCase();
         if (text.contains("not logged in") || text.contains("login") || text.contains("登录") || text.contains("未登录")) {
             return "LOGIN_REQUIRED";
@@ -321,6 +373,28 @@ public class MonitorAsyncUploadService {
             current = current.getCause();
         }
         return null;
+    }
+
+    private boolean isBrowserSessionLost(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (isBrowserSessionLost(current.getMessage())) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isBrowserSessionLost(String message) {
+        String text = message == null ? "" : message.toLowerCase();
+        return text.contains("object doesn't exist:")
+                || text.contains("target page, context or browser has been closed")
+                || text.contains("browser has been closed")
+                || text.contains("browser closed")
+                || text.contains("connection closed")
+                || text.contains("playwright connection closed")
+                || text.contains("execution context was destroyed");
     }
 
     private Map<String, Object> uploadResult(Map<String, Object> result) {
@@ -349,6 +423,9 @@ public class MonitorAsyncUploadService {
             return value;
         }
         return startedAt == null || completedAt == null ? null : Duration.between(startedAt, completedAt).toMillis();
+    }
+
+    private record UploadAttemptResult(Object result, int attempts) {
     }
 
     private Map<String, Object> parseJsonMap(String json) {
