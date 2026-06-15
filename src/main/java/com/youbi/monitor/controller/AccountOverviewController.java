@@ -4,12 +4,20 @@ import com.youbi.monitor.dto.AccountDownloaderMaxStagedCountUpdateRequest;
 import com.youbi.monitor.dto.AccountNextUploadAllowedAtUpdateRequest;
 import com.youbi.monitor.dto.AccountQuietTimeUpdateRequest;
 import com.youbi.monitor.dto.BackupperStatus;
+import com.youbi.monitor.dto.AccountCooldownUpdateRequest;
+import com.youbi.monitor.dto.AccountProfileUpdateRequest;
+import com.youbi.monitor.dto.SocialAccountKeyUpdateRequest;
+import com.youbi.monitor.service.AccountProfileService;
 import com.youbi.monitor.service.AccountOverviewService;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.Map;
@@ -17,9 +25,11 @@ import java.util.Map;
 @RestController
 public class AccountOverviewController {
     private final AccountOverviewService accountOverviewService;
+    private final AccountProfileService accountProfileService;
 
-    public AccountOverviewController(AccountOverviewService accountOverviewService) {
+    public AccountOverviewController(AccountOverviewService accountOverviewService, AccountProfileService accountProfileService) {
         this.accountOverviewService = accountOverviewService;
+        this.accountProfileService = accountProfileService;
     }
 
     @GetMapping("/api/accounts/overview")
@@ -35,6 +45,44 @@ public class AccountOverviewController {
     @GetMapping("/api/accounts/backupper-status")
     public BackupperStatus backupperStatus() {
         return accountOverviewService.latestBackupperStatus();
+    }
+
+    @GetMapping("/api/accounts/{platform}/{accountKey}")
+    public Map<String, Object> account(@PathVariable String platform, @PathVariable String accountKey) {
+        return accountOverviewService.account(platform, accountKey);
+    }
+
+    @PostMapping("/api/accounts/{platform}/{accountKey}/key")
+    public Map<String, Object> renameKey(@PathVariable String platform, @PathVariable String accountKey, @RequestBody SocialAccountKeyUpdateRequest request) {
+        return accountOverviewService.renameAccountKey(platform, accountKey, request.newAccountKey());
+    }
+
+    @PostMapping("/api/accounts/{platform}/{accountKey}/enabled")
+    public Map<String, Object> setEnabled(@PathVariable String platform, @PathVariable String accountKey, @RequestBody Map<String, Object> request) {
+        return accountOverviewService.updateEnabled(platform, accountKey, Boolean.TRUE.equals(request == null ? null : request.get("enabled")));
+    }
+
+    @PostMapping("/api/accounts/{platform}/{accountKey}/cooldown")
+    public Map<String, Object> setCooldown(@PathVariable String platform, @PathVariable String accountKey, @RequestBody(required = false) AccountCooldownUpdateRequest request) {
+        return accountOverviewService.updateCooldown(platform, accountKey, request == null ? null : request.minSeconds(), request == null ? null : request.maxSeconds());
+    }
+
+    @PostMapping("/api/accounts/{platform}/{accountKey}/profile")
+    public ResponseEntity<?> updateProfile(@PathVariable String platform, @PathVariable String accountKey, @RequestBody AccountProfileUpdateRequest request) {
+        try {
+            return ResponseEntity.ok(accountProfileService.updateProfile(platform, accountKey, request));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
+
+    @PostMapping(value = "/api/accounts/{platform}/{accountKey}/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadAvatar(@PathVariable String platform, @PathVariable String accountKey, @RequestParam("file") MultipartFile file) {
+        try {
+            return ResponseEntity.ok(accountProfileService.uploadAvatar(platform, accountKey, file));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
     }
 
     @PostMapping("/api/accounts/{platform}/{accountKey}/next-upload-allowed-at")

@@ -3,6 +3,7 @@ package com.youbi.monitor.service;
 import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.repository.MonitorRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -24,7 +25,13 @@ public class AccountOverviewService {
             "bilibili",
             "shipinhao",
             "kuaishou",
-            "jinritoutiao"
+            "jinritoutiao",
+            "x",
+            "youtube"
+    );
+    private static final Map<String, String> ACCOUNT_TABLES = Map.of(
+            "x", "uploader_account_x",
+            "youtube", "uploader_account_youtube"
     );
 
     private final MonitorRepository repository;
@@ -51,7 +58,7 @@ public class AccountOverviewService {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountSelectSql("") + """
-                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao'), ua.account_key
+                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube'), ua.account_key
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
         );
@@ -90,6 +97,53 @@ public class AccountOverviewService {
                 )
         );
         return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    public Map<String, Object> account(String platform, String accountKey) {
+        String normalizedPlatform = requirePlatform(platform);
+        String normalizedAccountKey = requireAccountKey(accountKey);
+        return findAccount(normalizedPlatform, normalizedAccountKey);
+    }
+
+    @Transactional
+    public Map<String, Object> renameAccountKey(String platform, String accountKey, String newAccountKey) {
+        String normalizedPlatform = requireGenericPlatform(platform);
+        String oldKey = requireAccountKey(accountKey);
+        String nextKey = requireAccountKey(newAccountKey);
+        if (oldKey.equals(nextKey)) {
+            return findAccount(normalizedPlatform, oldKey);
+        }
+        String table = ACCOUNT_TABLES.get(normalizedPlatform);
+        if (repository.update("UPDATE " + table + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?", nextKey, oldKey) != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        if (repository.update("UPDATE uploader_account SET account_key = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0", nextKey, normalizedPlatform, oldKey) != 1) {
+            throw new IllegalArgumentException("Uploader account not found");
+        }
+        return findAccount(normalizedPlatform, nextKey);
+    }
+
+    public Map<String, Object> updateEnabled(String platform, String accountKey, boolean enabled) {
+        return updateGenericState(platform, accountKey, "is_enabled", enabled);
+    }
+
+    public Map<String, Object> updateCooldown(String platform, String accountKey, Integer minSeconds, Integer maxSeconds) {
+        String normalizedPlatform = requireGenericPlatform(platform);
+        String normalizedAccountKey = requireAccountKey(accountKey);
+        int min = minSeconds == null ? 3600 : minSeconds;
+        int max = maxSeconds == null ? 7200 : maxSeconds;
+        if (min < 0 || max < min) {
+            throw new IllegalArgumentException("Invalid cooldown");
+        }
+        int updated = repository.update("""
+                UPDATE uploader_account
+                SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW()
+                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                """, min, max, normalizedPlatform, normalizedAccountKey);
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return findAccount(normalizedPlatform, normalizedAccountKey);
     }
 
     public Map<String, Object> updateNextUploadAllowedAt(String platform, String accountKey, LocalDateTime nextUploadAllowedAt) {
@@ -254,6 +308,8 @@ public class AccountOverviewService {
                          WHEN 'shipinhao' THEN s.user_id
                          WHEN 'kuaishou' THEN k.user_id
                          WHEN 'jinritoutiao' THEN j.user_id
+                         WHEN 'x' THEN tx.user_id
+                         WHEN 'youtube' THEN y.user_id
                          ELSE NULL
                        END AS user_id,
                        CASE ua.platform
@@ -262,6 +318,8 @@ public class AccountOverviewService {
                          WHEN 'shipinhao' THEN s.nickname
                          WHEN 'kuaishou' THEN k.nickname
                          WHEN 'jinritoutiao' THEN j.nickname
+                         WHEN 'x' THEN tx.nickname
+                         WHEN 'youtube' THEN y.nickname
                          ELSE NULL
                        END AS nickname,
                        CASE ua.platform
@@ -271,6 +329,8 @@ public class AccountOverviewService {
                          WHEN 'shipinhao' THEN s.storage_state_json
                          WHEN 'kuaishou' THEN k.storage_state_json
                          WHEN 'jinritoutiao' THEN j.storage_state_json
+                         WHEN 'x' THEN tx.storage_state_json
+                         WHEN 'youtube' THEN y.storage_state_json
                          ELSE NULL
                        END AS storage_json,
                        CASE ua.platform
@@ -280,6 +340,8 @@ public class AccountOverviewService {
                          WHEN 'shipinhao' THEN s.updated_at
                          WHEN 'kuaishou' THEN k.updated_at
                          WHEN 'jinritoutiao' THEN j.updated_at
+                         WHEN 'x' THEN tx.updated_at
+                         WHEN 'youtube' THEN y.updated_at
                          ELSE NULL
                        END AS cookie_updated_at,
                        CASE ua.platform
@@ -289,6 +351,8 @@ public class AccountOverviewService {
                          WHEN 'shipinhao' THEN s.display_name
                          WHEN 'kuaishou' THEN k.display_name
                          WHEN 'jinritoutiao' THEN j.display_name
+                         WHEN 'x' THEN tx.display_name
+                         WHEN 'youtube' THEN y.display_name
                          ELSE NULL
                        END AS display_name,
                        CASE ua.platform
@@ -298,6 +362,8 @@ public class AccountOverviewService {
                          WHEN 'shipinhao' THEN s.avatar_url
                          WHEN 'kuaishou' THEN k.avatar_url
                          WHEN 'jinritoutiao' THEN j.avatar_url
+                         WHEN 'x' THEN tx.avatar_url
+                         WHEN 'youtube' THEN y.avatar_url
                          ELSE NULL
                        END AS avatar_url
                 FROM uploader_account ua
@@ -313,7 +379,11 @@ public class AccountOverviewService {
                        ON ua.platform = 'kuaishou' AND k.account_key = ua.account_key
                 LEFT JOIN uploader_account_jinritoutiao j
                        ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
-                WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao')
+                LEFT JOIN uploader_account_x tx
+                       ON ua.platform = 'x' AND tx.account_key = ua.account_key
+                LEFT JOIN uploader_account_youtube y
+                       ON ua.platform = 'youtube' AND y.account_key = ua.account_key
+                WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube')
                   AND ua.is_deprecated = 0
                 %s
                 """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
@@ -516,5 +586,57 @@ public class AccountOverviewService {
 
     private static String normalizePlatform(String value) {
         return value == null ? "" : value.trim().toLowerCase();
+    }
+
+    private String requirePlatform(String platform) {
+        String normalized = normalizePlatform(platform);
+        if (!PLATFORMS.contains(normalized)) {
+            throw new IllegalArgumentException("Invalid platform");
+        }
+        return normalized;
+    }
+
+    private String requireGenericPlatform(String platform) {
+        String normalized = requirePlatform(platform);
+        if (!ACCOUNT_TABLES.containsKey(normalized)) {
+            throw new IllegalArgumentException("Unsupported generic account platform");
+        }
+        return normalized;
+    }
+
+    private String requireAccountKey(String accountKey) {
+        String normalized = accountKey == null ? "" : accountKey.trim();
+        if (!normalized.matches("[A-Za-z0-9_.-]{1,64}")) {
+            throw new IllegalArgumentException("Invalid account key");
+        }
+        return normalized;
+    }
+
+    private Map<String, Object> findAccount(String platform, String accountKey) {
+        List<Map<String, Object>> rows = repository.query(
+                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                (rs, rowNum) -> mapAccount(rs),
+                platform,
+                accountKey
+        );
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return rows.get(0);
+    }
+
+    private Map<String, Object> updateGenericState(String platform, String accountKey, String column, boolean value) {
+        String normalizedPlatform = requireGenericPlatform(platform);
+        String normalizedAccountKey = requireAccountKey(accountKey);
+        int updated = repository.update(
+                "UPDATE uploader_account SET " + column + " = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0",
+                value,
+                normalizedPlatform,
+                normalizedAccountKey
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return findAccount(normalizedPlatform, normalizedAccountKey);
     }
 }

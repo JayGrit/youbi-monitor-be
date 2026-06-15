@@ -18,13 +18,15 @@ import java.util.Map;
 @Service
 public class AccountProfileService {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
-    private static final Map<String, String> TABLES = Map.of(
-            "bilibili", "uploader_account_bilibili",
-            "douyin", "uploader_account_douyin",
-            "xiaohongshu", "uploader_account_xiaohongshu",
-            "shipinhao", "uploader_account_shipinhao",
-            "kuaishou", "uploader_account_kuaishou",
-            "jinritoutiao", "uploader_account_jinritoutiao"
+    private static final Map<String, String> TABLES = Map.ofEntries(
+            Map.entry("bilibili", "uploader_account_bilibili"),
+            Map.entry("douyin", "uploader_account_douyin"),
+            Map.entry("xiaohongshu", "uploader_account_xiaohongshu"),
+            Map.entry("shipinhao", "uploader_account_shipinhao"),
+            Map.entry("kuaishou", "uploader_account_kuaishou"),
+            Map.entry("jinritoutiao", "uploader_account_jinritoutiao"),
+            Map.entry("x", "uploader_account_x"),
+            Map.entry("youtube", "uploader_account_youtube")
     );
 
     private final IAccountProfileRepositoryService repositoryService;
