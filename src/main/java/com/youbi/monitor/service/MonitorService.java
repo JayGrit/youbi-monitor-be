@@ -254,7 +254,8 @@ public class MonitorService {
             String sourceLanguage,
             String targetLanguage,
             Boolean resetCover,
-            String coverOrientation
+            String coverOrientation,
+            Boolean fetchNewVideos
     ) {
         return submitterAuthorRepositoryService.saveSubmitterAuthorType(
                 author,
@@ -265,7 +266,8 @@ public class MonitorService {
                 sourceLanguage,
                 targetLanguage,
                 resetCover,
-                coverOrientation
+                coverOrientation,
+                fetchNewVideos
         );
     }
 
@@ -777,6 +779,7 @@ public class MonitorService {
             String targetLanguage,
             boolean resetCover,
             String coverOrientation,
+            boolean fetchNewVideos,
             int updatedSubmissionRows,
             int updatedVideoInfoRows
     ) {
@@ -791,7 +794,8 @@ public class MonitorService {
             String sourceLanguage,
             String targetLanguage,
             Boolean resetCover,
-            String coverOrientation
+            String coverOrientation,
+            Boolean fetchNewVideos
     ) {
     }
 

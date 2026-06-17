@@ -47,7 +47,8 @@ public class SubmitterAuthorTypeController {
                     request == null ? null : request.sourceLanguage(),
                     request == null ? null : request.targetLanguage(),
                     request == null ? null : request.resetCover(),
-                    request == null ? null : request.coverOrientation()
+                    request == null ? null : request.coverOrientation(),
+                    request == null ? null : request.fetchNewVideos()
             );
         } catch (IllegalArgumentException exc) {
             throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);

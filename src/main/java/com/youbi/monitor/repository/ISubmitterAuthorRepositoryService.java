@@ -18,7 +18,8 @@ public interface ISubmitterAuthorRepositoryService {
             String sourceLanguage,
             String targetLanguage,
             Boolean resetCover,
-            String coverOrientation
+            String coverOrientation,
+            Boolean fetchNewVideos
     );
 
     MonitorService.SubmitterAuthorDeleteResult deleteSubmitterAuthorType(String author);

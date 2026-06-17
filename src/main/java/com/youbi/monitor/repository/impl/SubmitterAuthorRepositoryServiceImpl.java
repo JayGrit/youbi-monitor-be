@@ -19,16 +19,16 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         ensureAuthorCoverColumns();
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false, "", 0, 0);
+            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false, "", false, 0, 0);
         }
         List<Map<String, Object>> rows = repository.queryForList("""
-                SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation
+                SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos
                 FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false, "", 0, 0);
+            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false, "", false, 0, 0);
         }
         Map<String, Object> row = rows.get(0);
         boolean needSubtitle = boolValue(row.get("need_subtitle"), true);
@@ -43,6 +43,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 defaultLanguage(row.get("target_language"), "中文"),
                 resetCover,
                 resetCover ? normalizeCoverOrientation(row.get("cover_orientation")) : "",
+                boolValue(row.get("fetch_new_videos"), false),
                 0,
                 0
         );
@@ -52,7 +53,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
     public List<MonitorService.SubmitterAuthorType> listSubmitterAuthorTypes() {
         ensureAuthorCoverColumns();
         return repository.query("""
-                SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation
+                SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos
                 FROM submitter_author
                 ORDER BY CASE WHEN COALESCE(NULLIF(type, ''), '') = '' THEN 1 ELSE 0 END, type, author
                 """, (rs, rowNum) -> {
@@ -67,6 +68,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                     defaultLanguage(rs.getString("target_language"), "中文"),
                     resetCover,
                     resetCover ? normalizeCoverOrientation(rs.getString("cover_orientation")) : "",
+                    boolValue(rs.getObject("fetch_new_videos"), false),
                     0,
                     0
             );
@@ -83,7 +85,8 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
             String sourceLanguage,
             String targetLanguage,
             Boolean resetCover,
-            String coverOrientation
+            String coverOrientation,
+            Boolean fetchNewVideos
     ) {
         ensureAuthorCoverColumns();
         String normalizedAuthor = text(author);
@@ -101,9 +104,10 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         boolean normalizedNeedSeparation = !Boolean.FALSE.equals(needSeparation);
         boolean normalizedResetCover = Boolean.TRUE.equals(resetCover);
         String normalizedCoverOrientation = normalizedResetCover ? normalizeCoverOrientation(coverOrientation) : "";
+        boolean normalizedFetchNewVideos = Boolean.TRUE.equals(fetchNewVideos);
         repository.update("""
-                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     type = VALUES(type),
                     need_subtitle = VALUES(need_subtitle),
@@ -113,6 +117,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                     target_language = VALUES(target_language),
                     reset_cover = VALUES(reset_cover),
                     cover_orientation = VALUES(cover_orientation),
+                    fetch_new_videos = VALUES(fetch_new_videos),
                     updated_at = NOW()
                 """,
                 normalizedAuthor,
@@ -123,7 +128,8 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
                 normalizedResetCover ? 1 : 0,
-                normalizedCoverOrientation
+                normalizedCoverOrientation,
+                normalizedFetchNewVideos ? 1 : 0
         );
         int updatedSubmissionRows = syncDownloaderSubmissions(
                 normalizedAuthor,
@@ -151,6 +157,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 normalizedTargetLanguage,
                 normalizedResetCover,
                 normalizedCoverOrientation,
+                normalizedFetchNewVideos,
                 updatedSubmissionRows,
                 updatedVideoInfoRows
         );
@@ -228,6 +235,12 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
             repository.update("""
                     ALTER TABLE submitter_author
                     ADD COLUMN cover_orientation VARCHAR(16) NOT NULL DEFAULT ''
+                    """);
+        }
+        if (!columnExists("submitter_author", "fetch_new_videos")) {
+            repository.update("""
+                    ALTER TABLE submitter_author
+                    ADD COLUMN fetch_new_videos TINYINT(1) NOT NULL DEFAULT 0
                     """);
         }
     }
