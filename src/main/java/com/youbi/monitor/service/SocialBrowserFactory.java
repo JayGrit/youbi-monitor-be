@@ -4,6 +4,7 @@ import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.options.Proxy;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +37,7 @@ public class SocialBrowserFactory {
     private final BrowserProfile shipinhaoProfile;
     private final BrowserProfile kuaishouProfile;
     private final BrowserProfile jinritoutiaoProfile;
+    private final BrowserProfile youtubeProfile;
     private final String defaultLocale;
     private final String defaultTimezone;
     private final int defaultViewportWidth;
@@ -67,7 +69,11 @@ public class SocialBrowserFactory {
             @Value("${youbi.kuaishou.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String kuaishouStealthScriptPath,
             @Value("${youbi.jinritoutiao.headless:true}") boolean jinritoutiaoHeadless,
             @Value("${youbi.jinritoutiao.browser-channel:chrome}") String jinritoutiaoBrowserChannel,
-            @Value("${youbi.jinritoutiao.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String jinritoutiaoStealthScriptPath
+            @Value("${youbi.jinritoutiao.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String jinritoutiaoStealthScriptPath,
+            @Value("${youbi.youtube.headless:true}") boolean youtubeHeadless,
+            @Value("${youbi.youtube.browser-channel:chrome}") String youtubeBrowserChannel,
+            @Value("${youbi.youtube.stealth-script-path:/Users/hoshuuch/Money/social-auto-upload/utils/stealth.min.js}") String youtubeStealthScriptPath,
+            @Value("${youbi.youtube.proxy-server:}") String youtubeProxyServer
     ) {
         this.playwright = Playwright.create();
         this.defaultLocale = text(defaultLocale).isBlank() ? "zh-CN" : text(defaultLocale);
@@ -76,12 +82,13 @@ public class SocialBrowserFactory {
         this.defaultViewportHeight = defaultViewportHeight <= 0 ? 900 : defaultViewportHeight;
         this.acceptLanguage = text(acceptLanguage).isBlank() ? "zh-CN,zh;q=0.9,en;q=0.8" : text(acceptLanguage);
         this.defaultUserAgent = text(defaultUserAgent);
-        this.douyinProfile = new BrowserProfile(douyinHeadless, channel(douyinBrowserChannel), loadStealthScript(SocialBrowserPlatform.DOUYIN, douyinStealthScriptPath));
-        this.xiaohongshuProfile = new BrowserProfile(xiaohongshuHeadless, channel(xiaohongshuBrowserChannel), loadStealthScript(SocialBrowserPlatform.XIAOHONGSHU, xiaohongshuStealthScriptPath));
-        this.bilibiliProfile = new BrowserProfile(bilibiliHeadless, channel(bilibiliBrowserChannel), loadStealthScript(SocialBrowserPlatform.BILIBILI, bilibiliStealthScriptPath));
-        this.shipinhaoProfile = new BrowserProfile(shipinhaoHeadless, channel(shipinhaoBrowserChannel), loadStealthScript(SocialBrowserPlatform.SHIPINHAO, shipinhaoStealthScriptPath));
-        this.kuaishouProfile = new BrowserProfile(kuaishouHeadless, channel(kuaishouBrowserChannel), loadStealthScript(SocialBrowserPlatform.KUAISHOU, kuaishouStealthScriptPath));
-        this.jinritoutiaoProfile = new BrowserProfile(jinritoutiaoHeadless, channel(jinritoutiaoBrowserChannel), loadStealthScript(SocialBrowserPlatform.JINRITOUTIAO, jinritoutiaoStealthScriptPath));
+        this.douyinProfile = new BrowserProfile(douyinHeadless, channel(douyinBrowserChannel), loadStealthScript(SocialBrowserPlatform.DOUYIN, douyinStealthScriptPath), "");
+        this.xiaohongshuProfile = new BrowserProfile(xiaohongshuHeadless, channel(xiaohongshuBrowserChannel), loadStealthScript(SocialBrowserPlatform.XIAOHONGSHU, xiaohongshuStealthScriptPath), "");
+        this.bilibiliProfile = new BrowserProfile(bilibiliHeadless, channel(bilibiliBrowserChannel), loadStealthScript(SocialBrowserPlatform.BILIBILI, bilibiliStealthScriptPath), "");
+        this.shipinhaoProfile = new BrowserProfile(shipinhaoHeadless, channel(shipinhaoBrowserChannel), loadStealthScript(SocialBrowserPlatform.SHIPINHAO, shipinhaoStealthScriptPath), "");
+        this.kuaishouProfile = new BrowserProfile(kuaishouHeadless, channel(kuaishouBrowserChannel), loadStealthScript(SocialBrowserPlatform.KUAISHOU, kuaishouStealthScriptPath), "");
+        this.jinritoutiaoProfile = new BrowserProfile(jinritoutiaoHeadless, channel(jinritoutiaoBrowserChannel), loadStealthScript(SocialBrowserPlatform.JINRITOUTIAO, jinritoutiaoStealthScriptPath), "");
+        this.youtubeProfile = new BrowserProfile(youtubeHeadless, channel(youtubeBrowserChannel), loadStealthScript(SocialBrowserPlatform.YOUTUBE, youtubeStealthScriptPath), text(youtubeProxyServer));
     }
 
     Browser launchBrowser(SocialBrowserPlatform platform) {
@@ -110,6 +117,7 @@ public class SocialBrowserFactory {
         if (platform == SocialBrowserPlatform.DOUYIN) {
             options.setPermissions(List.of("geolocation"));
         }
+        setProxy(options, profile.proxyServer());
         return prepareContext(platform, playwright.chromium().launchPersistentContext(userDataDir, options));
     }
 
@@ -154,6 +162,7 @@ public class SocialBrowserFactory {
         if (!profile.channel().isBlank()) {
             options.setChannel(profile.channel());
         }
+        setProxy(options, profile.proxyServer());
         return options;
     }
 
@@ -174,6 +183,7 @@ public class SocialBrowserFactory {
         if (storageState != null && !storageState.isBlank()) {
             options.setStorageState(storageState);
         }
+        setProxy(options, profile(platform).proxyServer());
         return options;
     }
 
@@ -200,7 +210,26 @@ public class SocialBrowserFactory {
             case SHIPINHAO -> shipinhaoProfile;
             case KUAISHOU -> kuaishouProfile;
             case JINRITOUTIAO -> jinritoutiaoProfile;
+            case YOUTUBE -> youtubeProfile;
         };
+    }
+
+    private void setProxy(BrowserType.LaunchOptions options, String proxyServer) {
+        if (!text(proxyServer).isBlank()) {
+            options.setProxy(new Proxy(text(proxyServer)));
+        }
+    }
+
+    private void setProxy(BrowserType.LaunchPersistentContextOptions options, String proxyServer) {
+        if (!text(proxyServer).isBlank()) {
+            options.setProxy(new Proxy(text(proxyServer)));
+        }
+    }
+
+    private void setProxy(Browser.NewContextOptions options, String proxyServer) {
+        if (!text(proxyServer).isBlank()) {
+            options.setProxy(new Proxy(text(proxyServer)));
+        }
     }
 
     private String loadStealthScript(SocialBrowserPlatform platform, String stealthScriptPath) {
@@ -230,6 +259,6 @@ public class SocialBrowserFactory {
         return value == null ? "" : value.trim();
     }
 
-    private record BrowserProfile(boolean headless, String channel, String stealthInitScript) {
+    private record BrowserProfile(boolean headless, String channel, String stealthInitScript, String proxyServer) {
     }
 }

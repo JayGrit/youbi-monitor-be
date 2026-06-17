@@ -207,6 +207,7 @@ public class SocialPlaywrightInspectService {
             case SHIPINHAO -> containsAny(body, "发表动态", "视频描述", "发表", "保存草稿");
             case KUAISHOU -> containsAny(body, "发布视频", "上传视频", "选择视频", "作品描述");
             case JINRITOUTIAO -> containsAny(body, "发布视频", "点击上传", "基本信息", "视频简介");
+            case YOUTUBE -> containsAny(body, "YouTube Studio", "Create", "Upload videos", "Channel content", "上传视频");
         };
     }
 
@@ -269,6 +270,7 @@ public class SocialPlaywrightInspectService {
             case SHIPINHAO -> shipinhaoAccountService.newContext(browser, storageState);
             case KUAISHOU -> kuaishouAccountService.newContext(browser, storageState);
             case JINRITOUTIAO -> jinritoutiaoAccountService.newContext(browser, storageState);
+            case YOUTUBE -> browserFactory.newContext(platform, browser, storageState);
         };
     }
 
@@ -280,6 +282,7 @@ public class SocialPlaywrightInspectService {
             case SHIPINHAO -> shipinhaoAccountService.normalizeAccountKey(accountKey);
             case KUAISHOU -> kuaishouAccountService.normalizeAccountKey(accountKey);
             case JINRITOUTIAO -> jinritoutiaoAccountService.normalizeAccountKey(accountKey);
+            case YOUTUBE -> normalizeGenericAccountKey(accountKey);
         };
     }
 
@@ -291,6 +294,7 @@ public class SocialPlaywrightInspectService {
             case SHIPINHAO -> shipinhaoAccountService.storageState(accountKey);
             case KUAISHOU -> kuaishouAccountService.storageState(accountKey);
             case JINRITOUTIAO -> jinritoutiaoAccountService.storageState(accountKey);
+            case YOUTUBE -> throw new IOException("YouTube storage-state upload-page inspection is not supported yet");
         };
     }
 
@@ -302,6 +306,7 @@ public class SocialPlaywrightInspectService {
             case SHIPINHAO -> ShipinhaoAccountService.PUBLISH_VIDEO_URL;
             case KUAISHOU -> KuaishouAccountService.PUBLISH_VIDEO_URL;
             case JINRITOUTIAO -> JinritoutiaoAccountService.PUBLISH_VIDEO_URL;
+            case YOUTUBE -> "https://studio.youtube.com/";
         };
     }
 
@@ -325,8 +330,20 @@ public class SocialPlaywrightInspectService {
             case "shipinhao", "sph", "channels", "weixin-channels" -> SocialBrowserPlatform.SHIPINHAO;
             case "kuaishou", "ks" -> SocialBrowserPlatform.KUAISHOU;
             case "jinritoutiao", "toutiao", "tt" -> SocialBrowserPlatform.JINRITOUTIAO;
+            case "youtube", "yt" -> SocialBrowserPlatform.YOUTUBE;
             default -> throw new IllegalArgumentException("Unsupported platform: " + value);
         };
+    }
+
+    private String normalizeGenericAccountKey(String accountKey) {
+        String normalized = text(accountKey);
+        if (normalized.isBlank()) {
+            return "default";
+        }
+        if (!normalized.matches("[A-Za-z0-9_.-]{1,64}")) {
+            throw new IllegalArgumentException("Invalid accountKey: " + accountKey);
+        }
+        return normalized;
     }
 
     private boolean containsAny(String text, String... keywords) {

@@ -6,7 +6,8 @@ enum SocialBrowserPlatform {
     BILIBILI("bilibili"),
     SHIPINHAO("shipinhao"),
     KUAISHOU("kuaishou"),
-    JINRITOUTIAO("jinritoutiao");
+    JINRITOUTIAO("jinritoutiao"),
+    YOUTUBE("youtube");
 
     private final String configKey;
 

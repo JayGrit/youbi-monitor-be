@@ -64,3 +64,8 @@ youbi:
     headless: ${YDBI_JINRITOUTIAO_HEADLESS:true}
     browser-channel: ${YDBI_JINRITOUTIAO_BROWSER_CHANNEL:chrome}
     stealth-script-path: ${YDBI_JINRITOUTIAO_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
+  youtube:
+    headless: ${YDBI_YOUTUBE_HEADLESS:true}
+    browser-channel: ${YDBI_YOUTUBE_BROWSER_CHANNEL:chrome}
+    stealth-script-path: ${YDBI_YOUTUBE_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
+    proxy-server: ${YDBI_YOUTUBE_PROXY_SERVER:http://127.0.0.1:7890}
