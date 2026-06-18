@@ -36,6 +36,7 @@ abstract class MonitorRepositorySqlSupport {
     );
     protected static final List<String> RESET_CHILD_TABLES = List.of(
             "speaker_segment",
+            "translator_segment",
             "translator_api_task",
             "whisper_word_timestamp",
             "asr_segment"

@@ -158,7 +158,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             ) fa ON fa.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(*) translated_count
-              FROM speaker_segment
+              FROM translator_segment
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
             LEFT JOIN (
@@ -173,7 +173,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   COUNT(*) normal_count,
                   COUNT(s.id) translated_count
                 FROM `translator-chunk` ch
-                LEFT JOIN speaker_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
+                LEFT JOIN translator_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
                 WHERE ch.row_role = 'normal'
                 GROUP BY ch.task_id, ch.chunk_index
               ) chunk_progress
