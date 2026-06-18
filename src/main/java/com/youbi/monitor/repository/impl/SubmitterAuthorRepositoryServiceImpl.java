@@ -19,26 +19,24 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         ensureAuthorCoverColumns();
         String normalized = text(author);
         if (normalized.isBlank()) {
-            return new MonitorService.SubmitterAuthorType("", "", true, true, true, "英文", "中文", false, "", false, 0, 0);
+            return new MonitorService.SubmitterAuthorType("", "", "", true, "英文", "中文", false, "", false, 0, 0);
         }
         List<Map<String, Object>> rows = repository.queryForList("""
-                SELECT type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos
+                SELECT type, task_type, has_background_audio, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos
                 FROM submitter_author
                 WHERE author = ?
                 LIMIT 1
                 """, normalized);
         if (rows.isEmpty()) {
-            return new MonitorService.SubmitterAuthorType(normalized, "", true, true, true, "英文", "中文", false, "", false, 0, 0);
+            return new MonitorService.SubmitterAuthorType(normalized, "", "", true, "英文", "中文", false, "", false, 0, 0);
         }
         Map<String, Object> row = rows.get(0);
-        boolean needSubtitle = boolValue(row.get("need_subtitle"), true);
         boolean resetCover = boolValue(row.get("reset_cover"), false);
         return new MonitorService.SubmitterAuthorType(
                 normalized,
                 stringValue(row.get("type")),
-                needSubtitle,
-                needSubtitle && boolValue(row.get("need_dubbing"), true),
-                boolValue(row.get("need_separation"), true),
+                stringValue(row.get("task_type")),
+                boolValue(row.get("has_background_audio"), true),
                 defaultLanguage(row.get("source_language"), "英文"),
                 defaultLanguage(row.get("target_language"), "中文"),
                 resetCover,
@@ -53,7 +51,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
     public List<MonitorService.SubmitterAuthorType> listSubmitterAuthorTypes() {
         ensureAuthorCoverColumns();
         return repository.query("""
-                SELECT author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos
+                SELECT author, type, task_type, has_background_audio, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos
                 FROM submitter_author
                 ORDER BY CASE WHEN COALESCE(NULLIF(type, ''), '') = '' THEN 1 ELSE 0 END, type, author
                 """, (rs, rowNum) -> {
@@ -61,9 +59,8 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
             return new MonitorService.SubmitterAuthorType(
                     text(rs.getString("author")),
                     text(rs.getString("type")),
-                    boolValue(rs.getObject("need_subtitle"), true),
-                    boolValue(rs.getObject("need_subtitle"), true) && boolValue(rs.getObject("need_dubbing"), true),
-                    boolValue(rs.getObject("need_separation"), true),
+                    text(rs.getString("task_type")),
+                    boolValue(rs.getObject("has_background_audio"), true),
                     defaultLanguage(rs.getString("source_language"), "英文"),
                     defaultLanguage(rs.getString("target_language"), "中文"),
                     resetCover,
@@ -79,9 +76,8 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
     public MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
             String author,
             String type,
-            Boolean needSubtitle,
-            Boolean needDubbing,
-            Boolean needSeparation,
+            String taskType,
+            Boolean hasBackgroundAudio,
             String sourceLanguage,
             String targetLanguage,
             Boolean resetCover,
@@ -91,6 +87,7 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         ensureAuthorCoverColumns();
         String normalizedAuthor = text(author);
         String normalizedType = text(type);
+        String normalizedTaskType = text(taskType);
         String normalizedSourceLanguage = defaultLanguage(sourceLanguage, "英文");
         String normalizedTargetLanguage = defaultLanguage(targetLanguage, "中文");
         if (normalizedAuthor.isBlank()) {
@@ -99,20 +96,26 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         if (normalizedType.isBlank()) {
             throw new IllegalArgumentException("type is required");
         }
-        boolean normalizedNeedSubtitle = !Boolean.FALSE.equals(needSubtitle);
-        boolean normalizedNeedDubbing = normalizedNeedSubtitle && !Boolean.FALSE.equals(needDubbing);
-        boolean normalizedNeedSeparation = !Boolean.FALSE.equals(needSeparation);
+        if (normalizedTaskType.isBlank()) {
+            throw new IllegalArgumentException("taskType is required");
+        }
+        if (repository.queryForList(
+                "SELECT task_type FROM distributor_task_type WHERE task_type = ? AND enabled = 1",
+                normalizedTaskType
+        ).isEmpty()) {
+            throw new IllegalArgumentException("taskType is invalid");
+        }
+        boolean normalizedHasBackgroundAudio = !Boolean.FALSE.equals(hasBackgroundAudio);
         boolean normalizedResetCover = Boolean.TRUE.equals(resetCover);
         String normalizedCoverOrientation = normalizedResetCover ? normalizeCoverOrientation(coverOrientation) : "";
         boolean normalizedFetchNewVideos = Boolean.TRUE.equals(fetchNewVideos);
         repository.update("""
-                INSERT INTO submitter_author (author, type, need_subtitle, need_dubbing, need_separation, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO submitter_author (author, type, task_type, has_background_audio, source_language, target_language, reset_cover, cover_orientation, fetch_new_videos)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     type = VALUES(type),
-                    need_subtitle = VALUES(need_subtitle),
-                    need_dubbing = VALUES(need_dubbing),
-                    need_separation = VALUES(need_separation),
+                    task_type = VALUES(task_type),
+                    has_background_audio = VALUES(has_background_audio),
                     source_language = VALUES(source_language),
                     target_language = VALUES(target_language),
                     reset_cover = VALUES(reset_cover),
@@ -122,105 +125,26 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
                 """,
                 normalizedAuthor,
                 normalizedType,
-                normalizedNeedSubtitle ? 1 : 0,
-                normalizedNeedDubbing ? 1 : 0,
-                normalizedNeedSeparation ? 1 : 0,
+                normalizedTaskType,
+                normalizedHasBackgroundAudio ? 1 : 0,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
                 normalizedResetCover ? 1 : 0,
                 normalizedCoverOrientation,
                 normalizedFetchNewVideos ? 1 : 0
         );
-        int updatedSubmissionRows = syncDownloaderSubmissions(
-                normalizedAuthor,
-                normalizedType,
-                normalizedNeedSubtitle,
-                normalizedNeedDubbing,
-                normalizedNeedSeparation
-        );
-        int updatedVideoInfoRows = syncVideoInfo(
-                normalizedAuthor,
-                normalizedType,
-                normalizedNeedSubtitle,
-                normalizedNeedDubbing,
-                normalizedNeedSeparation,
-                normalizedSourceLanguage,
-                normalizedTargetLanguage
-        );
         return new MonitorService.SubmitterAuthorType(
                 normalizedAuthor,
                 normalizedType,
-                normalizedNeedSubtitle,
-                normalizedNeedDubbing,
-                normalizedNeedSeparation,
+                normalizedTaskType,
+                normalizedHasBackgroundAudio,
                 normalizedSourceLanguage,
                 normalizedTargetLanguage,
                 normalizedResetCover,
                 normalizedCoverOrientation,
                 normalizedFetchNewVideos,
-                updatedSubmissionRows,
-                updatedVideoInfoRows
-        );
-    }
-
-    private int syncDownloaderSubmissions(
-            String author,
-            String type,
-            boolean needSubtitle,
-            boolean needDubbing,
-            boolean needSeparation
-    ) {
-        if (!tableExists("submitter_video") || !tableExists("downloader_submission")) {
-            return 0;
-        }
-        return repository.update("""
-                UPDATE downloader_submission submission
-                JOIN submitter_video video ON video.ydbi_submission_id = submission.id
-                SET submission.type = ?,
-                    submission.need_subtitle = ?,
-                    submission.need_dubbing = ?,
-                    submission.need_separation = ?
-                WHERE video.uploader = ? OR video.import_author = ? OR video.channel_id = ?
-                """,
-                type,
-                needSubtitle ? 1 : 0,
-                needDubbing ? 1 : 0,
-                needSeparation ? 1 : 0,
-                author,
-                author,
-                author
-        );
-    }
-
-    private int syncVideoInfo(
-            String author,
-            String type,
-            boolean needSubtitle,
-            boolean needDubbing,
-            boolean needSeparation,
-            String sourceLanguage,
-            String targetLanguage
-    ) {
-        if (!tableExists("video_info")) {
-            return 0;
-        }
-        return repository.update("""
-                UPDATE video_info
-                SET type = ?,
-                    need_subtitle = ?,
-                    need_dubbing = ?,
-                    need_separation = ?,
-                    source_language = ?,
-                    target_language = ?
-                WHERE source_uploader = ?
-                """,
-                type,
-                needSubtitle ? 1 : 0,
-                needDubbing ? 1 : 0,
-                needSeparation ? 1 : 0,
-                sourceLanguage,
-                targetLanguage,
-                author
+                0,
+                0
         );
     }
 

@@ -12,9 +12,8 @@ public interface ISubmitterAuthorRepositoryService {
     MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
             String author,
             String type,
-            Boolean needSubtitle,
-            Boolean needDubbing,
-            Boolean needSeparation,
+            String taskType,
+            Boolean hasBackgroundAudio,
             String sourceLanguage,
             String targetLanguage,
             Boolean resetCover,

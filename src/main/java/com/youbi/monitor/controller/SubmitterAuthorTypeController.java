@@ -41,9 +41,8 @@ public class SubmitterAuthorTypeController {
             return monitorService.saveAuthorType(
                     request == null ? null : request.author(),
                     request == null ? null : request.type(),
-                    request == null ? null : request.needSubtitle(),
-                    request == null ? null : request.needDubbing(),
-                    request == null ? null : request.needSeparation(),
+                    request == null ? null : request.taskType(),
+                    request == null ? null : request.hasBackgroundAudio(),
                     request == null ? null : request.sourceLanguage(),
                     request == null ? null : request.targetLanguage(),
                     request == null ? null : request.resetCover(),
