@@ -171,7 +171,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   ch.task_id,
                   ch.chunk_index,
                   COUNT(*) normal_count,
-                  COUNT(s.id) translated_count
+                  COUNT(s.task_id) translated_count
                 FROM `translator-chunk` ch
                 LEFT JOIN translator_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
                 WHERE ch.row_role = 'normal'
