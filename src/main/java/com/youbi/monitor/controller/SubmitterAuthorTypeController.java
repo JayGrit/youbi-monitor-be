@@ -33,6 +33,11 @@ public class SubmitterAuthorTypeController {
         return monitorService.authorTypes();
     }
 
+    @GetMapping("/api/submitter-author-types/task-types")
+    public List<MonitorService.DistributorTaskType> distributorTaskTypes() {
+        return monitorService.distributorTaskTypes();
+    }
+
     @PostMapping("/api/submitter-author-types")
     public MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
             @RequestBody MonitorService.SubmitterAuthorTypeUpdateRequest request

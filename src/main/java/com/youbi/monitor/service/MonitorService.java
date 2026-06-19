@@ -247,6 +247,10 @@ public class MonitorService {
         return submitterAuthorRepositoryService.listSubmitterAuthorTypes();
     }
 
+    public List<DistributorTaskType> distributorTaskTypes() {
+        return submitterAuthorRepositoryService.listDistributorTaskTypes();
+    }
+
     public SubmitterAuthorType saveAuthorType(
             String author,
             String type,
@@ -791,6 +795,9 @@ public class MonitorService {
             int updatedSubmissionRows,
             int updatedVideoInfoRows
     ) {
+    }
+
+    public record DistributorTaskType(String taskType, String name, String description) {
     }
 
     public record SubmitterAuthorTypeUpdateRequest(

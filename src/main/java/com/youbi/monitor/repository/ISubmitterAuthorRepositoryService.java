@@ -9,6 +9,8 @@ public interface ISubmitterAuthorRepositoryService {
 
     List<MonitorService.SubmitterAuthorType> listSubmitterAuthorTypes();
 
+    List<MonitorService.DistributorTaskType> listDistributorTaskTypes();
+
     MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
             String author,
             String type,

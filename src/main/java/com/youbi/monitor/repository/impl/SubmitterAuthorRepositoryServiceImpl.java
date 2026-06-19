@@ -72,6 +72,20 @@ public class SubmitterAuthorRepositoryServiceImpl extends MonitorRepositorySqlSu
         });
     }
 
+    @Override
+    public List<MonitorService.DistributorTaskType> listDistributorTaskTypes() {
+        return repository.query("""
+                SELECT task_type, name, description
+                FROM distributor_task_type
+                WHERE enabled = 1
+                ORDER BY task_type
+                """, (rs, rowNum) -> new MonitorService.DistributorTaskType(
+                text(rs.getString("task_type")),
+                text(rs.getString("name")),
+                text(rs.getString("description"))
+        ));
+    }
+
     
     public MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
             String author,
