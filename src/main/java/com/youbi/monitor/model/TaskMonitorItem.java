@@ -23,6 +23,7 @@ public record TaskMonitorItem(
         String bilibiliUploadUid,
         String bilibiliUploadAccountName,
         String errorMessage,
+        List<String> distributorStages,
         List<StageNode> nodes
 ) {
 }

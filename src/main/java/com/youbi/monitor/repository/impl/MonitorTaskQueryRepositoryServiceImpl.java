@@ -44,6 +44,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               vi.minio_storage_object_count,
               vi.minio_storage_updated_at,
               vi.type task_type,
+              vi.task_type distributor_task_type,
+              vi.has_background_audio,
+              __DISTRIBUTOR_STAGES_SELECT__
               t.status,
               t.current_stage,
               t.created_at,
@@ -84,6 +87,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               ss.speaker_failed_count,
               ss.speaker_total_count,
               se.child_error_message speaker_child_error,
+
+              __ASSETER_SELECT__
 
               m.status combiner_status,
               m.started_at combiner_started_at,
@@ -144,6 +149,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN whisper w ON w.task_id = t.id
             LEFT JOIN translator tr ON tr.task_id = t.id
             LEFT JOIN speaker sp ON sp.task_id = t.id
+            __ASSETER_JOIN__
             LEFT JOIN combiner m ON m.task_id = t.id
             LEFT JOIN publisher pub ON pub.task_id = t.id
             LEFT JOIN publisher_result pr ON pr.task_id = t.id
@@ -324,9 +330,38 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                      AND dv.kind = 'video'
                     """;
         }
+        String asseterSelect = """
+                NULL asseter_status,
+                NULL asseter_started_at,
+                NULL asseter_completed_at,
+                NULL asseter_error,
+                """;
+        String asseterJoin = "";
+        if (tableExists("asseter")) {
+            asseterSelect = """
+                    a.status asseter_status,
+                    a.started_at asseter_started_at,
+                    a.completed_at asseter_completed_at,
+                    a.error_message asseter_error,
+                    """;
+            asseterJoin = "LEFT JOIN asseter a ON a.task_id = t.id";
+        }
+        String distributorStagesSelect = "NULL distributor_stages,";
+        if (tableExists("distributor_type_stages")) {
+            distributorStagesSelect = """
+                    (
+                      SELECT GROUP_CONCAT(dts.stage_name ORDER BY dts.stage_order SEPARATOR ',')
+                      FROM distributor_type_stages dts
+                      WHERE dts.task_type = vi.task_type
+                    ) distributor_stages,
+                    """;
+        }
         return template
                 .replace("__DOWNLOADER_PROGRESS_SELECT__", progressSelect)
                 .replace("__DOWNLOADER_PROGRESS_JOIN__", progressJoin)
+                .replace("__ASSETER_SELECT__", asseterSelect)
+                .replace("__ASSETER_JOIN__", asseterJoin)
+                .replace("__DISTRIBUTOR_STAGES_SELECT__", distributorStagesSelect)
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
     }
@@ -562,8 +597,28 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     rs.getString("bilibili_upload_uid"),
                     rs.getString("bilibili_upload_account_name"),
                     rs.getString("error_message"),
+                    distributorStages(rs),
                     nodes
             );
+        }
+
+        private static List<String> distributorStages(ResultSet rs) throws SQLException {
+            String configuredStages = rs.getString("distributor_stages");
+            if (configuredStages == null || configuredStages.isBlank()) {
+                return List.of();
+            }
+            boolean skipDemucs = ("subtitle".equals(rs.getString("distributor_task_type"))
+                    || "dubbing".equals(rs.getString("distributor_task_type")))
+                    && !rs.getBoolean("has_background_audio")
+                    && !rs.wasNull();
+            List<String> stages = new ArrayList<>();
+            for (String value : configuredStages.split(",")) {
+                String stage = value.trim();
+                if (!stage.isBlank() && !(skipDemucs && "demucs".equals(stage))) {
+                    stages.add(stage);
+                }
+            }
+            return stages;
         }
 
         private static String stringOrDefault(ResultSet rs, String column, String defaultValue) throws SQLException {
