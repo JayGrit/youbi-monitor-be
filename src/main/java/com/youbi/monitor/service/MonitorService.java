@@ -380,7 +380,16 @@ public class MonitorService {
                 addLimitedTable(tables, "translator_segment", taskId, "task_id", "item_index");
             }
             case "speaker" -> addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
-            case "publisher" -> addLimitedTable(tables, "publisher_result", taskId, "task_id", "task_id");
+            case "publisher" -> {
+                addLimitedTable(tables, "publisher_jobs", taskId, "task_id", "job_order, id");
+                addLimitedTable(tables, "publisher_result", taskId, "task_id", "task_id");
+                addLimitedTable(tables, "product_narration", taskId, "task_id", "id");
+                addLimitedTable(tables, "product_narration_sentence", taskId, "task_id", "line_index, id");
+            }
+            case "asseter" -> {
+                addLimitedTable(tables, "asseter_jobs", taskId, "task_id", "id");
+                addLimitedTable(tables, "assets", taskId, "task_id", "id");
+            }
             case "uploader" -> {
                 addLimitedTable(tables, "uploader", taskId, "task_id", "task_id");
                 UPLOADER_TASK_TABLES.forEach((platform, table) -> addUploaderTaskTable(tables, platform, table, taskId));
