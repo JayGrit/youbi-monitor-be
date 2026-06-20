@@ -132,6 +132,10 @@ public class MonitorService {
         return new MonitorResponse(tasks, serviceHeartbeats, now, page, limit, totalCount);
     }
 
+    public List<ServiceHeartbeat> listServiceHeartbeats() {
+        return taskQueryRepositoryService.listServiceHeartbeats(LocalDateTime.now());
+    }
+
     public TaskFlowDetail getTaskFlow(String taskId) {
         LocalDateTime now = LocalDateTime.now();
         Map<String, Object> task = taskQueryRepositoryService.findTaskFlowRow("task", "id", taskId);

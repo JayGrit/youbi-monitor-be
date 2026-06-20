@@ -1,6 +1,7 @@
 package com.youbi.monitor.controller;
 
 import com.youbi.monitor.dto.MonitorResponse;
+import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.youbi.monitor.model.TaskFlowDetail;
 import com.youbi.monitor.model.TaskProgressDetail;
@@ -41,6 +42,11 @@ public class MonitorTaskController {
         int boundedPage = Math.max(1, page);
         int boundedLimit = Math.min(100, Math.max(1, limit));
         return monitorService.listTasks(boundedPage, boundedLimit, status, type, stage, taskId, sort);
+    }
+
+    @GetMapping("/api/services/heartbeats")
+    public List<ServiceHeartbeat> heartbeats() {
+        return monitorService.listServiceHeartbeats();
     }
 
     @GetMapping("/api/video-tasks/{taskId}/flow")
