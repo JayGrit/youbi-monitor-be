@@ -10,8 +10,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupport implements ITaskLifecycleRepositoryService {
@@ -29,18 +31,30 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     @Transactional
-    
     public boolean markTaskReady(String taskId) {
-        RetryStage failedStage = findFailedStage(taskId);
-        if (failedStage == null) {
+        List<String> taskStatuses = repository.queryForList(
+                "SELECT status FROM task WHERE id = ? FOR UPDATE",
+                String.class,
+                taskId
+        );
+        if (taskStatuses.isEmpty() || !"failed".equals(taskStatuses.get(0))) {
             return false;
         }
+        if (hasRunningStage(taskId)) {
+            throw new IllegalStateException("Task still has a running stage or child job.");
+        }
+
+        List<RouteNode> route = taskRouteService.routeForTask(taskId);
+        RouteNode failedNode = findFailedNode(taskId, route);
+        if (failedNode == null) return false;
+        int failedIndex = route.indexOf(failedNode);
 
         applyStagedPipelineRetry(taskId);
-        resetFailedStage(taskId, failedStage);
-        resetDownstreamStages(taskId, failedStage);
-        resetStageChildren(taskId, failedStage);
+        resetFailedNode(taskId, failedNode);
+        resetDownstreamNodes(taskId, route, failedIndex);
+        resetStageChildren(taskId, failedNode);
         resetExhaustedTranslatorApiTasks(taskId);
+        invalidateRouteLogs(taskId, route.subList(failedIndex, route.size()));
         repository.update("""
                 UPDATE task
                 SET status = 'ready',
@@ -48,7 +62,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     completed_at = NULL,
                     error_message = NULL
                 WHERE id = ?
-                """, failedStage.key(), taskId);
+                """, failedNode.stage(), taskId);
         return true;
     }
 
@@ -147,23 +161,25 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         return new MonitorService.TaskStopResult("failed", stoppedStages, true);
     }
 
-    private RetryStage findFailedStage(String taskId) {
+    private RouteNode findFailedNode(String taskId, List<RouteNode> route) {
         if (hasExhaustedTranslatorApiTasks(taskId)) {
-            return RETRY_STAGES.stream()
-                    .filter(stage -> "translator".equals(stage.key()))
+            return route.stream()
+                    .filter(node -> "translator".equals(node.stage()))
                     .findFirst()
                     .orElse(null);
         }
 
-        for (RetryStage stage : RETRY_STAGES) {
+        for (RouteNode node : route) {
+            if (!tableExists(node.tableName())) continue;
+            boolean scopedBySubStage = "combiner".equals(node.stage());
             Integer count = repository.queryForObject(
-                    "SELECT COUNT(*) FROM " + stage.table() + " WHERE task_id = ? AND status = 'failed'",
+                    "SELECT COUNT(*) FROM " + quotedIdentifier(node.tableName())
+                            + " WHERE task_id = ? AND status = 'failed'"
+                            + (scopedBySubStage ? " AND sub_stage = ?" : ""),
                     Integer.class,
-                    taskId
+                    scopedBySubStage ? new Object[]{taskId, node.subStage()} : new Object[]{taskId}
             );
-            if (count != null && count > 0) {
-                return stage;
-            }
+            if (count != null && count > 0) return node;
         }
 
         List<String> currentStages = repository.queryForList("""
@@ -175,9 +191,18 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             return null;
         }
         String currentStage = currentStages.get(0);
-        for (RetryStage stage : RETRY_STAGES) {
-            if (stage.key().equals(currentStage)) {
-                return stage;
+        List<RouteNode> candidates = route.stream().filter(node -> node.stage().equals(currentStage)).toList();
+        if (candidates.size() == 1) return candidates.get(0);
+        if ("combiner".equals(currentStage) && tableExists("combiner")) {
+            List<String> subStages = repository.queryForList(
+                    "SELECT sub_stage FROM combiner WHERE task_id = ?",
+                    String.class,
+                    taskId
+            );
+            if (!subStages.isEmpty()) {
+                for (RouteNode candidate : candidates) {
+                    if (candidate.subStage().equals(subStages.get(0))) return candidate;
+                }
             }
         }
         return null;
@@ -197,24 +222,34 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         return count != null && count > 0;
     }
 
-    private void resetFailedStage(String taskId, RetryStage stage) {
-        ensureOperatorColumn(stage.table());
+    private void resetFailedNode(String taskId, RouteNode node) {
+        ensureOperatorColumn(node.tableName());
+        boolean setSubStage = "combiner".equals(node.stage());
+        List<Object> arguments = new ArrayList<>();
+        if (setSubStage) arguments.add(node.subStage());
+        arguments.add(taskId);
         repository.update("""
                 UPDATE %s
                 SET status = 'ready',
                     started_at = NULL,
                     completed_at = NULL,
                     error_message = NULL,
-                    `operator` = NULL
+                    `operator` = NULL%s
                 WHERE task_id = ?
-                """.formatted(stage.table()), taskId);
+                """.formatted(
+                quotedIdentifier(node.tableName()),
+                setSubStage ? ", sub_stage = ?" : ""
+        ), arguments.toArray());
     }
 
-    private void resetDownstreamStages(String taskId, RetryStage failedStage) {
-        int failedIndex = RETRY_STAGES.indexOf(failedStage);
-        for (int i = failedIndex + 1; i < RETRY_STAGES.size(); i++) {
-            RetryStage stage = RETRY_STAGES.get(i);
-            ensureOperatorColumn(stage.table());
+    private void resetDownstreamNodes(String taskId, List<RouteNode> route, int failedIndex) {
+        Set<String> resetTables = new HashSet<>();
+        resetTables.add(route.get(failedIndex).tableName());
+        for (int i = failedIndex + 1; i < route.size(); i++) {
+            RouteNode node = route.get(i);
+            // combiner has one materialized row even when a route contains two combiner nodes.
+            if (!resetTables.add(node.tableName()) || !tableExists(node.tableName())) continue;
+            ensureOperatorColumn(node.tableName());
             repository.update("""
                     UPDATE %s
                     SET status = 'pending',
@@ -223,12 +258,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         error_message = NULL,
                         `operator` = NULL
                     WHERE task_id = ?
-                    """.formatted(stage.table()), taskId);
+                    """.formatted(quotedIdentifier(node.tableName())), taskId);
         }
     }
 
-    private void resetStageChildren(String taskId, RetryStage failedStage) {
-        if ("translator".equals(failedStage.key())) {
+    private void resetStageChildren(String taskId, RouteNode failedNode) {
+        if ("translator".equals(failedNode.stage())) {
             if (tableExists("translator_api_task")) {
                 ensureOperatorColumn("translator_api_task");
                 repository.update("""
@@ -247,7 +282,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             return;
         }
 
-        if ("speaker".equals(failedStage.key()) && tableExists("speaker_segment")) {
+        if ("speaker".equals(failedNode.stage()) && tableExists("speaker_segment")) {
             ensureOperatorColumn("speaker_segment");
             repository.update("""
                     UPDATE speaker_segment
@@ -261,7 +296,20 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     """, taskId);
         }
 
-        if ("uploader".equals(failedStage.key())) {
+        if ("asseter".equals(failedNode.stage()) && tableExists("asseter_jobs")) {
+            repository.update("""
+                    UPDATE asseter_jobs
+                    SET status = 'pending',
+                        attempts = 0,
+                        output_url = NULL,
+                        started_at = NULL,
+                        completed_at = NULL,
+                        error_message = NULL
+                    WHERE task_id = ? AND status IN ('failed', 'running')
+                    """, taskId);
+        }
+
+        if ("uploader".equals(failedNode.stage())) {
             UPLOADER_TASK_TABLES.forEach((platform, table) -> {
                 if (!tableExists(table)) {
                     return;
@@ -313,6 +361,24 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         """.formatted(quotedIdentifier(uploadStatusColumn(platform))), taskId);
             });
         }
+    }
+
+    private void invalidateRouteLogs(String taskId, List<RouteNode> nodes) {
+        if (!tableExists("distributor_route_log") || nodes.isEmpty()) return;
+        String conditions = nodes.stream()
+                .map(node -> "(from_stage = ? AND from_sub_stage = ?)")
+                .reduce((left, right) -> left + " OR " + right)
+                .orElseThrow();
+        List<Object> arguments = new ArrayList<>();
+        arguments.add(taskId);
+        for (RouteNode node : nodes) {
+            arguments.add(node.stage());
+            arguments.add(node.subStage());
+        }
+        repository.update(
+                "DELETE FROM distributor_route_log WHERE task_id = ? AND (" + conditions + ")",
+                arguments.toArray()
+        );
     }
 
     private void resetExhaustedTranslatorApiTasks(String taskId) {

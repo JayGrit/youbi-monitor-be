@@ -26,10 +26,14 @@ public class TaskLifecycleController {
 
     @PostMapping("/api/video-tasks/{taskId}/ready")
     public Map<String, String> markReady(@PathVariable String taskId) {
-        if (!monitorService.markTaskReady(taskId)) {
-            throw new ResponseStatusException(CONFLICT, "Task has no failed status or does not exist.");
+        try {
+            if (!monitorService.markTaskReady(taskId)) {
+                throw new ResponseStatusException(CONFLICT, "Task has no retryable failed route node or does not exist.");
+            }
+            return Map.of("status", "ready");
+        } catch (IllegalStateException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
         }
-        return Map.of("status", "ready");
     }
 
     @PostMapping("/api/video-tasks/{taskId}/restart")
