@@ -2,6 +2,7 @@ package com.youbi.monitor.repository;
 
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.model.TaskProgressDetail;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -13,6 +14,8 @@ public interface IMonitorTaskQueryRepositoryService {
     List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort);
 
     long countTaskMonitorItems(String status, String type, String stage, String taskId);
+
+    TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now);
 
     Map<String, Object> findTaskFlowRow(String table, String idColumn, String id);
 

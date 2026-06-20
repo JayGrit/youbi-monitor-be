@@ -3,6 +3,7 @@ package com.youbi.monitor.controller;
 import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.youbi.monitor.model.TaskFlowDetail;
+import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.service.DiagnosticArtifactService;
 import com.youbi.monitor.service.MonitorService;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -45,6 +46,15 @@ public class MonitorTaskController {
     @GetMapping("/api/video-tasks/{taskId}/flow")
     public TaskFlowDetail flow(@PathVariable String taskId) {
         TaskFlowDetail detail = monitorService.getTaskFlow(taskId);
+        if (detail == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
+        }
+        return detail;
+    }
+
+    @GetMapping("/api/video-tasks/{taskId}/progress")
+    public TaskProgressDetail progress(@PathVariable String taskId) {
+        TaskProgressDetail detail = monitorService.getTaskProgress(taskId);
         if (detail == null) {
             throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
         }

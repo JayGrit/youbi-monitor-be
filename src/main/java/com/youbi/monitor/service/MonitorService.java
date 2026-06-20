@@ -4,6 +4,7 @@ import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.TaskFlowDetail;
 import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.WhisperProcessingDetail;
 import com.youbi.monitor.model.WhisperWordTimestamp;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
@@ -146,6 +147,10 @@ public class MonitorService {
             stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
         }
         return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
+    }
+
+    public TaskProgressDetail getTaskProgress(String taskId) {
+        return taskQueryRepositoryService.findTaskProgress(taskId, LocalDateTime.now());
     }
 
     private void enrichSourceMetadata(Map<String, Object> videoInfo) {

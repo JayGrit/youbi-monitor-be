@@ -4,6 +4,7 @@ import com.youbi.monitor.dto.DeviceHeartbeat;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.StageNode;
 import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.UploadPlatformStatus;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
 import com.youbi.monitor.repository.MonitorRepository;
@@ -160,11 +161,13 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
               FROM asr_segment
+              __ASR_TASK_FILTER__
               GROUP BY task_id
             ) fa ON fa.task_id = t.id
             LEFT JOIN (
               SELECT task_id, COUNT(*) translated_count
               FROM translator_segment
+              __TRANSLATOR_SEGMENT_TASK_FILTER__
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
             LEFT JOIN (
@@ -180,7 +183,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   COUNT(s.task_id) translated_count
                 FROM `translator-chunk` ch
                 LEFT JOIN translator_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
-                WHERE ch.row_role = 'normal'
+                WHERE __TRANSLATOR_CHUNK_TASK_FILTER__ ch.row_role = 'normal'
                 GROUP BY ch.task_id, ch.chunk_index
               ) chunk_progress
               GROUP BY chunk_progress.task_id
@@ -188,7 +191,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN (
               SELECT task_id, COUNT(DISTINCT item_index) translator_failed_count
               FROM translator_api_task
-              WHERE status = 'failed' AND request_key LIKE 'chunk:%'
+              WHERE __TRANSLATOR_FAILURE_TASK_FILTER__ status = 'failed' AND request_key LIKE 'chunk:%'
               GROUP BY task_id
             ) tf ON tf.task_id = t.id
             LEFT JOIN (
@@ -198,6 +201,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) speaker_failed_count,
                 COUNT(*) speaker_total_count
               FROM speaker_segment
+              __SPEAKER_SEGMENT_TASK_FILTER__
               GROUP BY task_id
             ) ss ON ss.task_id = t.id
             LEFT JOIN (
@@ -209,7 +213,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   SEPARATOR 0x0A
                 ) child_error_message
               FROM translator_api_task
-              WHERE status = 'failed'
+              WHERE __TRANSLATOR_ERROR_TASK_FILTER__ status = 'failed'
               GROUP BY task_id
             ) te ON te.task_id = t.id
             LEFT JOIN (
@@ -221,7 +225,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                   SEPARATOR 0x0A
                 ) child_error_message
               FROM speaker_segment
-              WHERE status = 'failed'
+              WHERE __SPEAKER_ERROR_TASK_FILTER__ status = 'failed'
               GROUP BY task_id
             ) se ON se.task_id = t.id
             __TASK_MONITOR_WHERE__
@@ -313,6 +317,28 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return count == null ? 0 : count;
     }
 
+    @Override
+    public TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now) {
+        SqlFilter filter = new SqlFilter("WHERE t.id = ?", List.of(taskId));
+        List<Object> args = new ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            args.add(taskId);
+        }
+        args.add(taskId);
+        args.add(1);
+        args.add(0);
+        List<TaskMonitorItem> rows = repository.query(
+                progressSql(MONITOR_SQL, filter),
+                new TaskRowMapper(now),
+                args.toArray()
+        );
+        if (rows.isEmpty()) {
+            return null;
+        }
+        TaskMonitorItem row = rows.get(0);
+        return new TaskProgressDetail(row.distributorStages(), row.nodes());
+    }
+
     private void ensureVideoInfoColumn(String column, String definition) {
         if (tableExists("video_info") && !columnExists("video_info", column)) {
             repository.update("ALTER TABLE video_info ADD COLUMN " + quotedIdentifier(column) + " " + definition);
@@ -320,6 +346,32 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     private String monitorSql(String template, SqlFilter filter, String sort) {
+        return applyCapabilities(template)
+                .replace("__ASR_TASK_FILTER__", "")
+                .replace("__TRANSLATOR_SEGMENT_TASK_FILTER__", "")
+                .replace("__TRANSLATOR_CHUNK_TASK_FILTER__", "")
+                .replace("__TRANSLATOR_FAILURE_TASK_FILTER__", "")
+                .replace("__SPEAKER_SEGMENT_TASK_FILTER__", "")
+                .replace("__TRANSLATOR_ERROR_TASK_FILTER__", "")
+                .replace("__SPEAKER_ERROR_TASK_FILTER__", "")
+                .replace("__TASK_MONITOR_WHERE__", filter.clause())
+                .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
+    }
+
+    private String progressSql(String template, SqlFilter filter) {
+        return applyCapabilities(template)
+                .replace("__ASR_TASK_FILTER__", "WHERE task_id = ?")
+                .replace("__TRANSLATOR_SEGMENT_TASK_FILTER__", "WHERE task_id = ?")
+                .replace("__TRANSLATOR_CHUNK_TASK_FILTER__", "ch.task_id = ? AND")
+                .replace("__TRANSLATOR_FAILURE_TASK_FILTER__", "task_id = ? AND")
+                .replace("__SPEAKER_SEGMENT_TASK_FILTER__", "WHERE task_id = ?")
+                .replace("__TRANSLATOR_ERROR_TASK_FILTER__", "task_id = ? AND")
+                .replace("__SPEAKER_ERROR_TASK_FILTER__", "task_id = ? AND")
+                .replace("__TASK_MONITOR_WHERE__", filter.clause())
+                .replace("__TASK_MONITOR_ORDER_BY__", "");
+    }
+
+    private String applyCapabilities(String template) {
         String progressSelect = "NULL downloader_progress_percent,";
         String progressJoin = "";
         if (tableExists("downloader_detail")) {
@@ -361,9 +413,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 .replace("__DOWNLOADER_PROGRESS_JOIN__", progressJoin)
                 .replace("__ASSETER_SELECT__", asseterSelect)
                 .replace("__ASSETER_JOIN__", asseterJoin)
-                .replace("__DISTRIBUTOR_STAGES_SELECT__", distributorStagesSelect)
-                .replace("__TASK_MONITOR_WHERE__", filter.clause())
-                .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
+                .replace("__DISTRIBUTOR_STAGES_SELECT__", distributorStagesSelect);
     }
 
     private static String monitorOrderBy(String sort) {
