@@ -25,13 +25,24 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     @Override
     public List<DiagnosticArtifactRecord> listByTaskId(String taskId) {
         return repository.query("""
-                SELECT id, task_id, run_id, platform, source, account_key, step_index, step_name,
-                       screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
-                       screenshot_width, screenshot_height, status, error_message, created_at
-                FROM uploader_diagonostic
-                WHERE task_id = ?
-                ORDER BY created_at DESC, run_id DESC, step_index ASC, id ASC
-                """, (rs, rowNum) -> mapRecord(rs), taskId);
+                SELECT diagnostic.id, diagnostic.task_id, diagnostic.run_id, diagnostic.platform,
+                       diagnostic.source, diagnostic.account_key, diagnostic.step_index, diagnostic.step_name,
+                       diagnostic.screenshot_url, diagnostic.html_url,
+                       diagnostic.screenshot_size_bytes, diagnostic.html_size_bytes,
+                       diagnostic.screenshot_width, diagnostic.screenshot_height,
+                       diagnostic.status, diagnostic.error_message, diagnostic.created_at
+                FROM uploader_diagonostic diagnostic
+                WHERE diagnostic.task_id = ?
+                   OR EXISTS (
+                       SELECT 1
+                       FROM operator_task operator_task
+                       WHERE operator_task.task_id = ?
+                         AND operator_task.run_id = diagnostic.task_id
+                         AND operator_task.action = 'upload_video'
+                   )
+                ORDER BY diagnostic.created_at DESC, diagnostic.run_id DESC,
+                         diagnostic.step_index ASC, diagnostic.id ASC
+                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId);
     }
 
     @Override
