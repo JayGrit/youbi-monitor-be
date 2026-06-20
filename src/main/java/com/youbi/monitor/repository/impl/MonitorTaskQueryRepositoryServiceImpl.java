@@ -3,7 +3,9 @@ package com.youbi.monitor.repository.impl;
 import com.youbi.monitor.dto.DeviceHeartbeat;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.StageNode;
+import com.youbi.monitor.model.StageError;
 import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.model.TaskMonitorSummary;
 import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.UploadPlatformStatus;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
@@ -21,9 +23,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlSupport implements IMonitorTaskQueryRepositoryService {
+    private final Map<String, List<String>> tableColumnsCache = new ConcurrentHashMap<>();
     private static final long HEARTBEAT_ONLINE_SECONDS = 60;
     private static final List<String> HEARTBEAT_DEVICES = List.of(
             "Macbook Air M4",
@@ -78,7 +82,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               COALESCE(tc.translator_completed_count, ts.translated_count) translator_completed_count,
               tf.translator_failed_count translator_failed_count,
               COALESCE(tc.translator_total_count, GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0))) translator_total_count,
-              te.child_error_message translator_child_error,
+              NULL translator_child_error,
 
               CASE WHEN COALESCE(ss.speaker_failed_count, 0) > 0 THEN 'failed' ELSE sp.status END speaker_status,
               sp.started_at speaker_started_at,
@@ -87,7 +91,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               ss.speaker_completed_count,
               ss.speaker_failed_count,
               ss.speaker_total_count,
-              se.child_error_message speaker_child_error,
+              NULL speaker_child_error,
 
               __ASSETER_SELECT__
 
@@ -204,30 +208,31 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               __SPEAKER_SEGMENT_TASK_FILTER__
               GROUP BY task_id
             ) ss ON ss.task_id = t.id
-            LEFT JOIN (
-              SELECT
-                task_id,
-                GROUP_CONCAT(
-                  CONCAT(request_key, ' #', item_index, ': ', COALESCE(NULLIF(error_message, ''), status))
-                  ORDER BY id
-                  SEPARATOR 0x0A
-                ) child_error_message
-              FROM translator_api_task
-              WHERE __TRANSLATOR_ERROR_TASK_FILTER__ status = 'failed'
-              GROUP BY task_id
-            ) te ON te.task_id = t.id
-            LEFT JOIN (
-              SELECT
-                task_id,
-                GROUP_CONCAT(
-                  CONCAT('segment #', item_index, ': ', COALESCE(NULLIF(error_message, ''), status))
-                  ORDER BY item_index
-                  SEPARATOR 0x0A
-                ) child_error_message
-              FROM speaker_segment
-              WHERE __SPEAKER_ERROR_TASK_FILTER__ status = 'failed'
-              GROUP BY task_id
-            ) se ON se.task_id = t.id
+            __TASK_MONITOR_WHERE__
+            __TASK_MONITOR_ORDER_BY__
+            LIMIT ? OFFSET ?
+            """;
+    private static final String MONITOR_SUMMARY_SQL = """
+            SELECT
+              t.id,
+              COALESCE(NULLIF(vi.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
+              vi.source_url,
+              sv.webpage_url source_webpage_url,
+              vi.source_thumbnail_url,
+              sv.duration source_duration_seconds,
+              vi.minio_storage_bytes,
+              vi.minio_storage_object_count,
+              vi.minio_storage_updated_at,
+              vi.type task_type,
+              t.status,
+              t.current_stage,
+              t.created_at,
+              t.started_at,
+              t.completed_at,
+              t.error_message
+            FROM task t
+            LEFT JOIN video_info vi ON vi.task_id = t.id
+            LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __TASK_MONITOR_WHERE__
             __TASK_MONITOR_ORDER_BY__
             LIMIT ? OFFSET ?
@@ -298,16 +303,20 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private void ensurePublisherColumn(String column, String definition) {
         if (!columnExists("publisher_result", column)) {
             repository.update("ALTER TABLE publisher_result ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+            invalidateSchemaCapability("publisher_result", column);
         }
     }
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort) {
+    public List<TaskMonitorSummary> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort) {
         SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
-        return repository.query(monitorSql(MONITOR_SQL, filter, sort), new TaskRowMapper(now), args.toArray());
+        String sql = MONITOR_SUMMARY_SQL
+                .replace("__TASK_MONITOR_WHERE__", filter.clause())
+                .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
+        return repository.query(sql, new TaskSummaryRowMapper(now), args.toArray());
     }
 
     @Override
@@ -321,7 +330,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     public TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now) {
         SqlFilter filter = new SqlFilter("WHERE t.id = ?", List.of(taskId));
         List<Object> args = new ArrayList<>();
-        for (int i = 0; i < 7; i++) {
+        for (int i = 0; i < 5; i++) {
             args.add(taskId);
         }
         args.add(taskId);
@@ -336,12 +345,69 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             return null;
         }
         TaskMonitorItem row = rows.get(0);
-        return new TaskProgressDetail(row.distributorStages(), row.nodes());
+        return new TaskProgressDetail(row.distributorStages(), withStructuredErrors(taskId, row.nodes()));
+    }
+
+    private List<StageNode> withStructuredErrors(String taskId, List<StageNode> nodes) {
+        List<StageNode> enriched = new ArrayList<>(nodes.size());
+        for (StageNode node : nodes) {
+            if ("translator".equals(node.key())) {
+                enriched.add(withErrors(node, translatorErrors(taskId), errorCount("translator_api_task", taskId)));
+            } else if ("speaker".equals(node.key())) {
+                enriched.add(withErrors(node, speakerErrors(taskId), errorCount("speaker_segment", taskId)));
+            } else {
+                enriched.add(node);
+            }
+        }
+        return enriched;
+    }
+
+    private List<StageError> translatorErrors(String taskId) {
+        return repository.query("""
+                SELECT item_index, COALESCE(NULLIF(error_message, ''), status) message
+                FROM translator_api_task
+                WHERE task_id = ? AND status = 'failed'
+                ORDER BY id DESC
+                LIMIT 20
+                """, (rs, rowNum) -> new StageError(integerOrNull(rs, "item_index"), rs.getString("message")), taskId);
+    }
+
+    private List<StageError> speakerErrors(String taskId) {
+        return repository.query("""
+                SELECT item_index, COALESCE(NULLIF(error_message, ''), status) message
+                FROM speaker_segment
+                WHERE task_id = ? AND status = 'failed'
+                ORDER BY item_index DESC
+                LIMIT 20
+                """, (rs, rowNum) -> new StageError(integerOrNull(rs, "item_index"), rs.getString("message")), taskId);
+    }
+
+    private int errorCount(String table, String taskId) {
+        Integer count = repository.queryForObject(
+                "SELECT COUNT(*) FROM " + quotedIdentifier(table) + " WHERE task_id = ? AND status = 'failed'",
+                Integer.class,
+                taskId
+        );
+        return count == null ? 0 : count;
+    }
+
+    private static StageNode withErrors(StageNode node, List<StageError> errors, int errorCount) {
+        return new StageNode(
+                node.key(), node.label(), node.status(), node.startedAt(), node.completedAt(), node.elapsedSeconds(),
+                node.completedCount(), node.failedCount(), node.totalCount(), node.progressPercent(),
+                node.errorMessage(), node.childErrorMessage(), node.platformStatuses(), errors, errorCount, errorCount > errors.size()
+        );
+    }
+
+    private static Integer integerOrNull(ResultSet rs, String column) throws SQLException {
+        int value = rs.getInt(column);
+        return rs.wasNull() ? null : value;
     }
 
     private void ensureVideoInfoColumn(String column, String definition) {
         if (tableExists("video_info") && !columnExists("video_info", column)) {
             repository.update("ALTER TABLE video_info ADD COLUMN " + quotedIdentifier(column) + " " + definition);
+            invalidateSchemaCapability("video_info", column);
         }
     }
 
@@ -352,8 +418,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 .replace("__TRANSLATOR_CHUNK_TASK_FILTER__", "")
                 .replace("__TRANSLATOR_FAILURE_TASK_FILTER__", "")
                 .replace("__SPEAKER_SEGMENT_TASK_FILTER__", "")
-                .replace("__TRANSLATOR_ERROR_TASK_FILTER__", "")
-                .replace("__SPEAKER_ERROR_TASK_FILTER__", "")
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
     }
@@ -365,8 +429,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 .replace("__TRANSLATOR_CHUNK_TASK_FILTER__", "ch.task_id = ? AND")
                 .replace("__TRANSLATOR_FAILURE_TASK_FILTER__", "task_id = ? AND")
                 .replace("__SPEAKER_SEGMENT_TASK_FILTER__", "WHERE task_id = ?")
-                .replace("__TRANSLATOR_ERROR_TASK_FILTER__", "task_id = ? AND")
-                .replace("__SPEAKER_ERROR_TASK_FILTER__", "task_id = ? AND")
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", "");
     }
@@ -499,12 +561,12 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         if (!tableExists(table)) {
             return List.of();
         }
-        return repository.queryForList("""
+        return tableColumnsCache.computeIfAbsent(table, key -> repository.queryForList("""
                 SELECT COLUMN_NAME
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
                 ORDER BY ORDINAL_POSITION
-                """, String.class, table);
+                """, String.class, key));
     }
 
     private Map<String, Object> rowMap(ResultSet rs) throws SQLException {
@@ -549,7 +611,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     private String heartbeatSql() {
-        List<String> columns = repository.queryForList(HEARTBEAT_COLUMNS_SQL, String.class, HEARTBEAT_TABLE);
+        List<String> columns = columns(HEARTBEAT_TABLE);
         StringBuilder sql = new StringBuilder("SELECT service_name");
         for (String device : HEARTBEAT_DEVICES) {
             sql.append(",\n  ");
@@ -623,7 +685,10 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                         progressPercent(rs, stage.key()),
                         rs.getString(stage.errorColumn()),
                         childErrorMessage(rs, stage.key()),
-                        platformStatuses(rs, stage.key())
+                        platformStatuses(rs, stage.key()),
+                        List.of(),
+                        0,
+                        false
                 ));
             }
 
@@ -730,6 +795,49 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             statuses.add(new UploadPlatformStatus(platform, status));
         }
 
+    }
+
+    private static class TaskSummaryRowMapper implements RowMapper<TaskMonitorSummary> {
+        private final LocalDateTime now;
+
+        private TaskSummaryRowMapper(LocalDateTime now) {
+            this.now = now;
+        }
+
+        @Override
+        public TaskMonitorSummary mapRow(ResultSet rs, int rowNum) throws SQLException {
+            LocalDateTime startedAt = timestamp(rs, "started_at");
+            LocalDateTime completedAt = timestamp(rs, "completed_at");
+            return new TaskMonitorSummary(
+                    rs.getString("id"),
+                    rs.getString("title"),
+                    rs.getString("source_url"),
+                    rs.getString("source_webpage_url"),
+                    rs.getString("source_thumbnail_url"),
+                    doubleOrNull(rs, "source_duration_seconds"),
+                    nullableLong(rs, "minio_storage_bytes"),
+                    integerOrNull(rs, "minio_storage_object_count"),
+                    timestamp(rs, "minio_storage_updated_at"),
+                    rs.getString("task_type"),
+                    rs.getString("status"),
+                    rs.getString("current_stage"),
+                    timestamp(rs, "created_at"),
+                    startedAt,
+                    completedAt,
+                    elapsedSeconds(startedAt, completedAt, now),
+                    rs.getString("error_message")
+            );
+        }
+
+        private static Double doubleOrNull(ResultSet rs, String column) throws SQLException {
+            double value = rs.getDouble(column);
+            return rs.wasNull() ? null : value;
+        }
+
+        private static Integer integerOrNull(ResultSet rs, String column) throws SQLException {
+            int value = rs.getInt(column);
+            return rs.wasNull() ? null : value;
+        }
     }
 
     private record SqlFilter(String clause, List<Object> args) {

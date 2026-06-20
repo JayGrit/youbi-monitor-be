@@ -16,6 +16,9 @@ public record StageNode(
         Double progressPercent,
         String errorMessage,
         String childErrorMessage,
-        List<UploadPlatformStatus> platformStatuses
+        List<UploadPlatformStatus> platformStatuses,
+        List<StageError> errors,
+        int errorCount,
+        boolean errorsTruncated
 ) {
 }

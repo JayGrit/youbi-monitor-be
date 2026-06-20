@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 abstract class MonitorRepositorySqlSupport {
     protected static final List<StageDefinition> STAGES = List.of(
@@ -83,27 +84,41 @@ abstract class MonitorRepositorySqlSupport {
     );
 
     protected final MonitorRepository repository;
+    private final Map<String, Boolean> tableExistsCache = new ConcurrentHashMap<>();
+    private final Map<String, Boolean> columnExistsCache = new ConcurrentHashMap<>();
 
     protected MonitorRepositorySqlSupport(MonitorRepository repository) {
         this.repository = repository;
     }
 
     public boolean tableExists(String table) {
-        Integer count = repository.queryForObject("""
+        return tableExistsCache.computeIfAbsent(table, key -> {
+            Integer count = repository.queryForObject("""
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.TABLES
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-                """, Integer.class, table);
-        return count != null && count > 0;
+                """, Integer.class, key);
+            return count != null && count > 0;
+        });
     }
 
     protected boolean columnExists(String table, String column) {
-        Integer count = repository.queryForObject("""
+        String cacheKey = table + "\u0000" + column;
+        return columnExistsCache.computeIfAbsent(cacheKey, key -> {
+            Integer count = repository.queryForObject("""
                 SELECT COUNT(*)
                 FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
                 """, Integer.class, table, column);
-        return count != null && count > 0;
+            return count != null && count > 0;
+        });
+    }
+
+    protected void invalidateSchemaCapability(String table, String column) {
+        tableExistsCache.remove(table);
+        if (column != null) {
+            columnExistsCache.remove(table + "\u0000" + column);
+        }
     }
 
     protected void ensureOperatorColumn(String table) {
@@ -112,6 +127,7 @@ abstract class MonitorRepositorySqlSupport {
     protected void dropColumnIfExists(String table, String column) {
         if (tableExists(table) && columnExists(table, column)) {
             repository.update("ALTER TABLE " + quotedIdentifier(table) + " DROP COLUMN " + quotedIdentifier(column));
+            invalidateSchemaCapability(table, column);
         }
     }
 

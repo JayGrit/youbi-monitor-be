@@ -3,7 +3,7 @@ package com.youbi.monitor.service;
 import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.TaskFlowDetail;
-import com.youbi.monitor.model.TaskMonitorItem;
+import com.youbi.monitor.model.TaskMonitorSummary;
 import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.WhisperProcessingDetail;
 import com.youbi.monitor.model.WhisperWordTimestamp;
@@ -126,10 +126,9 @@ public class MonitorService {
     public MonitorResponse listTasks(int page, int limit, String status, String type, String stage, String taskId, String sort) {
         LocalDateTime now = LocalDateTime.now();
         int offset = Math.max(0, page - 1) * limit;
-        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, type, stage, taskId, sort);
-        List<ServiceHeartbeat> serviceHeartbeats = taskQueryRepositoryService.listServiceHeartbeats(now);
+        List<TaskMonitorSummary> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, type, stage, taskId, sort);
         long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, type, stage, taskId);
-        return new MonitorResponse(tasks, serviceHeartbeats, now, page, limit, totalCount);
+        return new MonitorResponse(tasks, now, page, limit, totalCount);
     }
 
     public List<ServiceHeartbeat> listServiceHeartbeats() {

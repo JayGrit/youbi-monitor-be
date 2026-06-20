@@ -19,6 +19,24 @@ import static org.mockito.Mockito.when;
 class MonitorTaskQueryRepositoryServiceImplTest {
 
     @Test
+    void summaryQueryDoesNotJoinStageOrChildTables() {
+        MonitorRepository repository = mock(MonitorRepository.class);
+        AtomicReference<String> capturedSql = new AtomicReference<>();
+        when(repository.query(anyString(), any(RowMapper.class), any(Object[].class))).thenAnswer(invocation -> {
+            capturedSql.set(invocation.getArgument(0));
+            return List.of();
+        });
+
+        MonitorTaskQueryRepositoryServiceImpl service = new MonitorTaskQueryRepositoryServiceImpl(repository);
+        service.listTaskMonitorItems(LocalDateTime.now(), 20, 0, "running", "dubbing", "speaker", "task", "created_desc");
+
+        assertThat(capturedSql.get())
+                .contains("FROM task t", "LEFT JOIN video_info", "LEFT JOIN submitter_video")
+                .doesNotContain("asr_segment", "translator_segment", "translator_api_task", "speaker_segment")
+                .doesNotContain("LEFT JOIN downloader", "LEFT JOIN demucs", "LEFT JOIN whisper", "LEFT JOIN uploader");
+    }
+
+    @Test
     void progressScopesEveryChildAggregationToOneTask() {
         MonitorRepository repository = mock(MonitorRepository.class);
         AtomicReference<String> capturedSql = new AtomicReference<>();
@@ -42,7 +60,7 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         assertThat(normalizedSql).contains("FROM speaker_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("WHERE t.id = ?");
         assertThat(capturedArgs.get()).containsExactly(
-                "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", 1, 0
+                "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", 1, 0
         );
     }
 }
