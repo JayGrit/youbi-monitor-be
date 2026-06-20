@@ -26,7 +26,8 @@ public class AccountProfileService {
             Map.entry("kuaishou", "uploader_account_kuaishou"),
             Map.entry("jinritoutiao", "uploader_account_jinritoutiao"),
             Map.entry("x", "uploader_account_x"),
-            Map.entry("youtube", "uploader_account_youtube")
+            Map.entry("youtube", "uploader_account_youtube"),
+            Map.entry("doubao", "publisher_account_doubao")
     );
 
     private final IAccountProfileRepositoryService repositoryService;

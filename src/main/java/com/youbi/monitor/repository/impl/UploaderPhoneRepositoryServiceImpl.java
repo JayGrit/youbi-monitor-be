@@ -28,7 +28,8 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
             new PlatformTable("kuaishou", "uploader_account_kuaishou", "kuaishou_account_id"),
             new PlatformTable("jinritoutiao", "uploader_account_jinritoutiao", "jinritoutiao_account_id"),
             new PlatformTable("x", "uploader_account_x", "x_account_id"),
-            new PlatformTable("youtube", "uploader_account_youtube", "youtube_account_id")
+            new PlatformTable("youtube", "uploader_account_youtube", "youtube_account_id"),
+            new PlatformTable("doubao", "publisher_account_doubao", "doubao_account_id")
     );
 
     private final UploaderPhoneRepository repository;

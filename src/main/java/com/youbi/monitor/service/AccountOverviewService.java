@@ -27,11 +27,13 @@ public class AccountOverviewService {
             "kuaishou",
             "jinritoutiao",
             "x",
-            "youtube"
+            "youtube",
+            "doubao"
     );
     private static final Map<String, String> ACCOUNT_TABLES = Map.of(
             "x", "uploader_account_x",
-            "youtube", "uploader_account_youtube"
+            "youtube", "uploader_account_youtube",
+            "doubao", "publisher_account_doubao"
     );
 
     private final MonitorRepository repository;
@@ -58,7 +60,7 @@ public class AccountOverviewService {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountSelectSql("") + """
-                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube'), ua.account_key
+                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao'), ua.account_key
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
         );
@@ -310,6 +312,7 @@ public class AccountOverviewService {
                          WHEN 'jinritoutiao' THEN j.user_id
                          WHEN 'x' THEN tx.user_id
                          WHEN 'youtube' THEN y.user_id
+                         WHEN 'doubao' THEN db.user_id
                          ELSE NULL
                        END AS user_id,
                        CASE ua.platform
@@ -320,6 +323,7 @@ public class AccountOverviewService {
                          WHEN 'jinritoutiao' THEN j.nickname
                          WHEN 'x' THEN tx.nickname
                          WHEN 'youtube' THEN y.nickname
+                         WHEN 'doubao' THEN db.nickname
                          ELSE NULL
                        END AS nickname,
                        CASE ua.platform
@@ -331,6 +335,7 @@ public class AccountOverviewService {
                          WHEN 'jinritoutiao' THEN j.storage_state_json
                          WHEN 'x' THEN tx.storage_state_json
                          WHEN 'youtube' THEN y.storage_state_json
+                         WHEN 'doubao' THEN db.storage_state_json
                          ELSE NULL
                        END AS storage_json,
                        CASE ua.platform
@@ -342,6 +347,7 @@ public class AccountOverviewService {
                          WHEN 'jinritoutiao' THEN j.updated_at
                          WHEN 'x' THEN tx.updated_at
                          WHEN 'youtube' THEN y.updated_at
+                         WHEN 'doubao' THEN db.updated_at
                          ELSE NULL
                        END AS cookie_updated_at,
                        CASE ua.platform
@@ -353,6 +359,7 @@ public class AccountOverviewService {
                          WHEN 'jinritoutiao' THEN j.display_name
                          WHEN 'x' THEN tx.display_name
                          WHEN 'youtube' THEN y.display_name
+                         WHEN 'doubao' THEN db.display_name
                          ELSE NULL
                        END AS display_name,
                        CASE ua.platform
@@ -364,6 +371,7 @@ public class AccountOverviewService {
                          WHEN 'jinritoutiao' THEN j.avatar_url
                          WHEN 'x' THEN tx.avatar_url
                          WHEN 'youtube' THEN y.avatar_url
+                         WHEN 'doubao' THEN db.avatar_url
                          ELSE NULL
                        END AS avatar_url
                 FROM uploader_account ua
@@ -383,7 +391,9 @@ public class AccountOverviewService {
                        ON ua.platform = 'x' AND tx.account_key = ua.account_key
                 LEFT JOIN uploader_account_youtube y
                        ON ua.platform = 'youtube' AND y.account_key = ua.account_key
-                WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube')
+                LEFT JOIN publisher_account_doubao db
+                       ON ua.platform = 'doubao' AND db.account_key = ua.account_key
+                WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao')
                   AND ua.is_deprecated = 0
                 %s
                 """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
