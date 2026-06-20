@@ -373,18 +373,28 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         applyUploaderAccountStatusChanges(normalized, accountStatusChanges);
 
         List<String> registeredTaskIds = rows.stream().map(UploadBackfillInsertRow::taskId).distinct().toList();
-        Object[] registeredArgs = registeredTaskIds.toArray();
         String registeredPlaceholders = placeholders(registeredTaskIds.size());
+        List<Object> uploaderArgs = new ArrayList<>();
+        uploaderArgs.add(normalized);
+        uploaderArgs.add(normalized);
+        uploaderArgs.add(normalized);
+        uploaderArgs.addAll(registeredTaskIds);
         int uploaderUpdated = repository.update("""
                 UPDATE uploader
                 SET status = 'running',
+                    upload_platforms = CASE
+                        WHEN COALESCE(NULLIF(TRIM(upload_platforms), ''), '') = '' THEN ?
+                        WHEN FIND_IN_SET(?, REPLACE(upload_platforms, ' ', '')) > 0 THEN upload_platforms
+                        ELSE CONCAT(upload_platforms, ',', ?)
+                    END,
                     %s = 'ready',
                     started_at = COALESCE(started_at, NOW()),
                     completed_at = NULL,
                     error_message = NULL,
                     `operator` = NULL
                 WHERE task_id IN (%s)
-                """.formatted(quotedIdentifier(uploadStatusColumn(normalized)), registeredPlaceholders), registeredArgs);
+                """.formatted(quotedIdentifier(uploadStatusColumn(normalized)), registeredPlaceholders), uploaderArgs.toArray());
+        Object[] registeredArgs = registeredTaskIds.toArray();
         int taskUpdated = repository.update("""
                 UPDATE task
                 SET status = 'running',
