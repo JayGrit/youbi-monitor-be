@@ -2,7 +2,10 @@ package com.youbi.monitor.repository.impl;
 
 import com.youbi.monitor.repository.ITaskLifecycleRepositoryService;
 import com.youbi.monitor.repository.MonitorRepository;
+import com.youbi.monitor.model.RouteNode;
 import com.youbi.monitor.service.MonitorService;
+import com.youbi.monitor.service.StageRegistry;
+import com.youbi.monitor.service.TaskRouteService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,8 +15,17 @@ import java.util.Map;
 
 @Service
 public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupport implements ITaskLifecycleRepositoryService {
-    public TaskLifecycleRepositoryServiceImpl(MonitorRepository repository) {
+    private final TaskRouteService taskRouteService;
+    private final StageRegistry stageRegistry;
+
+    public TaskLifecycleRepositoryServiceImpl(
+            MonitorRepository repository,
+            TaskRouteService taskRouteService,
+            StageRegistry stageRegistry
+    ) {
         super(repository);
+        this.taskRouteService = taskRouteService;
+        this.stageRegistry = stageRegistry;
     }
 
     @Transactional
@@ -43,7 +55,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     @Override
     public String findTaskStatus(String taskId) {
         List<String> statuses = repository.queryForList(
-                "SELECT status FROM task WHERE id = ?",
+                "SELECT status FROM task WHERE id = ? FOR UPDATE",
                 String.class,
                 taskId
         );
@@ -65,11 +77,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         String message = "手动停止任务";
         int stoppedStages = 0;
         String stoppedStage = "";
-        for (RetryStage stage : RETRY_STAGES) {
-            if (!tableExists(stage.table())) {
+        List<RouteNode> route = taskRouteService.routeForTask(taskId);
+        for (RouteNode node : route) {
+            if (!tableExists(node.tableName())) {
                 continue;
             }
-            ensureOperatorColumn(stage.table());
+            ensureOperatorColumn(node.tableName());
             int updated = repository.update("""
                     UPDATE %s
                     SET status = 'failed',
@@ -77,11 +90,11 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         error_message = ?,
                         `operator` = NULL
                     WHERE task_id = ? AND status = 'running'
-                    """.formatted(quotedIdentifier(stage.table())), message, taskId);
+                    """.formatted(quotedIdentifier(node.tableName())), message, taskId);
             if (updated > 0) {
                 stoppedStages += updated;
                 if (stoppedStage.isBlank()) {
-                    stoppedStage = stage.key();
+                    stoppedStage = node.stage();
                 }
             }
         }
@@ -106,6 +119,15 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         error_message = ?,
                         `operator` = NULL
                     WHERE task_id = ? AND status IN ('ready', 'running')
+                    """, message, taskId);
+        }
+        if (tableExists("asseter_jobs")) {
+            stoppedStages += repository.update("""
+                    UPDATE asseter_jobs
+                    SET status = 'failed',
+                        completed_at = NOW(),
+                        error_message = ?
+                    WHERE task_id = ? AND status IN ('pending', 'running')
                     """, message, taskId);
         }
 
@@ -316,12 +338,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
 
     @Override
     public boolean hasRunningStage(String taskId) {
-        for (RetryStage stage : RETRY_STAGES) {
-            if (!tableExists(stage.table())) {
+        for (StageRegistry.StagePolicy policy : stageRegistry.policies()) {
+            if (!tableExists(policy.tableName())) {
                 continue;
             }
             Integer count = repository.queryForObject(
-                    "SELECT COUNT(*) FROM " + quotedIdentifier(stage.table()) + " WHERE task_id = ? AND status = 'running'",
+                    "SELECT COUNT(*) FROM " + quotedIdentifier(policy.tableName()) + " WHERE task_id = ? AND status = 'running'",
                     Integer.class,
                     taskId
             );
@@ -329,13 +351,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 return true;
             }
         }
-        if (tableExists("speaker_segment")) {
+        for (String childTable : List.of("translator_api_task", "speaker_segment", "asseter_jobs")) {
+            if (!tableExists(childTable)) continue;
             Integer count = repository.queryForObject(
-                    "SELECT COUNT(*) FROM speaker_segment WHERE task_id = ? AND status = 'running'",
-                    Integer.class,
-                    taskId
-            );
-            return count != null && count > 0;
+                    "SELECT COUNT(*) FROM " + quotedIdentifier(childTable) + " WHERE task_id = ? AND status = 'running'",
+                    Integer.class, taskId);
+            if (count != null && count > 0) return true;
         }
         return false;
     }

@@ -313,7 +313,7 @@ public class MonitorService {
         if (status == null) {
             return null;
         }
-        if ("running".equals(status)) {
+        if ("running".equals(status) || taskLifecycleRepositoryService.hasRunningStage(taskId)) {
             throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before deleting.");
         }
 
