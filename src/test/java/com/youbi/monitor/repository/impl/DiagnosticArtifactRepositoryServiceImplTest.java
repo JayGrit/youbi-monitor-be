@@ -29,19 +29,20 @@ class DiagnosticArtifactRepositoryServiceImplTest {
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(repository).query(sql.capture(), any(RowMapper.class), arguments.capture());
         assertThat(sql.getValue())
+                .contains("SELECT CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci task_id")
                 .contains("FROM operator_task operator_task")
-                .contains("operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id")
+                .contains("SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci")
                 .contains("JOIN publisher_jobs publisher_job")
-                .contains("publisher_job.job_name")
-                .contains("publisher_job_name")
-                .contains("LEFT JOIN product_narration narration")
+                .contains("JOIN product_narration narration")
                 .contains("LIKE CONCAT(narration.cover_prompt, '%')")
                 .contains("LIKE CONCAT(narration.background_prompt, '%')")
-                .contains("'$.aspect_ratio'")
                 .contains("JSON_VALID(operator_task.request_json)")
-                .contains("'$.prompt'");
+                .contains("'$.prompt'")
+                .contains("ON diagnostic.task_id = relevant_task.task_id")
+                .doesNotContain("publisher_job.job_name")
+                .doesNotContain("'$.aspect_ratio'");
         assertThat(arguments.getValue()).containsExactly(
-                "pipeline-task", "pipeline-task", "pipeline-task", "pipeline-task", "pipeline-task"
+                "pipeline-task", "pipeline-task", "pipeline-task", "pipeline-task"
         );
     }
 }

@@ -27,73 +27,24 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         return repository.query("""
                 SELECT diagnostic.id, diagnostic.task_id, diagnostic.run_id, diagnostic.platform,
                        diagnostic.source, diagnostic.account_key,
-                       COALESCE(
-                           publisher_job.job_name,
-                           CASE
-                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
-                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                                      '$.prompt'
-                                    )) LIKE CONCAT(narration.cover_prompt, '%')
-                                   THEN 'generate_cover_image'
-                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
-                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                                      '$.prompt'
-                                    )) LIKE CONCAT(narration.background_prompt, '%')
-                                   THEN 'generate_background_image'
-                               ELSE NULL
-                           END
-                       ) publisher_job_name,
-                       COALESCE(
-                           JSON_UNQUOTE(JSON_EXTRACT(
-                               IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'),
-                               '$.aspect_ratio'
-                           )),
-                           CASE
-                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
-                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                                      '$.prompt'
-                                    )) LIKE CONCAT(narration.cover_prompt, '%')
-                                   THEN '1:1'
-                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
-                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                                      '$.prompt'
-                                    )) LIKE CONCAT(narration.background_prompt, '%')
-                                   THEN '4:3'
-                               ELSE NULL
-                           END
-                       ) aspect_ratio,
+                       NULL publisher_job_name, NULL aspect_ratio,
                        diagnostic.step_index, diagnostic.step_name,
                        diagnostic.screenshot_url, diagnostic.html_url,
                        diagnostic.screenshot_size_bytes, diagnostic.html_size_bytes,
                        diagnostic.screenshot_width, diagnostic.screenshot_height,
                        diagnostic.status, diagnostic.error_message, diagnostic.created_at
                 FROM uploader_diagonostic diagnostic
-                LEFT JOIN operator_task publisher_operator
-                  ON publisher_operator.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
-                LEFT JOIN product_narration narration
-                  ON narration.task_id = ?
-                LEFT JOIN publisher_jobs publisher_job
-                  ON publisher_job.task_id = ?
-                 AND JSON_UNQUOTE(JSON_EXTRACT(
-                       IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'),
-                       '$.prompt'
-                     )) COLLATE utf8mb4_unicode_ci
-                     = JSON_UNQUOTE(JSON_EXTRACT(
-                       IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                       '$.prompt'
-                     )) COLLATE utf8mb4_unicode_ci
-                WHERE diagnostic.task_id = ?
-                   OR EXISTS (
-                       SELECT 1
-                       FROM operator_task operator_task
-                       WHERE operator_task.task_id = ?
-                         AND operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
-                   )
-                   OR EXISTS (
-                       SELECT 1
-                       FROM operator_task operator_task
-                       JOIN publisher_jobs publisher_job
-                         ON publisher_job.task_id = ?
+                JOIN (
+                    SELECT CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci task_id
+                    UNION
+                    SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci
+                    FROM operator_task operator_task
+                    WHERE operator_task.task_id = ?
+                    UNION
+                    SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci
+                    FROM operator_task operator_task
+                    JOIN publisher_jobs publisher_job
+                      ON publisher_job.task_id = ?
                         AND (
                             JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.cover_prompt'))
                                 COLLATE utf8mb4_unicode_ci
@@ -108,24 +59,24 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                                 = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
                                     COLLATE utf8mb4_unicode_ci
                         )
-                       WHERE operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
-                   )
-                   OR (
-                       publisher_operator.run_id IS NOT NULL
-                       AND (
-                           JSON_UNQUOTE(JSON_EXTRACT(
-                               IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                               '$.prompt'
-                           )) LIKE CONCAT(narration.cover_prompt, '%')
-                           OR JSON_UNQUOTE(JSON_EXTRACT(
-                               IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
-                               '$.prompt'
-                           )) LIKE CONCAT(narration.background_prompt, '%')
-                       )
-                   )
+                    UNION
+                    SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci
+                    FROM operator_task operator_task
+                    JOIN product_narration narration
+                      ON narration.task_id = ?
+                    WHERE JSON_UNQUOTE(JSON_EXTRACT(
+                              IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'),
+                              '$.prompt'
+                          )) LIKE CONCAT(narration.cover_prompt, '%')
+                       OR JSON_UNQUOTE(JSON_EXTRACT(
+                              IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'),
+                              '$.prompt'
+                          )) LIKE CONCAT(narration.background_prompt, '%')
+                ) relevant_task
+                  ON diagnostic.task_id = relevant_task.task_id
                 ORDER BY diagnostic.created_at DESC, diagnostic.run_id DESC,
                          diagnostic.step_index ASC, diagnostic.id ASC
-                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId, taskId, taskId, taskId);
+                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId, taskId, taskId);
     }
 
     @Override
