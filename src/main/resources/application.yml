@@ -17,6 +17,8 @@ management:
         include: health
 
 youbi:
+  distributor:
+    base-url: ${YDBI_DISTRIBUTOR_BASE_URL:http://127.0.0.1:8210}
   upload-task-timeout-seconds: ${YDBI_UPLOAD_TASK_TIMEOUT_SECONDS:480}
   alidrive-upload-task-timeout-seconds: ${YDBI_ALIDRIVE_UPLOAD_TASK_TIMEOUT_SECONDS:900}
   playwright:

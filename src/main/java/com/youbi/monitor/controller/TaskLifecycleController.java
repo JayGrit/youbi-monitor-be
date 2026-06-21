@@ -53,14 +53,15 @@ public class TaskLifecycleController {
 
     @PostMapping("/api/video-tasks/{taskId}/stop")
     public MonitorService.TaskStopResult stop(@PathVariable String taskId) {
-        MonitorService.TaskStopResult result = monitorService.stopTask(taskId);
-        if (result == null) {
-            throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
+        try {
+            MonitorService.TaskStopResult result = monitorService.stopTask(taskId);
+            if (!result.stoppedTask()) {
+                throw new ResponseStatusException(CONFLICT, "Task is not running.");
+            }
+            return result;
+        } catch (IllegalStateException exc) {
+            throw new ResponseStatusException(CONFLICT, exc.getMessage(), exc);
         }
-        if (!result.stoppedTask()) {
-            throw new ResponseStatusException(CONFLICT, "Task is not running.");
-        }
-        return result;
     }
 
     @DeleteMapping("/api/video-tasks/{taskId}")

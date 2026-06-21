@@ -1,5 +1,6 @@
 package com.youbi.monitor.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.TaskFlowDetail;
@@ -92,6 +93,7 @@ public class MonitorService {
     private final IUploadSubmissionRepositoryService uploadSubmissionRepositoryService;
     private final ISubmitterAuthorRepositoryService submitterAuthorRepositoryService;
     private final ITaskLifecycleRepositoryService taskLifecycleRepositoryService;
+    private final DistributorLifecycleClient distributorLifecycleClient;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
@@ -103,6 +105,7 @@ public class MonitorService {
             IUploadSubmissionRepositoryService uploadSubmissionRepositoryService,
             ISubmitterAuthorRepositoryService submitterAuthorRepositoryService,
             ITaskLifecycleRepositoryService taskLifecycleRepositoryService,
+            DistributorLifecycleClient distributorLifecycleClient,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -114,6 +117,7 @@ public class MonitorService {
         this.uploadSubmissionRepositoryService = uploadSubmissionRepositoryService;
         this.submitterAuthorRepositoryService = submitterAuthorRepositoryService;
         this.taskLifecycleRepositoryService = taskLifecycleRepositoryService;
+        this.distributorLifecycleClient = distributorLifecycleClient;
         this.minioEndpoint = text(minioEndpoint);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
@@ -295,12 +299,11 @@ public class MonitorService {
         return submitterAuthorRepositoryService.deleteSubmitterAuthorType(author);
     }
 
-    @Transactional
     public boolean markTaskReady(String taskId) {
-        return taskLifecycleRepositoryService.markTaskReady(taskId);
+        distributorLifecycleClient.retry(taskId);
+        return true;
     }
 
-    @Transactional
     public TaskRestartResult restartTask(String taskId) throws IOException {
         String status = taskLifecycleRepositoryService.findTaskStatus(taskId);
         if (status == null) {
@@ -311,7 +314,7 @@ public class MonitorService {
         }
 
         int deletedObjects = deleteTaskObjects(taskId);
-        taskLifecycleRepositoryService.resetTaskRowsForDownloader(taskId);
+        distributorLifecycleClient.restart(taskId);
         return new TaskRestartResult("ready", deletedObjects);
     }
 
@@ -330,9 +333,13 @@ public class MonitorService {
         return new TaskDeleteResult("deleted", deletedRows, deletedObjects);
     }
 
-    @Transactional
     public TaskStopResult stopTask(String taskId) {
-        return taskLifecycleRepositoryService.stopTask(taskId);
+        JsonNode result = distributorLifecycleClient.stop(taskId);
+        return new TaskStopResult(
+                result.path("status").asText("failed"),
+                result.path("stoppedStages").asInt(),
+                result.path("stoppedTask").asBoolean()
+        );
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
