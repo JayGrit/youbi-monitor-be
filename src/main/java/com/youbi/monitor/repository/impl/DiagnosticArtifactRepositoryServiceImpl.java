@@ -26,12 +26,62 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     public List<DiagnosticArtifactRecord> listByTaskId(String taskId) {
         return repository.query("""
                 SELECT diagnostic.id, diagnostic.task_id, diagnostic.run_id, diagnostic.platform,
-                       diagnostic.source, diagnostic.account_key, diagnostic.step_index, diagnostic.step_name,
+                       diagnostic.source, diagnostic.account_key,
+                       COALESCE(
+                           publisher_job.job_name,
+                           CASE
+                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
+                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                                      '$.prompt'
+                                    )) LIKE CONCAT(narration.cover_prompt, '%')
+                                   THEN 'generate_cover_image'
+                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
+                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                                      '$.prompt'
+                                    )) LIKE CONCAT(narration.background_prompt, '%')
+                                   THEN 'generate_background_image'
+                               ELSE NULL
+                           END
+                       ) publisher_job_name,
+                       COALESCE(
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'),
+                               '$.aspect_ratio'
+                           )),
+                           CASE
+                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
+                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                                      '$.prompt'
+                                    )) LIKE CONCAT(narration.cover_prompt, '%')
+                                   THEN '1:1'
+                               WHEN JSON_UNQUOTE(JSON_EXTRACT(
+                                      IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                                      '$.prompt'
+                                    )) LIKE CONCAT(narration.background_prompt, '%')
+                                   THEN '4:3'
+                               ELSE NULL
+                           END
+                       ) aspect_ratio,
+                       diagnostic.step_index, diagnostic.step_name,
                        diagnostic.screenshot_url, diagnostic.html_url,
                        diagnostic.screenshot_size_bytes, diagnostic.html_size_bytes,
                        diagnostic.screenshot_width, diagnostic.screenshot_height,
                        diagnostic.status, diagnostic.error_message, diagnostic.created_at
                 FROM uploader_diagonostic diagnostic
+                LEFT JOIN operator_task publisher_operator
+                  ON publisher_operator.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
+                LEFT JOIN product_narration narration
+                  ON narration.task_id = ?
+                LEFT JOIN publisher_jobs publisher_job
+                  ON publisher_job.task_id = ?
+                 AND JSON_UNQUOTE(JSON_EXTRACT(
+                       IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'),
+                       '$.prompt'
+                     )) COLLATE utf8mb4_unicode_ci
+                     = JSON_UNQUOTE(JSON_EXTRACT(
+                       IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                       '$.prompt'
+                     )) COLLATE utf8mb4_unicode_ci
                 WHERE diagnostic.task_id = ?
                    OR EXISTS (
                        SELECT 1
@@ -60,15 +110,29 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                         )
                        WHERE operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
                    )
+                   OR (
+                       publisher_operator.run_id IS NOT NULL
+                       AND (
+                           JSON_UNQUOTE(JSON_EXTRACT(
+                               IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                               '$.prompt'
+                           )) LIKE CONCAT(narration.cover_prompt, '%')
+                           OR JSON_UNQUOTE(JSON_EXTRACT(
+                               IF(JSON_VALID(publisher_operator.request_json), publisher_operator.request_json, '{}'),
+                               '$.prompt'
+                           )) LIKE CONCAT(narration.background_prompt, '%')
+                       )
+                   )
                 ORDER BY diagnostic.created_at DESC, diagnostic.run_id DESC,
                          diagnostic.step_index ASC, diagnostic.id ASC
-                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId, taskId);
+                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId, taskId, taskId, taskId);
     }
 
     @Override
     public List<DiagnosticArtifactRecord> listByTaskIdAndRunId(String taskId, String runId) {
         return repository.query("""
-                SELECT id, task_id, run_id, platform, source, account_key, step_index, step_name,
+                SELECT id, task_id, run_id, platform, source, account_key,
+                       NULL publisher_job_name, NULL aspect_ratio, step_index, step_name,
                        screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
                        screenshot_width, screenshot_height, status, error_message, created_at
                 FROM uploader_diagonostic
@@ -124,6 +188,8 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 rs.getString("platform"),
                 rs.getString("source"),
                 rs.getString("account_key"),
+                rs.getString("publisher_job_name"),
+                rs.getString("aspect_ratio"),
                 rs.getInt("step_index"),
                 rs.getString("step_name"),
                 rs.getString("screenshot_url"),

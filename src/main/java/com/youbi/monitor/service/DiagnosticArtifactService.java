@@ -77,13 +77,13 @@ public class DiagnosticArtifactService {
                     screenshotUrl, htmlUrl, (long) screenshot.length, (long) html.length, imageSize.width(), imageSize.height());
             log.info("Diagnostic artifact archived taskId={} runId={} platform={} source={} stepIndex={} stepName={} screenshotUrl={} htmlUrl={}",
                     taskId, runId, platform, source, stepIndex, stepName, screenshotUrl, htmlUrl);
-            return new DiagnosticArtifactRecord(id, taskId, runId, platform, source, emptyToNull(accountKey), stepIndex, stepName,
+            return new DiagnosticArtifactRecord(id, taskId, runId, platform, source, emptyToNull(accountKey), null, null, stepIndex, stepName,
                     screenshotUrl, htmlUrl, (long) screenshot.length, (long) html.length, imageSize.width(), imageSize.height(),
                     "uploaded", null, null);
         } catch (Exception exception) {
             log.warn("Diagnostic artifact archive failed taskId={} runId={} platform={} source={} stepIndex={} stepName={} message={}",
                     taskId, runId, platform, source, stepIndex, stepName, exception.getMessage());
-            return new DiagnosticArtifactRecord(null, taskId, runId, platform, source, emptyToNull(accountKey), stepIndex, stepName,
+            return new DiagnosticArtifactRecord(null, taskId, runId, platform, source, emptyToNull(accountKey), null, null, stepIndex, stepName,
                     null, null, null, null, null, null, "upload_failed", exception.getMessage(), null);
         }
     }

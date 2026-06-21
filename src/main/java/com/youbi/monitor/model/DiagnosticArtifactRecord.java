@@ -9,6 +9,8 @@ public record DiagnosticArtifactRecord(
         String platform,
         String source,
         String accountKey,
+        String publisherJobName,
+        String aspectRatio,
         int stepIndex,
         String stepName,
         String screenshotUrl,

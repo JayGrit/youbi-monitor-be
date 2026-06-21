@@ -32,8 +32,16 @@ class DiagnosticArtifactRepositoryServiceImplTest {
                 .contains("FROM operator_task operator_task")
                 .contains("operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id")
                 .contains("JOIN publisher_jobs publisher_job")
+                .contains("publisher_job.job_name")
+                .contains("publisher_job_name")
+                .contains("LEFT JOIN product_narration narration")
+                .contains("LIKE CONCAT(narration.cover_prompt, '%')")
+                .contains("LIKE CONCAT(narration.background_prompt, '%')")
+                .contains("'$.aspect_ratio'")
                 .contains("JSON_VALID(operator_task.request_json)")
                 .contains("'$.prompt'");
-        assertThat(arguments.getValue()).containsExactly("pipeline-task", "pipeline-task", "pipeline-task");
+        assertThat(arguments.getValue()).containsExactly(
+                "pipeline-task", "pipeline-task", "pipeline-task", "pipeline-task", "pipeline-task"
+        );
     }
 }
