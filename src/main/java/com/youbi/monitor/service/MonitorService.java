@@ -156,6 +156,14 @@ public class MonitorService {
         return taskQueryRepositoryService.findTaskProgress(taskId, LocalDateTime.now());
     }
 
+    public List<TaskProgressDetail> getTaskProgressBatch(List<String> taskIds) {
+        LocalDateTime now = LocalDateTime.now();
+        return taskIds.stream()
+                .map(taskId -> taskQueryRepositoryService.findTaskProgress(taskId, now))
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
     private void enrichSourceMetadata(Map<String, Object> videoInfo) {
         Object submitterVideoId = videoInfo.get("submitter_video_id");
         if (submitterVideoId == null) {

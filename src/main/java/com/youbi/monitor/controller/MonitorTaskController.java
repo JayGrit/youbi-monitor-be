@@ -5,11 +5,14 @@ import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.youbi.monitor.model.TaskFlowDetail;
 import com.youbi.monitor.model.TaskProgressDetail;
+import com.youbi.monitor.model.TaskProgressBatchRequest;
 import com.youbi.monitor.service.DiagnosticArtifactService;
 import com.youbi.monitor.service.MonitorService;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -65,6 +68,20 @@ public class MonitorTaskController {
             throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
         }
         return detail;
+    }
+
+    @PostMapping("/api/video-tasks/progress/batch")
+    public List<TaskProgressDetail> progressBatch(@RequestBody TaskProgressBatchRequest request) {
+        List<String> taskIds = request == null || request.taskIds() == null
+                ? List.of()
+                : request.taskIds().stream()
+                        .filter(java.util.Objects::nonNull)
+                        .map(String::trim)
+                        .filter(value -> !value.isBlank())
+                        .distinct()
+                        .limit(20)
+                        .toList();
+        return monitorService.getTaskProgressBatch(taskIds);
     }
 
     @GetMapping("/api/video-tasks/{taskId}/uploader-diagnostics")
