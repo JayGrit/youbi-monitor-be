@@ -94,7 +94,7 @@ public class NarrationManualService {
     public Map<String, Object> uploadImage(String taskId, String rawKind, MultipartFile file) throws Exception {
         ImageKind kind = ImageKind.from(rawKind);
         NarrationRow narration = narration(taskId);
-        String prompt = kind == ImageKind.COVER ? narration.coverPrompt() : narration.backgroundPrompt();
+        String prompt = imagePrompt(taskId, kind, narration);
         if (text(prompt).isBlank()) {
             throw new IOException(kind.label + "提示词尚未生成");
         }
@@ -131,18 +131,28 @@ public class NarrationManualService {
                     .build());
         }
         String imageUrl = minioEndpoint + "/" + minioBucket + "/" + objectKey;
-        repository.update(
-                "UPDATE product_narration SET " + kind.columnName + " = ?, error_message = NULL WHERE task_id = ?",
-                imageUrl,
-                taskId
-        );
+        if (kind.publishMetadata) {
+            repository.update(
+                    "UPDATE video_info SET " + kind.columnName + " = ? WHERE task_id = ?",
+                    imageUrl,
+                    taskId
+            );
+        } else {
+            repository.update(
+                    "UPDATE product_narration SET " + kind.columnName + " = ?, error_message = NULL WHERE task_id = ?",
+                    imageUrl,
+                    taskId
+            );
+        }
         markJobSuccess(taskId, kind.jobName, Map.of(
                 kind.resultKey, imageUrl,
                 "width", image.getWidth(),
                 "height", image.getHeight(),
                 "manual", true
         ));
-        boolean completed = finalizeIfComplete(taskId);
+        boolean completed = kind.publishMetadata
+                ? finalizePublishMetadataIfComplete(taskId)
+                : finalizeIfComplete(taskId);
         return Map.of(
                 "taskId", taskId,
                 "kind", kind.apiName,
@@ -151,6 +161,30 @@ public class NarrationManualService {
                 "height", image.getHeight(),
                 "publisherCompleted", completed
         );
+    }
+
+    private String imagePrompt(String taskId, ImageKind kind, NarrationRow narration) throws IOException {
+        List<String> rows = repository.queryForList("""
+                SELECT input_json
+                FROM publisher_jobs
+                WHERE task_id = ? AND job_name = ?
+                """, String.class, taskId, kind.jobName);
+        if (!rows.isEmpty() && !text(rows.get(0)).isBlank()) {
+            JsonNode input = objectMapper.readTree(rows.get(0));
+            String prompt = input.path("prompt").asText("").trim();
+            if (!prompt.isBlank()) {
+                return prompt;
+            }
+        }
+        if (kind.publishMetadata) {
+            return "";
+        }
+        String basePrompt = kind == ImageKind.COVER ? narration.coverPrompt() : narration.backgroundPrompt();
+        if (text(basePrompt).isBlank()) {
+            return "";
+        }
+        return text(basePrompt).replaceFirst("[。\\s]+$", "")
+                + "。严格使用 " + kind.ratioText + " 比例构图。";
     }
 
     private NarrationRow narration(String taskId) throws IOException {
@@ -416,6 +450,68 @@ public class NarrationManualService {
         return true;
     }
 
+    private boolean finalizePublishMetadataIfComplete(String taskId) throws JsonProcessingException {
+        List<Map<String, Object>> rows = repository.queryForList("""
+                SELECT
+                  vi.upload_title,
+                  vi.upload_description,
+                  vi.upload_tags,
+                  vi.cover_text,
+                  vi.vertical_cover_url,
+                  vi.horizontal_cover_url,
+                  pn.image_prompt
+                FROM video_info vi
+                JOIN product_narration pn ON pn.task_id = vi.task_id
+                WHERE vi.task_id = ?
+                """, taskId);
+        if (rows.isEmpty()) {
+            return false;
+        }
+        Map<String, Object> row = rows.get(0);
+        if (text(row.get("upload_title")).isBlank()
+                || text(row.get("upload_description")).isBlank()
+                || text(row.get("upload_tags")).isBlank()
+                || text(row.get("cover_text")).isBlank()
+                || text(row.get("image_prompt")).isBlank()
+                || text(row.get("vertical_cover_url")).isBlank()
+                || text(row.get("horizontal_cover_url")).isBlank()) {
+            return false;
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("task_id", taskId);
+        result.put("task_type", "narration");
+        result.put("sub_stage", "publish_metadata");
+        result.put("image_prompt", row.get("image_prompt"));
+        result.put("vertical_cover_url", row.get("vertical_cover_url"));
+        result.put("horizontal_cover_url", row.get("horizontal_cover_url"));
+        result.put("manual_completed", true);
+        String resultJson = objectMapper.writeValueAsString(result);
+
+        repository.update("""
+                UPDATE video_info
+                SET final_cover_url = horizontal_cover_url
+                WHERE task_id = ?
+                """, taskId);
+        repository.update("""
+                INSERT INTO publisher_result (task_id, status, result_json, error_message)
+                VALUES (?, 'success', ?, NULL)
+                ON DUPLICATE KEY UPDATE
+                    status = 'success',
+                    result_json = VALUES(result_json),
+                    error_message = NULL
+                """, taskId, resultJson);
+        repository.update("""
+                UPDATE publisher
+                SET status = 'success',
+                    completed_at = NOW(),
+                    error_message = NULL
+                WHERE task_id = ? AND sub_stage = 'publish_metadata'
+                """, taskId);
+        restoreRunningTask(taskId);
+        return true;
+    }
+
     private void restoreRunningTask(String taskId) {
         repository.update("""
                 UPDATE task
@@ -488,8 +584,10 @@ public class NarrationManualService {
     }
 
     private enum ImageKind {
-        COVER("cover", "封面图", "cover_image_url", "generate_cover_image", "cover_image_url", 1, 1, "1:1"),
-        BACKGROUND("background", "背景图", "background_image_url", "generate_background_image", "background_image_url", 4, 3, "4:3");
+        COVER("cover", "封面图", "cover_image_url", "generate_cover_image", "cover_image_url", 1, 1, "1:1", false),
+        BACKGROUND("background", "背景图", "background_image_url", "generate_background_image", "background_image_url", 4, 3, "4:3", false),
+        VERTICAL("vertical", "竖版封面", "vertical_cover_url", "generate_narration_vertical_cover", "vertical_cover_url", 3, 4, "3:4", true),
+        HORIZONTAL("horizontal", "横版封面", "horizontal_cover_url", "generate_narration_horizontal_cover", "horizontal_cover_url", 4, 3, "4:3", true);
 
         private final String apiName;
         private final String label;
@@ -499,6 +597,7 @@ public class NarrationManualService {
         private final int ratioWidth;
         private final int ratioHeight;
         private final String ratioText;
+        private final boolean publishMetadata;
 
         ImageKind(
                 String apiName,
@@ -508,7 +607,8 @@ public class NarrationManualService {
                 String resultKey,
                 int ratioWidth,
                 int ratioHeight,
-                String ratioText
+                String ratioText,
+                boolean publishMetadata
         ) {
             this.apiName = apiName;
             this.label = label;
@@ -518,6 +618,7 @@ public class NarrationManualService {
             this.ratioWidth = ratioWidth;
             this.ratioHeight = ratioHeight;
             this.ratioText = ratioText;
+            this.publishMetadata = publishMetadata;
         }
 
         private static ImageKind from(String value) throws IOException {
@@ -526,7 +627,7 @@ public class NarrationManualService {
                     return kind;
                 }
             }
-            throw new IOException("图片类型必须是 cover 或 background");
+            throw new IOException("图片类型必须是 cover、background、vertical 或 horizontal");
         }
     }
 }
