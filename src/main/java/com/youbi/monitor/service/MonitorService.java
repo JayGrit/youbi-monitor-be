@@ -139,7 +139,7 @@ public class MonitorService {
         return taskQueryRepositoryService.listServiceHeartbeats(LocalDateTime.now());
     }
 
-    public TaskFlowDetail getTaskFlow(String taskId) {
+    public TaskFlowDetail getTaskFlow(String taskId, String requestedStage) {
         LocalDateTime now = LocalDateTime.now();
         Map<String, Object> task = taskQueryRepositoryService.findTaskFlowRow("task", "id", taskId);
         if (task.isEmpty()) {
@@ -148,12 +148,26 @@ public class MonitorService {
 
         Map<String, Object> videoInfo = taskQueryRepositoryService.findTaskFlowRow("video_info", "task_id", taskId);
         enrichSourceMetadata(videoInfo);
-        List<TaskFlowDetail.TaskFlowAsset> minioObjects = listTaskAssets(taskId);
+        List<String> stageKeys = detailStageKeys(requestedStage);
+        List<TaskFlowDetail.TaskFlowAsset> minioObjects = listTaskAssets(taskId).stream()
+                .filter(asset -> stageKeys.contains(asset.stage()))
+                .toList();
         List<TaskFlowDetail.TaskFlowStage> stages = new ArrayList<>();
         for (StageDefinition definition : STAGES) {
-            stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
+            if (stageKeys.contains(definition.key())) {
+                stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
+            }
         }
         return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
+    }
+
+    private List<String> detailStageKeys(String requestedStage) {
+        String stage = text(requestedStage);
+        if (stage.equals("speech") || stage.equals("translator") || stage.equals("speaker")) {
+            return List.of("demucs", "whisper", "translator", "speaker");
+        }
+        boolean knownStage = STAGES.stream().anyMatch(definition -> definition.key().equals(stage));
+        return knownStage ? List.of(stage) : List.of("downloader");
     }
 
     public TaskProgressDetail getTaskProgress(String taskId) {

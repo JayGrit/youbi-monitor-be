@@ -53,8 +53,11 @@ public class MonitorTaskController {
     }
 
     @GetMapping("/api/video-tasks/{taskId}/flow")
-    public TaskFlowDetail flow(@PathVariable String taskId) {
-        TaskFlowDetail detail = monitorService.getTaskFlow(taskId);
+    public TaskFlowDetail flow(
+            @PathVariable String taskId,
+            @RequestParam(defaultValue = "downloader") String stage
+    ) {
+        TaskFlowDetail detail = monitorService.getTaskFlow(taskId, stage);
         if (detail == null) {
             throw new ResponseStatusException(NOT_FOUND, "Task does not exist.");
         }
