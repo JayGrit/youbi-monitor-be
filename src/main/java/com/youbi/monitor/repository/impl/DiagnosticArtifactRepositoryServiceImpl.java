@@ -37,12 +37,32 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                        SELECT 1
                        FROM operator_task operator_task
                        WHERE operator_task.task_id = ?
-                         AND operator_task.run_id = diagnostic.task_id
-                         AND operator_task.action = 'upload_video'
+                         AND operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
+                   )
+                   OR EXISTS (
+                       SELECT 1
+                       FROM operator_task operator_task
+                       JOIN publisher_jobs publisher_job
+                         ON publisher_job.task_id = ?
+                        AND (
+                            JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.cover_prompt'))
+                                COLLATE utf8mb4_unicode_ci
+                                = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
+                                    COLLATE utf8mb4_unicode_ci
+                            OR JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.background_prompt'))
+                                COLLATE utf8mb4_unicode_ci
+                                = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
+                                    COLLATE utf8mb4_unicode_ci
+                            OR JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.prompt'))
+                                COLLATE utf8mb4_unicode_ci
+                                = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
+                                    COLLATE utf8mb4_unicode_ci
+                        )
+                       WHERE operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id
                    )
                 ORDER BY diagnostic.created_at DESC, diagnostic.run_id DESC,
                          diagnostic.step_index ASC, diagnostic.id ASC
-                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId);
+                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId, taskId);
     }
 
     @Override

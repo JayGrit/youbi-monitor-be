@@ -17,7 +17,7 @@ import static org.mockito.Mockito.when;
 class DiagnosticArtifactRepositoryServiceImplTest {
 
     @Test
-    void listByTaskIdIncludesUploadDiagnosticsFromOperatorRuns() {
+    void listByTaskIdIncludesDiagnosticsFromOperatorAndPublisherRuns() {
         DiagnosticArtifactRepository repository = mock(DiagnosticArtifactRepository.class);
         when(repository.query(anyString(), any(RowMapper.class), any(Object[].class)))
                 .thenReturn(List.of());
@@ -30,8 +30,10 @@ class DiagnosticArtifactRepositoryServiceImplTest {
         verify(repository).query(sql.capture(), any(RowMapper.class), arguments.capture());
         assertThat(sql.getValue())
                 .contains("FROM operator_task operator_task")
-                .contains("operator_task.run_id = diagnostic.task_id")
-                .contains("operator_task.action = 'upload_video'");
-        assertThat(arguments.getValue()).containsExactly("pipeline-task", "pipeline-task");
+                .contains("operator_task.run_id COLLATE utf8mb4_unicode_ci = diagnostic.task_id")
+                .contains("JOIN publisher_jobs publisher_job")
+                .contains("JSON_VALID(operator_task.request_json)")
+                .contains("'$.prompt'");
+        assertThat(arguments.getValue()).containsExactly("pipeline-task", "pipeline-task", "pipeline-task");
     }
 }
