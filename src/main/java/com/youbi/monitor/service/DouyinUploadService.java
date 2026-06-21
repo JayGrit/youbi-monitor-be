@@ -466,6 +466,9 @@ public class DouyinUploadService {
         if (clickKnownFloatingPrompt(page, taskId)) {
             return true;
         }
+        if (dismissHorizontalCoverPrompt(page, taskId)) {
+            return true;
+        }
         for (String text : List.of("暂不设置", "我知道了", "知道了", "稍后再说", "完成", "取消")) {
             if (clickDialogButtonByText(page, taskId, text)) {
                 return true;
@@ -517,6 +520,62 @@ public class DouyinUploadService {
             }
         }
         return false;
+    }
+
+    private boolean dismissHorizontalCoverPrompt(Page page, String taskId) {
+        try {
+            Locator promptTitle = page.getByText(
+                    "设置横封面获取更多流量",
+                    new Page.GetByTextOptions().setExact(true)
+            );
+            if (!hasVisibleLocator(promptTitle)) {
+                return false;
+            }
+
+            Locator visibleTitle = firstVisibleLocator(promptTitle);
+            Locator promptDialog = visibleTitle == null
+                    ? null
+                    : visibleTitle.locator("xpath=ancestor::*[@role='dialog' or contains(@class, 'semi-modal-content')][1]");
+            Locator visibleSkipButton = promptDialog == null || promptDialog.count() == 0
+                    ? null
+                    : firstVisibleLocator(promptDialog.getByText(
+                            "暂不设置",
+                            new Locator.GetByTextOptions().setExact(true)
+                    ));
+            if (visibleSkipButton == null) {
+                visibleSkipButton = firstVisibleLocator(page.getByText(
+                        "暂不设置",
+                        new Page.GetByTextOptions().setExact(true)
+                ));
+            }
+            if (visibleSkipButton == null) {
+                log.warn("Douyin horizontal cover prompt found without visible skip button taskId={}", taskId);
+                return false;
+            }
+
+            clickWithFallback(page, visibleSkipButton);
+            log.info("Douyin upload dismissed horizontal cover prompt taskId={}", taskId);
+            page.waitForTimeout(800);
+            return true;
+        } catch (Exception exception) {
+            log.debug("Douyin horizontal cover prompt dismiss skipped taskId={} message={}", taskId, exception.getMessage());
+            return false;
+        }
+    }
+
+    private boolean hasVisibleLocator(Locator locator) {
+        return firstVisibleLocator(locator) != null;
+    }
+
+    private Locator firstVisibleLocator(Locator locator) {
+        int count = locator.count();
+        for (int index = 0; index < count; index++) {
+            Locator candidate = locator.nth(index);
+            if (candidate.isVisible()) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     private Locator visibleDialog(Page page) {
