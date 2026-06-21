@@ -93,11 +93,7 @@ public class NarrationManualService {
     @Transactional
     public Map<String, Object> uploadImage(String taskId, String rawKind, MultipartFile file) throws Exception {
         ImageKind kind = ImageKind.from(rawKind);
-        NarrationRow narration = narration(taskId);
-        String prompt = imagePrompt(taskId, kind, narration);
-        if (text(prompt).isBlank()) {
-            throw new IOException(kind.label + "提示词尚未生成");
-        }
+        narration(taskId);
         if (file == null || file.isEmpty()) {
             throw new IOException("图片文件为空");
         }
@@ -161,30 +157,6 @@ public class NarrationManualService {
                 "height", image.getHeight(),
                 "publisherCompleted", completed
         );
-    }
-
-    private String imagePrompt(String taskId, ImageKind kind, NarrationRow narration) throws IOException {
-        List<String> rows = repository.queryForList("""
-                SELECT input_json
-                FROM publisher_jobs
-                WHERE task_id = ? AND job_name = ?
-                """, String.class, taskId, kind.jobName);
-        if (!rows.isEmpty() && !text(rows.get(0)).isBlank()) {
-            JsonNode input = objectMapper.readTree(rows.get(0));
-            String prompt = input.path("prompt").asText("").trim();
-            if (!prompt.isBlank()) {
-                return prompt;
-            }
-        }
-        if (kind.publishMetadata) {
-            return "";
-        }
-        String basePrompt = kind == ImageKind.COVER ? narration.coverPrompt() : narration.backgroundPrompt();
-        if (text(basePrompt).isBlank()) {
-            return "";
-        }
-        return text(basePrompt).replaceFirst("[。\\s]+$", "")
-                + "。严格使用 " + kind.ratioText + " 比例构图。";
     }
 
     private NarrationRow narration(String taskId) throws IOException {
