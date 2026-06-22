@@ -2,6 +2,10 @@
 
 Spring Boot 3 / Java 17 backend for the YouBi video generation monitor.
 
+## Deprecated browser uploads
+
+Upload execution and Playwright automation are deprecated in monitor-be. Their controllers, services, and browser repositories are excluded from Spring component scanning; source code and dependencies remain temporarily for staged removal. Operator is the only active browser execution service.
+
 ## Run
 
 ```bash
