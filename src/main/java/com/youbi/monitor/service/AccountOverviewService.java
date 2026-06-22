@@ -30,10 +30,16 @@ public class AccountOverviewService {
             "youtube",
             "doubao"
     );
-    private static final Map<String, String> ACCOUNT_TABLES = Map.of(
-            "x", "uploader_account_x",
-            "youtube", "uploader_account_youtube",
-            "doubao", "publisher_account_doubao"
+    private static final Map<String, String> ACCOUNT_TABLES = Map.ofEntries(
+            Map.entry("bilibili", "uploader_account_bilibili"),
+            Map.entry("douyin", "uploader_account_douyin"),
+            Map.entry("xiaohongshu", "uploader_account_xiaohongshu"),
+            Map.entry("shipinhao", "uploader_account_shipinhao"),
+            Map.entry("kuaishou", "uploader_account_kuaishou"),
+            Map.entry("jinritoutiao", "uploader_account_jinritoutiao"),
+            Map.entry("x", "uploader_account_x"),
+            Map.entry("youtube", "uploader_account_youtube"),
+            Map.entry("doubao", "publisher_account_doubao")
     );
 
     private final MonitorRepository repository;
@@ -109,7 +115,7 @@ public class AccountOverviewService {
 
     @Transactional
     public Map<String, Object> renameAccountKey(String platform, String accountKey, String newAccountKey) {
-        String normalizedPlatform = requireGenericPlatform(platform);
+        String normalizedPlatform = requireManagedPlatform(platform);
         String oldKey = requireAccountKey(accountKey);
         String nextKey = requireAccountKey(newAccountKey);
         if (oldKey.equals(nextKey)) {
@@ -130,7 +136,7 @@ public class AccountOverviewService {
     }
 
     public Map<String, Object> updateCooldown(String platform, String accountKey, Integer minSeconds, Integer maxSeconds) {
-        String normalizedPlatform = requireGenericPlatform(platform);
+        String normalizedPlatform = requireManagedPlatform(platform);
         String normalizedAccountKey = requireAccountKey(accountKey);
         int min = minSeconds == null ? 3600 : minSeconds;
         int max = maxSeconds == null ? 7200 : maxSeconds;
@@ -606,10 +612,10 @@ public class AccountOverviewService {
         return normalized;
     }
 
-    private String requireGenericPlatform(String platform) {
+    private String requireManagedPlatform(String platform) {
         String normalized = requirePlatform(platform);
         if (!ACCOUNT_TABLES.containsKey(normalized)) {
-            throw new IllegalArgumentException("Unsupported generic account platform");
+            throw new IllegalArgumentException("Unsupported account platform");
         }
         return normalized;
     }
@@ -636,7 +642,7 @@ public class AccountOverviewService {
     }
 
     private Map<String, Object> updateGenericState(String platform, String accountKey, String column, boolean value) {
-        String normalizedPlatform = requireGenericPlatform(platform);
+        String normalizedPlatform = requireManagedPlatform(platform);
         String normalizedAccountKey = requireAccountKey(accountKey);
         int updated = repository.update(
                 "UPDATE uploader_account SET " + column + " = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0",

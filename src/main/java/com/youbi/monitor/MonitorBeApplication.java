@@ -13,8 +13,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @ComponentScan(excludeFilters = @ComponentScan.Filter(
         type = FilterType.REGEX,
         pattern = {
-                "com\\.youbi\\.monitor\\.controller\\.(?:AccountOverviewController|BilibiliPlaywrightController|SocialPlaywrightInspectController|(?:Bilibili|Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)UploadController|(?:Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)AccountController)",
-                "com\\.youbi\\.monitor\\.service\\.(?:AccountOverviewService|MonitorAsyncUploadService|BilibiliPlaywrightAccountService|SocialBrowserFactory|SocialHumanActions|SocialPlaywrightInspectService|SocialRiskDetector|(?:BilibiliPlaywright|Bilibili|Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)UploadService|(?:Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)AccountService)",
+                "com\\.youbi\\.monitor\\.controller\\.(?:BilibiliPlaywrightController|SocialPlaywrightInspectController|(?:Bilibili|Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)UploadController|(?:Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)AccountController)",
+                "com\\.youbi\\.monitor\\.service\\.(?:MonitorAsyncUploadService|BilibiliPlaywrightAccountService|SocialBrowserFactory|SocialHumanActions|SocialPlaywrightInspectService|SocialRiskDetector|(?:BilibiliPlaywright|Bilibili|Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)UploadService|(?:Douyin|Xiaohongshu|Shipinhao|Kuaishou|Jinritoutiao)AccountService)",
                 "com\\.youbi\\.monitor\\.repository\\.(?:BilibiliPlaywrightAccountRepository|MonitorAsyncUploadRepository)",
                 "com\\.youbi\\.monitor\\.repository\\.impl\\.(?:BilibiliPlaywrightAccountRepositoryServiceImpl|MonitorAsyncUploadRepositoryServiceImpl)"
         }
