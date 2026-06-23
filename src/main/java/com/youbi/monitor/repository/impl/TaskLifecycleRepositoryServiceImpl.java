@@ -566,6 +566,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 WHERE columns_info.TABLE_SCHEMA = DATABASE()
                   AND columns_info.COLUMN_NAME = 'task_id'
                   AND columns_info.TABLE_NAME <> 'downloader_submission'
+                  AND columns_info.TABLE_NAME <> 'operator_task'
                   AND tables_info.TABLE_TYPE = 'BASE TABLE'
                 ORDER BY CASE
                     WHEN columns_info.TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'asr_segment') THEN 0
