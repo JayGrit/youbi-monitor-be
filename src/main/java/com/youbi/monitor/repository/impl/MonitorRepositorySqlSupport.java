@@ -49,7 +49,9 @@ abstract class MonitorRepositorySqlSupport {
             "xiaohongshu", "uploader_task_xiaohongshu",
             "shipinhao", "uploader_task_shipinhao",
             "kuaishou", "uploader_task_kuaishou",
-            "jinritoutiao", "uploader_task_jinritoutiao"
+            "jinritoutiao", "uploader_task_jinritoutiao",
+            "youtube", "uploader_task_youtube",
+            "x", "uploader_task_x"
     );
     protected static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
             "bilibili", "uploader_account_bilibili",
@@ -57,7 +59,9 @@ abstract class MonitorRepositorySqlSupport {
             "xiaohongshu", "uploader_account_xiaohongshu",
             "shipinhao", "uploader_account_shipinhao",
             "kuaishou", "uploader_account_kuaishou",
-            "jinritoutiao", "uploader_account_jinritoutiao"
+            "jinritoutiao", "uploader_account_jinritoutiao",
+            "youtube", "uploader_account_youtube",
+            "x", "uploader_account_x"
     );
     protected static final String UNIFIED_UPLOADER_ACCOUNT_TABLE = "uploader_account";
     protected static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
@@ -223,6 +227,8 @@ abstract class MonitorRepositorySqlSupport {
             normalized = "kuaishou";
         } else if ("toutiao".equals(normalized) || "tt".equals(normalized) || "今日头条".equals(normalized)) {
             normalized = "jinritoutiao";
+        } else if ("yt".equals(normalized) || "油管".equals(normalized)) {
+            normalized = "youtube";
         }
         if (!UPLOADER_TASK_TABLES.containsKey(normalized)) {
             throw new IllegalArgumentException("Unsupported upload platform: " + platform);
@@ -230,9 +236,10 @@ abstract class MonitorRepositorySqlSupport {
         return normalized;
     }
 
-    protected static String successfulUploadUnion(String excludedPlatform) {
+    protected String successfulUploadUnion(String excludedPlatform) {
         return UPLOADER_TASK_TABLES.entrySet().stream()
                 .filter(entry -> !entry.getKey().equals(excludedPlatform))
+                .filter(entry -> tableExists(entry.getValue()))
                 .map(entry -> "SELECT task_id, '" + entry.getKey() + "' platform FROM " + quotedIdentifier(entry.getValue()) + " WHERE status = 'success'")
                 .reduce((left, right) -> left + "\nUNION ALL\n" + right)
                 .orElse("SELECT NULL task_id, NULL platform WHERE FALSE");

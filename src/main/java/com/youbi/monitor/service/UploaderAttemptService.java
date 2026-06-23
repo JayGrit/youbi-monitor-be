@@ -16,7 +16,9 @@ public class UploaderAttemptService {
             "xiaohongshu", "uploader_task_xiaohongshu",
             "shipinhao", "uploader_task_shipinhao",
             "kuaishou", "uploader_task_kuaishou",
-            "jinritoutiao", "uploader_task_jinritoutiao"
+            "jinritoutiao", "uploader_task_jinritoutiao",
+            "youtube", "uploader_task_youtube",
+            "x", "uploader_task_x"
     );
 
     private final MonitorRepository repository;

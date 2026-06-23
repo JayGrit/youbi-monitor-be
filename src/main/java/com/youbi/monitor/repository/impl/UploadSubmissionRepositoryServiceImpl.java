@@ -20,6 +20,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         String normalized = normalizeUploadPlatform(platform);
         String table = UPLOADER_TASK_TABLES.get(normalized);
         String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(table)) {
+            return new MonitorService.FailedUploadSubmissionList(normalized, 0, List.of());
+        }
         boolean accountTableExists = tableExists(accountTable);
         String submissionTitleSql = submissionTitleSql(table);
         String accountJoin = accountTableExists
@@ -99,6 +102,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         }
         String table = UPLOADER_TASK_TABLES.get(normalized);
         String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(table)) {
+            throw new IllegalArgumentException("Upload task table does not exist for platform: " + normalized);
+        }
         if (!tableExists(accountTable)) {
             throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
         }
@@ -186,6 +192,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         }
         String table = UPLOADER_TASK_TABLES.get(normalized);
         String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(table)) {
+            return new MonitorService.UploadBackfillCandidateList(normalized, normalizedAccountKey, normalizedType, 0, List.of());
+        }
         if (!tableExists(accountTable)) {
             throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
         }
@@ -303,6 +312,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         }
         String table = UPLOADER_TASK_TABLES.get(normalized);
         String accountTable = UPLOADER_ACCOUNT_TABLES.get(normalized);
+        if (!tableExists(table)) {
+            throw new IllegalArgumentException("Upload task table does not exist for platform: " + normalized);
+        }
         if (!tableExists(accountTable)) {
             throw new IllegalArgumentException("Account table does not exist for platform: " + normalized);
         }

@@ -34,6 +34,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
             queries.add(stageQuery(entry.getKey(), entry.getValue()));
         }
         for (Map.Entry<String, String> entry : UPLOADER_TASK_TABLES.entrySet()) {
+            if (!tableExists(entry.getValue())) {
+                continue;
+            }
             queries.add(uploadQuery(entry.getKey(), entry.getValue()));
         }
         queries.add(genericUploaderQuery());
@@ -347,8 +350,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 """.formatted(platform, platform, quotedIdentifier(table));
     }
 
-    private static String genericUploaderQuery() {
+    private String genericUploaderQuery() {
         String failedUploadExists = UPLOADER_TASK_TABLES.values().stream()
+                .filter(this::tableExists)
                 .map(table -> """
                         SELECT 1 FROM %s submission
                         WHERE submission.task_id = uploader.task_id AND submission.status = 'failed'
