@@ -17,7 +17,6 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 
 @Service
 public class DiagnosticArtifactService {
@@ -86,18 +85,6 @@ public class DiagnosticArtifactService {
             return new DiagnosticArtifactRecord(null, taskId, runId, platform, source, emptyToNull(accountKey), null, null, stepIndex, stepName,
                     null, null, null, null, null, null, "upload_failed", exception.getMessage(), null);
         }
-    }
-
-    public List<DiagnosticArtifactRecord> list(String taskId, String runId) {
-        String normalizedTaskId = TextSupport.text(taskId);
-        String normalizedRunId = TextSupport.text(runId);
-        if (normalizedTaskId.isBlank()) {
-            throw new IllegalArgumentException("Missing taskId");
-        }
-        if (normalizedRunId.isBlank()) {
-            return repositoryService.listByTaskId(normalizedTaskId);
-        }
-        return repositoryService.listByTaskIdAndRunId(normalizedTaskId, normalizedRunId);
     }
 
     private Long insert(String taskId, String runId, String platform, String source, String accountKey, int stepIndex, String stepName,

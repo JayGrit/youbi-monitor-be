@@ -2,11 +2,9 @@ package com.youbi.monitor.controller;
 
 import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.dto.ServiceHeartbeat;
-import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.youbi.monitor.model.TaskFlowDetail;
 import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.TaskProgressBatchRequest;
-import com.youbi.monitor.service.DiagnosticArtifactService;
 import com.youbi.monitor.service.MonitorService;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,11 +23,9 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 @CrossOrigin
 public class MonitorTaskController {
     private final MonitorService monitorService;
-    private final DiagnosticArtifactService diagnosticArtifactService;
 
-    public MonitorTaskController(MonitorService monitorService, DiagnosticArtifactService diagnosticArtifactService) {
+    public MonitorTaskController(MonitorService monitorService) {
         this.monitorService = monitorService;
-        this.diagnosticArtifactService = diagnosticArtifactService;
     }
 
     @GetMapping("/api/video-tasks/monitor")
@@ -85,10 +81,5 @@ public class MonitorTaskController {
                         .limit(20)
                         .toList();
         return monitorService.getTaskProgressBatch(taskIds);
-    }
-
-    @GetMapping("/api/video-tasks/{taskId}/uploader-diagnostics")
-    public List<DiagnosticArtifactRecord> uploaderDiagnostics(@PathVariable String taskId) {
-        return diagnosticArtifactService.list(taskId, null);
     }
 }

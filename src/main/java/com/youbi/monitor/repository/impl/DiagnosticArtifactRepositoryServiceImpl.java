@@ -1,14 +1,8 @@
 package com.youbi.monitor.repository.impl;
 
-import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.youbi.monitor.repository.DiagnosticArtifactRepository;
 import com.youbi.monitor.repository.IDiagnosticArtifactRepositoryService;
 import org.springframework.stereotype.Service;
-
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.time.LocalDateTime;
-import java.util.List;
 
 @Service
 public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtifactRepositoryService {
@@ -20,76 +14,6 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
 
     @Override
     public void ensureSchema() {
-    }
-
-    @Override
-    public List<DiagnosticArtifactRecord> listByTaskId(String taskId) {
-        return repository.query("""
-                SELECT diagnostic.id, diagnostic.task_id, diagnostic.run_id, diagnostic.platform,
-                       diagnostic.source, diagnostic.account_key,
-                       NULL publisher_job_name, NULL aspect_ratio,
-                       diagnostic.step_index, diagnostic.step_name,
-                       diagnostic.screenshot_url, diagnostic.html_url,
-                       diagnostic.screenshot_size_bytes, diagnostic.html_size_bytes,
-                       diagnostic.screenshot_width, diagnostic.screenshot_height,
-                       diagnostic.status, diagnostic.error_message, diagnostic.created_at
-                FROM uploader_diagonostic diagnostic
-                JOIN (
-                    SELECT CONVERT(? USING utf8mb4) COLLATE utf8mb4_unicode_ci task_id
-                    UNION
-                    SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci
-                    FROM operator_task operator_task
-                    WHERE operator_task.task_id = ?
-                    UNION
-                    SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci
-                    FROM operator_task operator_task
-                    JOIN publisher_jobs publisher_job
-                      ON publisher_job.task_id = ?
-                        AND (
-                            JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.cover_prompt'))
-                                COLLATE utf8mb4_unicode_ci
-                                = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
-                                    COLLATE utf8mb4_unicode_ci
-                            OR JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.background_prompt'))
-                                COLLATE utf8mb4_unicode_ci
-                                = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
-                                    COLLATE utf8mb4_unicode_ci
-                            OR JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(publisher_job.input_json), publisher_job.input_json, '{}'), '$.prompt'))
-                                COLLATE utf8mb4_unicode_ci
-                                = JSON_UNQUOTE(JSON_EXTRACT(IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'), '$.prompt'))
-                                    COLLATE utf8mb4_unicode_ci
-                        )
-                    UNION
-                    SELECT operator_task.run_id COLLATE utf8mb4_unicode_ci
-                    FROM operator_task operator_task
-                    JOIN product_narration narration
-                      ON narration.task_id = ?
-                    WHERE JSON_UNQUOTE(JSON_EXTRACT(
-                              IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'),
-                              '$.prompt'
-                          )) LIKE CONCAT(narration.cover_prompt, '%')
-                       OR JSON_UNQUOTE(JSON_EXTRACT(
-                              IF(JSON_VALID(operator_task.request_json), operator_task.request_json, '{}'),
-                              '$.prompt'
-                          )) LIKE CONCAT(narration.background_prompt, '%')
-                ) relevant_task
-                  ON diagnostic.task_id = relevant_task.task_id
-                ORDER BY diagnostic.created_at DESC, diagnostic.run_id DESC,
-                         diagnostic.step_index ASC, diagnostic.id ASC
-                """, (rs, rowNum) -> mapRecord(rs), taskId, taskId, taskId, taskId);
-    }
-
-    @Override
-    public List<DiagnosticArtifactRecord> listByTaskIdAndRunId(String taskId, String runId) {
-        return repository.query("""
-                SELECT id, task_id, run_id, platform, source, account_key,
-                       NULL publisher_job_name, NULL aspect_ratio, step_index, step_name,
-                       screenshot_url, html_url, screenshot_size_bytes, html_size_bytes,
-                       screenshot_width, screenshot_height, status, error_message, created_at
-                FROM uploader_diagonostic
-                WHERE task_id = ? AND run_id = ?
-                ORDER BY step_index ASC, id ASC
-                """, (rs, rowNum) -> mapRecord(rs), taskId, runId);
     }
 
     @Override
@@ -129,40 +53,6 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 screenshotWidth,
                 screenshotHeight
         );
-    }
-
-    private DiagnosticArtifactRecord mapRecord(ResultSet rs) throws SQLException {
-        return new DiagnosticArtifactRecord(
-                rs.getLong("id"),
-                rs.getString("task_id"),
-                rs.getString("run_id"),
-                rs.getString("platform"),
-                rs.getString("source"),
-                rs.getString("account_key"),
-                rs.getString("publisher_job_name"),
-                rs.getString("aspect_ratio"),
-                rs.getInt("step_index"),
-                rs.getString("step_name"),
-                rs.getString("screenshot_url"),
-                rs.getString("html_url"),
-                nullableLong(rs, "screenshot_size_bytes"),
-                nullableLong(rs, "html_size_bytes"),
-                nullableInt(rs, "screenshot_width"),
-                nullableInt(rs, "screenshot_height"),
-                rs.getString("status"),
-                rs.getString("error_message"),
-                rs.getObject("created_at", LocalDateTime.class)
-        );
-    }
-
-    private Long nullableLong(ResultSet rs, String column) throws SQLException {
-        long value = rs.getLong(column);
-        return rs.wasNull() ? null : value;
-    }
-
-    private Integer nullableInt(ResultSet rs, String column) throws SQLException {
-        int value = rs.getInt(column);
-        return rs.wasNull() ? null : value;
     }
 
     private String emptyToNull(String value) {

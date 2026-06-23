@@ -21,6 +21,10 @@ management:
         include: health
 
 youbi:
+  operator:
+    base-url: ${YDBI_OPERATOR_BASE_URL:http://127.0.0.1:8100/api}
+    connect-timeout: ${YDBI_OPERATOR_CONNECT_TIMEOUT:PT3S}
+    read-timeout: ${YDBI_OPERATOR_READ_TIMEOUT:PT15S}
   distributor:
     base-url: ${YDBI_DISTRIBUTOR_BASE_URL:http://127.0.0.1:8210}
   upload-task-timeout-seconds: ${YDBI_UPLOAD_TASK_TIMEOUT_SECONDS:480}
