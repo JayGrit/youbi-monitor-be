@@ -147,7 +147,14 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 SET submission.status = 'ready',
                     submission.started_at = NULL,
                     submission.completed_at = NULL,
-                    submission.error_message = NULL
+                    submission.error_message = NULL,
+                    submission.operator_upload_status = NULL,
+                    submission.monitor_be_upload_status = NULL,
+                    submission.operator_op_id = NULL,
+                    submission.operator_run_id = NULL,
+                    submission.operator_task_id = NULL,
+                    submission.operator_next_check_at = NULL,
+                    submission.operator_deadline_at = NULL
                 WHERE submission.id IN (%s)
                   AND submission.status = 'failed'
                 """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), normalizedIds.toArray());
