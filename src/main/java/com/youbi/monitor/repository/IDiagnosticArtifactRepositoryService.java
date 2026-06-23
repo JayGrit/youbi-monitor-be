@@ -2,22 +2,15 @@ package com.youbi.monitor.repository;
 
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
 
+import java.util.List;
+import java.util.Map;
+
 public interface IDiagnosticArtifactRepositoryService {
     void ensureSchema();
 
-    Long insertUploadedArtifact(
-            String taskId,
-            String runId,
-            String platform,
-            String source,
-            String accountKey,
-            int stepIndex,
-            String stepName,
-            String screenshotUrl,
-            String htmlUrl,
-            Long screenshotSizeBytes,
-            Long htmlSizeBytes,
-            Integer screenshotWidth,
-            Integer screenshotHeight
-    );
+    long countOperatorExecutions(Map<String, String> filters);
+
+    List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters, int offset, int limit);
+
+    List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId);
 }
