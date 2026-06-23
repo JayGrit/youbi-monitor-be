@@ -355,12 +355,15 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
     private RouteGraph routeGraph(String taskId, List<StageNode> stageNodes, LocalDateTime now) {
         Map<String, Object> profile = repository.query("""
-                SELECT task_type, has_background_audio
+                SELECT task_type, has_background_audio, narration_input_mode, has_native_subtitle
                 FROM video_info
                 WHERE task_id = ?
                 """, (rs, rowNum) -> Map.<String, Object>of(
                 "taskType", rs.getString("task_type") == null ? "" : rs.getString("task_type"),
-                "hasBackgroundAudio", rs.getObject("has_background_audio") == null || rs.getBoolean("has_background_audio")
+                "hasBackgroundAudio", rs.getObject("has_background_audio") == null || rs.getBoolean("has_background_audio"),
+                "narrationInputMode", rs.getString("narration_input_mode") == null ? "" : rs.getString("narration_input_mode"),
+                "hasNativeSubtitleKnown", rs.getObject("has_native_subtitle") != null,
+                "hasNativeSubtitle", rs.getObject("has_native_subtitle") != null && rs.getBoolean("has_native_subtitle")
         ), taskId).stream().findFirst().orElse(Map.of());
         String taskType = String.valueOf(profile.getOrDefault("taskType", ""));
         if (taskType.isBlank() || !tableExists("distributor_type_stages")) {
@@ -378,6 +381,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         if (configured.isEmpty()) return legacyRouteGraph(stageNodes);
 
         boolean hasBackgroundAudio = Boolean.TRUE.equals(profile.get("hasBackgroundAudio"));
+        String narrationInputMode = String.valueOf(profile.getOrDefault("narrationInputMode", ""));
+        boolean hasNativeSubtitleKnown = Boolean.TRUE.equals(profile.get("hasNativeSubtitleKnown"));
+        boolean hasNativeSubtitle = Boolean.TRUE.equals(profile.get("hasNativeSubtitle"));
         Set<String> configuredIds = configured.stream().map(RouteConfigNode::id).collect(java.util.stream.Collectors.toSet());
         Map<String, Set<String>> parents = new LinkedHashMap<>();
         configured.forEach(node -> parents.put(node.id(), new java.util.LinkedHashSet<>()));
@@ -395,7 +401,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         }
 
         Set<String> activeIds = configured.stream()
-                .filter(node -> hasBackgroundAudio || !"demucs".equals(node.stage()))
+                .filter(node -> routeNodeEnabled(taskType, hasBackgroundAudio, narrationInputMode, hasNativeSubtitleKnown, hasNativeSubtitle, node))
                 .map(RouteConfigNode::id)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
         List<RouteEdge> edges = new ArrayList<>();
@@ -431,11 +437,28 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         }
     }
 
+    private static boolean routeNodeEnabled(String taskType, boolean hasBackgroundAudio, String narrationInputMode,
+                                            boolean hasNativeSubtitleKnown, boolean hasNativeSubtitle,
+                                            RouteConfigNode node) {
+        if (!hasBackgroundAudio && "demucs".equals(node.stage())) return false;
+        if (!"narration".equals(taskType)) return true;
+        if ("prepared_text".equals(narrationInputMode)) {
+            return !(("downloader".equals(node.stage()) && "metadata".equals(node.subStage()))
+                    || ("whisper".equals(node.stage()) && "source_transcription".equals(node.subStage()))
+                    || ("publisher".equals(node.stage()) && "script_generation".equals(node.subStage())));
+        }
+        return !("submission".equals(narrationInputMode)
+                && hasNativeSubtitleKnown
+                && hasNativeSubtitle
+                && "whisper".equals(node.stage())
+                && "source_transcription".equals(node.subStage()));
+    }
+
     private Map<String, PhysicalStageState> loadPhysicalSubStageStates(String taskId, LocalDateTime now) {
         Map<String, PhysicalStageState> states = new HashMap<>();
-        for (String stage : List.of("publisher", "combiner")) {
+        for (String stage : List.of("downloader", "publisher", "whisper", "asseter", "combiner")) {
             if (!tableExists(stage) || !columnExists(stage, "sub_stage")) continue;
-            repository.query("SELECT sub_stage, status, started_at, completed_at, error_message FROM " + quotedIdentifier(stage) + " WHERE task_id = ?",
+            repository.query("SELECT sub_stage, status, started_at, completed_at, error_message FROM " + quotedIdentifier(stage) + " WHERE task_id = ? AND sub_stage <> 'main'",
                     (rs, rowNum) -> {
                         LocalDateTime startedAt = timestamp(rs, "started_at");
                         LocalDateTime completedAt = timestamp(rs, "completed_at");
@@ -542,6 +565,12 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return switch (id) {
             case "publisher:segment_plan" -> "文案分段";
             case "publisher:image_generation" -> "图片生成";
+            case "publisher:script_generation" -> "文案生成";
+            case "publisher:publish_metadata" -> "发布准备";
+            case "downloader:metadata" -> "元数据下载";
+            case "whisper:source_transcription" -> "源语音识别";
+            case "asseter:image_composition" -> "图片素材";
+            case "asseter:audio_visualization" -> "音频素材";
             case "combiner:audio_merge" -> "音频合并";
             case "combiner:video_render" -> "视频渲染";
             case "combiner:asmr" -> "ASMR 合成";

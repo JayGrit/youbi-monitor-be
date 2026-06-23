@@ -19,9 +19,12 @@ public class TaskRouteService {
             "subtitle", steps("downloader", "publisher", "demucs", "whisper", "translator", "combiner", "uploader"),
             "dubbing", steps("downloader", "publisher", "demucs", "whisper", "translator", "speaker", "combiner", "uploader"),
             "narration", List.of(
-                    new Step("publisher", "main"), new Step("speaker", "main"),
+                    new Step("downloader", "metadata"), new Step("whisper", "source_transcription"),
+                    new Step("publisher", "script_generation"), new Step("publisher", "publish_metadata"),
+                    new Step("publisher", "segment_plan"), new Step("publisher", "image_generation"),
+                    new Step("asseter", "image_composition"), new Step("speaker", "main"),
                     new Step("combiner", "audio_merge"), new Step("whisper", "main"),
-                    new Step("asseter", "main"), new Step("combiner", "video_render"),
+                    new Step("asseter", "audio_visualization"), new Step("combiner", "video_render"),
                     new Step("uploader", "main")
             ),
             "asmr", List.of(new Step("downloader", "main"), new Step("publisher", "main"), new Step("combiner", "asmr"))
@@ -48,12 +51,14 @@ public class TaskRouteService {
 
     public List<RouteNode> routeForTask(String taskId) {
         List<TaskProfile> profiles = repository.query("""
-                SELECT task_type, has_background_audio
+                SELECT task_type, has_background_audio, narration_input_mode, has_native_subtitle
                 FROM video_info
                 WHERE task_id = ?
                 """, (rs, rowNum) -> new TaskProfile(
                 rs.getString("task_type"),
-                rs.getObject("has_background_audio") == null || rs.getBoolean("has_background_audio")
+                rs.getObject("has_background_audio") == null || rs.getBoolean("has_background_audio"),
+                rs.getString("narration_input_mode"),
+                rs.getObject("has_native_subtitle") == null ? null : rs.getBoolean("has_native_subtitle")
         ), taskId);
         if (profiles.isEmpty() || profiles.get(0).taskType() == null || profiles.get(0).taskType().isBlank()) {
             throw new IllegalStateException("Task has no distributor task type: " + taskId);
@@ -75,7 +80,7 @@ public class TaskRouteService {
 
         List<RouteNode> route = new ArrayList<>();
         for (Step step : configured) {
-            if (!profile.hasBackgroundAudio() && "demucs".equals(step.stage())) {
+            if (!stageEnabled(profile, step)) {
                 continue;
             }
             StageRegistry.StagePolicy policy = registry.require(step.stage());
@@ -96,6 +101,24 @@ public class TaskRouteService {
     }
 
     private static String label(String defaultLabel, String stage, String subStage) {
+        if ("downloader".equals(stage) && "metadata".equals(subStage)) return "元数据下载";
+        if ("whisper".equals(stage) && "source_transcription".equals(subStage)) return "源语音识别";
+        if ("publisher".equals(stage)) {
+            return switch (subStage) {
+                case "script_generation" -> "文案生成";
+                case "publish_metadata" -> "发布准备";
+                case "segment_plan" -> "文案分段";
+                case "image_generation" -> "图片生成";
+                default -> defaultLabel;
+            };
+        }
+        if ("asseter".equals(stage)) {
+            return switch (subStage) {
+                case "image_composition" -> "图片素材";
+                case "audio_visualization" -> "音频素材";
+                default -> defaultLabel;
+            };
+        }
         if (!"combiner".equals(stage)) return defaultLabel;
         return switch (subStage) {
             case "audio_merge" -> "音频合并";
@@ -103,6 +126,20 @@ public class TaskRouteService {
             case "asmr" -> "ASMR 合成";
             default -> defaultLabel;
         };
+    }
+
+    private static boolean stageEnabled(TaskProfile profile, Step step) {
+        if (!profile.hasBackgroundAudio() && "demucs".equals(step.stage())) return false;
+        if (!"narration".equals(profile.taskType())) return true;
+        if ("prepared_text".equals(normalizeSubStage(profile.narrationInputMode()))) {
+            return !(("downloader".equals(step.stage()) && "metadata".equals(step.subStage()))
+                    || ("whisper".equals(step.stage()) && "source_transcription".equals(step.subStage()))
+                    || ("publisher".equals(step.stage()) && "script_generation".equals(step.subStage())));
+        }
+        return !("submission".equals(normalizeSubStage(profile.narrationInputMode()))
+                && Boolean.TRUE.equals(profile.hasNativeSubtitle())
+                && "whisper".equals(step.stage())
+                && "source_transcription".equals(step.subStage()));
     }
 
     private static String normalizeSubStage(String value) {
@@ -115,7 +152,12 @@ public class TaskRouteService {
         return List.copyOf(result);
     }
 
-    private record TaskProfile(String taskType, boolean hasBackgroundAudio) {
+    private record TaskProfile(
+            String taskType,
+            boolean hasBackgroundAudio,
+            String narrationInputMode,
+            Boolean hasNativeSubtitle
+    ) {
     }
 
     private record Step(String stage, String subStage) {
