@@ -1,7 +1,6 @@
 package com.youbi.monitor.controller;
 
 import com.youbi.monitor.model.TaskProgressBatchRequest;
-import com.youbi.monitor.service.DiagnosticArtifactService;
 import com.youbi.monitor.service.MonitorService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,10 +20,7 @@ class MonitorTaskControllerTest {
     void batchProgressDeduplicatesAndLimitsCurrentPageToTwentyTasks() {
         MonitorService monitorService = mock(MonitorService.class);
         when(monitorService.getTaskProgressBatch(anyList())).thenReturn(List.of());
-        MonitorTaskController controller = new MonitorTaskController(
-                monitorService,
-                mock(DiagnosticArtifactService.class)
-        );
+        MonitorTaskController controller = new MonitorTaskController(monitorService);
         List<String> requested = new ArrayList<>();
         requested.add(" task-1 ");
         requested.add("task-1");
