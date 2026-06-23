@@ -75,13 +75,24 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     }
 
     @Override
-    public List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId) {
+    public long countOperatorDiagnostics(String opId) {
+        Long count = repository.queryForObject(
+                "SELECT COUNT(*) FROM " + OPERATOR_DIAGNOSTIC_TABLE + " WHERE op_id = ?",
+                Long.class,
+                text(opId)
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId, int offset, int limit) {
         return repository.query("""
                 SELECT *
                 FROM operator_diagnostic
                 WHERE op_id = ?
                 ORDER BY step_index ASC, id ASC
-                """, this::mapDiagnostic, opId);
+                LIMIT ? OFFSET ?
+                """, this::mapDiagnostic, text(opId), Math.max(1, limit), Math.max(0, offset));
     }
 
     private QueryParts executionWhere(Map<String, String> filters) {
@@ -91,6 +102,8 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         addLike(conditions, args, "op_id", filters.get("taskId"));
         addLike(conditions, args, "COALESCE(screenshot_url, html_url, '')", filters.get("platform"));
         addLike(conditions, args, "COALESCE(screenshot_url, html_url, '')", filters.get("action"));
+        addDateLowerBound(conditions, args, "created_at", filters.get("createdFrom"));
+        addDateUpperBound(conditions, args, "created_at", filters.get("createdTo"));
         String status = text(filters.get("status"));
         if (!status.isBlank()) {
             if ("failed".equals(status)) {
@@ -111,6 +124,24 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         }
         conditions.add(column + " LIKE ?");
         args.add("%" + text + "%");
+    }
+
+    private void addDateLowerBound(List<String> conditions, List<Object> args, String column, String value) {
+        String text = text(value);
+        if (text.isBlank()) {
+            return;
+        }
+        conditions.add(column + " >= ?");
+        args.add(text);
+    }
+
+    private void addDateUpperBound(List<String> conditions, List<Object> args, String column, String value) {
+        String text = text(value);
+        if (text.isBlank()) {
+            return;
+        }
+        conditions.add(column + " < ?");
+        args.add(text);
     }
 
     private DiagnosticArtifactRecord mapDiagnostic(ResultSet rs, int rowNum) throws SQLException {

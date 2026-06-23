@@ -30,7 +30,7 @@ public class OperatorDiagnosticsController {
     }
 
     @GetMapping("/tasks/{opId}/diagnostics")
-    public Map<String, Object> diagnostics(@PathVariable String opId) {
-        return operatorDiagnosticsService.getDiagnostics(opId);
+    public Map<String, Object> diagnostics(@PathVariable String opId, @RequestParam MultiValueMap<String, String> query) {
+        return operatorDiagnosticsService.getDiagnostics(opId, query);
     }
 }

@@ -6,6 +6,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMap;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +16,7 @@ import java.util.Map;
 public class OperatorDiagnosticsService {
     private static final int DEFAULT_LIMIT = 10;
     private static final int MAX_LIMIT = 100;
+    private static final DateTimeFormatter SQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final IDiagnosticArtifactRepositoryService repositoryService;
 
@@ -51,12 +54,24 @@ public class OperatorDiagnosticsService {
                 .orElseGet(() -> Map.of("opId", TextSupport.text(opId), "status", "not_found", "diagnosticCount", 0));
     }
 
-    public Map<String, Object> getDiagnostics(String opId) {
-        List<Map<String, Object>> items = repositoryService.listOperatorDiagnostics(TextSupport.text(opId))
+    public Map<String, Object> getDiagnostics(String opId, MultiValueMap<String, String> query) {
+        int page = positiveInt(first(query, "page"), 1);
+        int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), DEFAULT_LIMIT));
+        long total = repositoryService.countOperatorDiagnostics(TextSupport.text(opId));
+        int pageCount = total == 0 ? 0 : (int) Math.ceil((double) total / limit);
+        int normalizedPage = pageCount == 0 ? 1 : Math.min(page, pageCount);
+        int offset = (normalizedPage - 1) * limit;
+        List<Map<String, Object>> items = repositoryService.listOperatorDiagnostics(TextSupport.text(opId), offset, limit)
                 .stream()
                 .map(this::diagnosticJson)
                 .toList();
-        return Map.of("items", items, "total", items.size());
+        return Map.of(
+                "items", items,
+                "total", total,
+                "page", normalizedPage,
+                "limit", limit,
+                "pageCount", pageCount
+        );
     }
 
     private Map<String, Object> normalizeExecution(Map<String, Object> row) {
@@ -121,7 +136,32 @@ public class OperatorDiagnosticsService {
                 filters.put(key, value.trim());
             }
         }
+        putDateTimeFilter(filters, "createdFrom", first(query, "createdFrom"));
+        putDateTimeFilter(filters, "createdTo", first(query, "createdTo"));
         return filters;
+    }
+
+    private void putDateTimeFilter(Map<String, String> filters, String key, String value) {
+        LocalDateTime dateTime = parseDateTime(value);
+        if (dateTime != null) {
+            filters.put(key, SQL_DATETIME.format(dateTime));
+        }
+    }
+
+    private LocalDateTime parseDateTime(String value) {
+        String text = TextSupport.text(value);
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(text.replace(' ', 'T'));
+        } catch (DateTimeParseException exception) {
+            try {
+                return LocalDateTime.parse(text, SQL_DATETIME);
+            } catch (DateTimeParseException ignored) {
+                return null;
+            }
+        }
     }
 
     private String first(MultiValueMap<String, String> query, String key) {
