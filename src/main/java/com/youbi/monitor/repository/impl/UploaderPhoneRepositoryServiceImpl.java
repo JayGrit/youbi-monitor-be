@@ -7,7 +7,6 @@ import com.youbi.monitor.model.UploaderPhoneMatrixResponse;
 import com.youbi.monitor.model.UploaderPhonePlatformAccounts;
 import com.youbi.monitor.model.UploaderPhoneRecord;
 import com.youbi.monitor.repository.IUploaderPhoneRepositoryService;
-import com.youbi.monitor.repository.RepositorySchemaSupport;
 import com.youbi.monitor.repository.UploaderPhoneRepository;
 import org.springframework.stereotype.Service;
 
@@ -21,15 +20,17 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
     private static final String TABLE = "uploader_phone";
     private static final String ACCOUNT_TABLE = "uploader_phone_account";
     private static final List<PlatformTable> PLATFORMS = List.of(
-            new PlatformTable("douyin", "uploader_account_douyin", "douyin_account_id"),
-            new PlatformTable("xiaohongshu", "uploader_account_xiaohongshu", "xiaohongshu_account_id"),
-            new PlatformTable("bilibili", "uploader_account_bilibili", "bilibili_account_id"),
-            new PlatformTable("shipinhao", "uploader_account_shipinhao", "shipinhao_account_id"),
-            new PlatformTable("kuaishou", "uploader_account_kuaishou", "kuaishou_account_id"),
-            new PlatformTable("jinritoutiao", "uploader_account_jinritoutiao", "jinritoutiao_account_id"),
-            new PlatformTable("x", "uploader_account_x", "x_account_id"),
-            new PlatformTable("youtube", "uploader_account_youtube", "youtube_account_id"),
-            new PlatformTable("doubao", "publisher_account_doubao", "doubao_account_id")
+            new PlatformTable("douyin"),
+            new PlatformTable("xiaohongshu"),
+            new PlatformTable("bilibili"),
+            new PlatformTable("shipinhao"),
+            new PlatformTable("kuaishou"),
+            new PlatformTable("jinritoutiao"),
+            new PlatformTable("x"),
+            new PlatformTable("youtube"),
+            new PlatformTable("doubao"),
+            new PlatformTable("notebooklm"),
+            new PlatformTable("chatgpt")
     );
 
     private final UploaderPhoneRepository repository;
@@ -162,30 +163,35 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
     }
 
     private List<UploaderPhoneAccountOption> accountOptions(PlatformTable platform) {
-        if (!tableExists(platform.table())) {
+        if (!tableExists("operator_loginstate")) {
             return List.of();
         }
-        RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
-        ensureAccountColumn(platform.table(), "display_name", "VARCHAR(128) NULL");
-        ensureAccountColumn(platform.table(), "avatar_url", "VARCHAR(1024) NULL");
-        String nameExpression = "COALESCE(NULLIF(account.nickname, ''), account.account_key)";
-        if ("bilibili".equals(platform.key())) {
-            nameExpression = "COALESCE(NULLIF(account.uname, ''), account.account_key)";
-        }
+        ensureUploaderPhoneAccountColumn("display_name", "VARCHAR(128) NULL");
+        ensureUploaderPhoneAccountColumn("avatar_url", "VARCHAR(1024) NULL");
         return repository.query(
-                ("""
+                """
                 SELECT account.id,
                        account.account_key,
-                       %s AS resolved_display_name,
-                       account.display_name AS remark,
-                       account.avatar_url,
+                       account.account_key AS resolved_display_name,
+                       phone_profile.display_name AS remark,
+                       phone_profile.avatar_url,
                        state.is_available
-                FROM %s account
+                FROM operator_loginstate account
                 LEFT JOIN uploader_account state
-                  ON state.platform = '%s'
+                  ON state.platform = account.platform
                  AND state.account_key = account.account_key
+                LEFT JOIN (
+                    SELECT platform, account_id,
+                           MAX(display_name) AS display_name,
+                           MAX(avatar_url) AS avatar_url
+                    FROM uploader_phone_account
+                    GROUP BY platform, account_id
+                ) phone_profile
+                  ON phone_profile.platform = account.platform
+                 AND phone_profile.account_id = account.id
+                WHERE account.platform = ?
                 ORDER BY account.account_key
-                """).formatted(nameExpression, platform.table(), platform.key()),
+                """,
                 (rs, rowNum) -> new UploaderPhoneAccountOption(
                         rs.getLong("id"),
                         rs.getString("account_key"),
@@ -193,18 +199,19 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
                         rs.getString("remark"),
                         rs.getString("avatar_url"),
                         rs.getObject("is_available", Boolean.class)
-                )
+                ),
+                platform.key()
         );
     }
 
     private boolean accountIdExists(PlatformTable platform, long accountId) {
-        if (!tableExists(platform.table())) {
+        if (!tableExists("operator_loginstate")) {
             return false;
         }
-        RepositorySchemaSupport.ensureSurrogatePrimaryKey(repository, platform.table());
         Integer count = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + platform.table() + " WHERE id = ?",
+                "SELECT COUNT(*) FROM operator_loginstate WHERE platform = ? AND id = ?",
                 Integer.class,
+                platform.key(),
                 accountId
         );
         return count != null && count > 0;
@@ -221,6 +228,10 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
 
     @Override
     public void ensureSchema() {
+        if (tableExists(ACCOUNT_TABLE)) {
+            ensureUploaderPhoneAccountColumn("display_name", "VARCHAR(128) NULL");
+            ensureUploaderPhoneAccountColumn("avatar_url", "VARCHAR(1024) NULL");
+        }
     }
 
     private void migrateLegacyAccountColumns() {
@@ -245,10 +256,23 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
     }
 
     private void ensureUploaderPhoneAccountColumn(String column, String definition) {
+        if (!columnExists(ACCOUNT_TABLE, column)) {
+            repository.update("ALTER TABLE " + ACCOUNT_TABLE + " ADD COLUMN " + column + " " + definition);
+        }
     }
 
     private boolean columnExists(String table, String column) {
-        return true;
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
+                """,
+                Integer.class,
+                table,
+                column
+        );
+        return count != null && count > 0;
     }
 
     private void dropColumnIfExists(String table, String column) {
@@ -258,7 +282,16 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
     }
 
     private boolean tableExists(String table) {
-        return true;
+        Integer count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                """,
+                Integer.class,
+                table
+        );
+        return count != null && count > 0;
     }
 
     private PlatformTable platformTable(String platform) throws IOException {
@@ -273,6 +306,6 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         return value == null ? "" : value.trim();
     }
 
-    private record PlatformTable(String key, String table, String phoneColumn) {
+    private record PlatformTable(String key) {
     }
 }

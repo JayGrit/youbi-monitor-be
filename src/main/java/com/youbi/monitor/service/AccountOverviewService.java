@@ -28,18 +28,9 @@ public class AccountOverviewService {
             "jinritoutiao",
             "x",
             "youtube",
-            "doubao"
-    );
-    private static final Map<String, String> ACCOUNT_TABLES = Map.ofEntries(
-            Map.entry("bilibili", "uploader_account_bilibili"),
-            Map.entry("douyin", "uploader_account_douyin"),
-            Map.entry("xiaohongshu", "uploader_account_xiaohongshu"),
-            Map.entry("shipinhao", "uploader_account_shipinhao"),
-            Map.entry("kuaishou", "uploader_account_kuaishou"),
-            Map.entry("jinritoutiao", "uploader_account_jinritoutiao"),
-            Map.entry("x", "uploader_account_x"),
-            Map.entry("youtube", "uploader_account_youtube"),
-            Map.entry("doubao", "publisher_account_doubao")
+            "doubao",
+            "notebooklm",
+            "chatgpt"
     );
 
     private final MonitorRepository repository;
@@ -49,24 +40,25 @@ public class AccountOverviewService {
     }
 
     public List<String> types() {
+        ensureOperatorLoginstateTables();
         ensureDeprecatedColumn();
         return repository.queryForList("""
                 SELECT DISTINCT account_key
-                FROM uploader_account
+                FROM operator_loginstate
                 WHERE account_key IS NOT NULL
                   AND TRIM(account_key) <> ''
-                  AND is_deprecated = 0
                 ORDER BY account_key
                 """, String.class);
     }
 
     public Map<String, List<Map<String, Object>>> overview() {
+        ensureOperatorLoginstateTables();
         ensureDeprecatedColumn();
         ensureQuietTimeColumns();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountSelectSql("") + """
-                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao'), ua.account_key
+                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.account_key
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
         );
@@ -121,13 +113,10 @@ public class AccountOverviewService {
         if (oldKey.equals(nextKey)) {
             return findAccount(normalizedPlatform, oldKey);
         }
-        String table = ACCOUNT_TABLES.get(normalizedPlatform);
-        if (repository.update("UPDATE " + table + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?", nextKey, oldKey) != 1) {
+        if (repository.update("UPDATE operator_loginstate SET account_key = ?, updated_at = NOW() WHERE platform = ? AND account_key = ?", nextKey, normalizedPlatform, oldKey) != 1) {
             throw new IllegalArgumentException("Account not found");
         }
-        if (repository.update("UPDATE uploader_account SET account_key = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0", nextKey, normalizedPlatform, oldKey) != 1) {
-            throw new IllegalArgumentException("Uploader account not found");
-        }
+        repository.update("UPDATE uploader_account SET account_key = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0", nextKey, normalizedPlatform, oldKey);
         return findAccount(normalizedPlatform, nextKey);
     }
 
@@ -174,7 +163,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedAccountKey
@@ -212,7 +201,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedAccountKey
@@ -248,7 +237,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedAccountKey
@@ -261,7 +250,7 @@ public class AccountOverviewService {
 
     private String accountSelectSql(String extraWhere) {
         String failedCountSql = columnExists("uploader_account", "failed_upload_count")
-                ? "ua.failed_upload_count"
+                ? "COALESCE(ua.failed_upload_count, 0) AS failed_upload_count"
                 : "0 failed_upload_count";
         boolean hasRunningTaskId = columnExists("uploader_account", "upload_running_task_id");
         String runningTaskIdSql = hasRunningTaskId
@@ -269,138 +258,68 @@ public class AccountOverviewService {
                 : "NULL AS upload_running_task_id";
         String runningCountSql = hasRunningTaskId
                 ? "CASE WHEN NULLIF(ua.upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
-                : "ua.upload_running_count";
+                : "COALESCE(ua.upload_running_count, 0) AS upload_running_count";
         String downloaderMaxStagedCountSql = columnExists("uploader_account", "downloader_max_staged_count")
-                ? "ua.downloader_max_staged_count"
+                ? "COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count"
                 : "5 downloader_max_staged_count";
         String downloaderPendingCountSql = columnExists("uploader_account", "downloader_pending_count")
-                ? "ua.downloader_pending_count"
+                ? "COALESCE(ua.downloader_pending_count, 0) AS downloader_pending_count"
                 : "0 downloader_pending_count";
         String stagedRunningCountSql = columnExists("uploader_account", "staged_running_count")
-                ? "ua.staged_running_count"
+                ? "COALESCE(ua.staged_running_count, 0) AS staged_running_count"
                 : "0 staged_running_count";
         String stagedFailedCountSql = columnExists("uploader_account", "staged_failed_count")
-                ? "ua.staged_failed_count"
+                ? "COALESCE(ua.staged_failed_count, 0) AS staged_failed_count"
                 : "0 staged_failed_count";
         String quietStartSql = columnExists("uploader_account", "upload_quiet_start_time")
-                ? "ua.upload_quiet_start_time"
+                ? "COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time"
                 : "TIME('01:00:00') upload_quiet_start_time";
         String quietEndSql = columnExists("uploader_account", "upload_quiet_end_time")
-                ? "ua.upload_quiet_end_time"
+                ? "COALESCE(ua.upload_quiet_end_time, TIME('07:00:00')) AS upload_quiet_end_time"
                 : "TIME('07:00:00') upload_quiet_end_time";
         return ("""
-                SELECT ua.platform,
-                       ua.account_key,
+                SELECT ol.platform,
+                       ol.account_key,
                        ua.last_upload_at,
                        ua.next_upload_allowed_at,
-                       ua.upload_cooldown_min_seconds,
-                       ua.upload_cooldown_max_seconds,
+                       COALESCE(ua.upload_cooldown_min_seconds, 3600) AS upload_cooldown_min_seconds,
+                       COALESCE(ua.upload_cooldown_max_seconds, 7200) AS upload_cooldown_max_seconds,
                        %s,
                        %s,
                        %s,
                        %s,
                        %s,
                        %s,
-                       ua.today_upload_count,
-                       ua.cooldown_waiting_count,
+                       COALESCE(ua.today_upload_count, 0) AS today_upload_count,
+                       COALESCE(ua.cooldown_waiting_count, 0) AS cooldown_waiting_count,
                        %s,
                        %s,
                        %s,
-                       ua.is_enabled,
-                       ua.is_available,
-                       b.mid,
-                       b.uname,
-                       CASE ua.platform
-                         WHEN 'douyin' THEN d.user_id
-                         WHEN 'xiaohongshu' THEN x.user_id
-                         WHEN 'shipinhao' THEN s.user_id
-                         WHEN 'kuaishou' THEN k.user_id
-                         WHEN 'jinritoutiao' THEN j.user_id
-                         WHEN 'x' THEN tx.user_id
-                         WHEN 'youtube' THEN y.user_id
-                         WHEN 'doubao' THEN db.user_id
-                         ELSE NULL
-                       END AS user_id,
-                       CASE ua.platform
-                         WHEN 'douyin' THEN d.nickname
-                         WHEN 'xiaohongshu' THEN x.nickname
-                         WHEN 'shipinhao' THEN s.nickname
-                         WHEN 'kuaishou' THEN k.nickname
-                         WHEN 'jinritoutiao' THEN j.nickname
-                         WHEN 'x' THEN tx.nickname
-                         WHEN 'youtube' THEN y.nickname
-                         WHEN 'doubao' THEN db.nickname
-                         ELSE NULL
-                       END AS nickname,
-                       CASE ua.platform
-                         WHEN 'bilibili' THEN b.login_info_json
-                         WHEN 'douyin' THEN d.storage_state_json
-                         WHEN 'xiaohongshu' THEN x.storage_state_json
-                         WHEN 'shipinhao' THEN s.storage_state_json
-                         WHEN 'kuaishou' THEN k.storage_state_json
-                         WHEN 'jinritoutiao' THEN j.storage_state_json
-                         WHEN 'x' THEN tx.storage_state_json
-                         WHEN 'youtube' THEN y.storage_state_json
-                         WHEN 'doubao' THEN db.storage_state_json
-                         ELSE NULL
-                       END AS storage_json,
-                       CASE ua.platform
-                         WHEN 'bilibili' THEN b.updated_at
-                         WHEN 'douyin' THEN d.updated_at
-                         WHEN 'xiaohongshu' THEN x.updated_at
-                         WHEN 'shipinhao' THEN s.updated_at
-                         WHEN 'kuaishou' THEN k.updated_at
-                         WHEN 'jinritoutiao' THEN j.updated_at
-                         WHEN 'x' THEN tx.updated_at
-                         WHEN 'youtube' THEN y.updated_at
-                         WHEN 'doubao' THEN db.updated_at
-                         ELSE NULL
-                       END AS cookie_updated_at,
-                       CASE ua.platform
-                         WHEN 'bilibili' THEN b.display_name
-                         WHEN 'douyin' THEN d.display_name
-                         WHEN 'xiaohongshu' THEN x.display_name
-                         WHEN 'shipinhao' THEN s.display_name
-                         WHEN 'kuaishou' THEN k.display_name
-                         WHEN 'jinritoutiao' THEN j.display_name
-                         WHEN 'x' THEN tx.display_name
-                         WHEN 'youtube' THEN y.display_name
-                         WHEN 'doubao' THEN db.display_name
-                         ELSE NULL
-                       END AS display_name,
-                       CASE ua.platform
-                         WHEN 'bilibili' THEN b.avatar_url
-                         WHEN 'douyin' THEN d.avatar_url
-                         WHEN 'xiaohongshu' THEN x.avatar_url
-                         WHEN 'shipinhao' THEN s.avatar_url
-                         WHEN 'kuaishou' THEN k.avatar_url
-                         WHEN 'jinritoutiao' THEN j.avatar_url
-                         WHEN 'x' THEN tx.avatar_url
-                         WHEN 'youtube' THEN y.avatar_url
-                         WHEN 'doubao' THEN db.avatar_url
-                         ELSE NULL
-                       END AS avatar_url
-                FROM uploader_account ua
-                LEFT JOIN uploader_account_bilibili b
-                       ON ua.platform = 'bilibili' AND b.account_key = ua.account_key
-                LEFT JOIN uploader_account_douyin d
-                       ON ua.platform = 'douyin' AND d.account_key = ua.account_key
-                LEFT JOIN uploader_account_xiaohongshu x
-                       ON ua.platform = 'xiaohongshu' AND x.account_key = ua.account_key
-                LEFT JOIN uploader_account_shipinhao s
-                       ON ua.platform = 'shipinhao' AND s.account_key = ua.account_key
-                LEFT JOIN uploader_account_kuaishou k
-                       ON ua.platform = 'kuaishou' AND k.account_key = ua.account_key
-                LEFT JOIN uploader_account_jinritoutiao j
-                       ON ua.platform = 'jinritoutiao' AND j.account_key = ua.account_key
-                LEFT JOIN uploader_account_x tx
-                       ON ua.platform = 'x' AND tx.account_key = ua.account_key
-                LEFT JOIN uploader_account_youtube y
-                       ON ua.platform = 'youtube' AND y.account_key = ua.account_key
-                LEFT JOIN publisher_account_doubao db
-                       ON ua.platform = 'doubao' AND db.account_key = ua.account_key
-                WHERE ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao')
-                  AND ua.is_deprecated = 0
+                       COALESCE(ua.is_enabled, 1) AS is_enabled,
+                       COALESCE(ua.is_available, ol.available) AS is_available,
+                       NULL AS mid,
+                       NULL AS uname,
+                       NULL AS user_id,
+                       NULL AS nickname,
+                       ol.storage_state_json AS storage_json,
+                       ol.updated_at AS cookie_updated_at,
+                       phone_profile.display_name,
+                       phone_profile.avatar_url
+                FROM operator_loginstate ol
+                LEFT JOIN uploader_account ua
+                       ON ua.platform = ol.platform
+                      AND ua.account_key = ol.account_key
+                      AND ua.is_deprecated = 0
+                LEFT JOIN (
+                    SELECT platform, account_id,
+                           MAX(display_name) AS display_name,
+                           MAX(avatar_url) AS avatar_url
+                    FROM uploader_phone_account
+                    GROUP BY platform, account_id
+                ) phone_profile
+                       ON phone_profile.platform = ol.platform
+                      AND phone_profile.account_id = ol.id
+                WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
                 """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
     }
@@ -580,6 +499,53 @@ public class AccountOverviewService {
                 """);
     }
 
+    private void ensureOperatorLoginstateTables() {
+        if (!tableExists("operator_profile")) {
+            repository.update("""
+                    CREATE TABLE operator_profile (
+                      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                      profile_key VARCHAR(64) NOT NULL,
+                      profile_path VARCHAR(1024) NOT NULL,
+                      enabled TINYINT(1) NOT NULL DEFAULT 1,
+                      note VARCHAR(255) NULL,
+                      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (id),
+                      UNIQUE KEY uniq_operator_profile_key (profile_key)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """);
+        }
+        if (!tableExists("operator_loginstate")) {
+            repository.update("""
+                    CREATE TABLE operator_loginstate (
+                      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                      platform VARCHAR(64) NOT NULL,
+                      account_key VARCHAR(128) NOT NULL,
+                      account_category VARCHAR(32) NOT NULL DEFAULT 'video_platform',
+                      login_state_type VARCHAR(32) NOT NULL,
+                      storage_state_json MEDIUMTEXT NULL,
+                      profile_id BIGINT UNSIGNED NULL,
+                      available TINYINT(1) NOT NULL DEFAULT 1,
+                      video_generation_quota INT NOT NULL DEFAULT 0,
+                      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                      PRIMARY KEY (id),
+                      UNIQUE KEY uniq_operator_loginstate_platform_key (platform, account_key),
+                      KEY idx_operator_loginstate_category_platform (account_category, platform),
+                      KEY idx_operator_loginstate_profile_id (profile_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                    """);
+        }
+        if (tableExists("uploader_phone_account")) {
+            if (!columnExists("uploader_phone_account", "display_name")) {
+                repository.update("ALTER TABLE uploader_phone_account ADD COLUMN display_name VARCHAR(128) NULL AFTER disabled");
+            }
+            if (!columnExists("uploader_phone_account", "avatar_url")) {
+                repository.update("ALTER TABLE uploader_phone_account ADD COLUMN avatar_url VARCHAR(1024) NULL AFTER display_name");
+            }
+        }
+    }
+
     private static String formatBackupperStatusText(BigDecimal usedGb, String totalLabel) {
         if (usedGb == null) {
             return "";
@@ -613,11 +579,7 @@ public class AccountOverviewService {
     }
 
     private String requireManagedPlatform(String platform) {
-        String normalized = requirePlatform(platform);
-        if (!ACCOUNT_TABLES.containsKey(normalized)) {
-            throw new IllegalArgumentException("Unsupported account platform");
-        }
-        return normalized;
+        return requirePlatform(platform);
     }
 
     private String requireAccountKey(String accountKey) {
@@ -630,7 +592,7 @@ public class AccountOverviewService {
 
     private Map<String, Object> findAccount(String platform, String accountKey) {
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ua.platform = ? AND ua.account_key = ?"),
+                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 platform,
                 accountKey

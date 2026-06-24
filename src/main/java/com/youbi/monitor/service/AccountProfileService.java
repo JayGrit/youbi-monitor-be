@@ -19,15 +19,17 @@ import java.util.Map;
 public class AccountProfileService {
     private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.BASIC_ISO_DATE;
     private static final Map<String, String> TABLES = Map.ofEntries(
-            Map.entry("bilibili", "uploader_account_bilibili"),
-            Map.entry("douyin", "uploader_account_douyin"),
-            Map.entry("xiaohongshu", "uploader_account_xiaohongshu"),
-            Map.entry("shipinhao", "uploader_account_shipinhao"),
-            Map.entry("kuaishou", "uploader_account_kuaishou"),
-            Map.entry("jinritoutiao", "uploader_account_jinritoutiao"),
-            Map.entry("x", "uploader_account_x"),
-            Map.entry("youtube", "uploader_account_youtube"),
-            Map.entry("doubao", "publisher_account_doubao")
+            Map.entry("bilibili", "bilibili"),
+            Map.entry("douyin", "douyin"),
+            Map.entry("xiaohongshu", "xiaohongshu"),
+            Map.entry("shipinhao", "shipinhao"),
+            Map.entry("kuaishou", "kuaishou"),
+            Map.entry("jinritoutiao", "jinritoutiao"),
+            Map.entry("x", "x"),
+            Map.entry("youtube", "youtube"),
+            Map.entry("doubao", "doubao"),
+            Map.entry("notebooklm", "notebooklm"),
+            Map.entry("chatgpt", "chatgpt")
     );
 
     private final IAccountProfileRepositoryService repositoryService;
@@ -57,7 +59,7 @@ public class AccountProfileService {
         repositoryService.ensureProfileColumns(table);
         String displayName = TextSupport.text(request == null ? "" : request.displayName());
         int updated = repositoryService.updateDisplayName(table, normalized, displayName.isBlank() ? null : TextSupport.truncate(displayName, 128));
-        if (updated != 1) {
+        if (updated < 1) {
             throw new IOException("Account key not found: " + normalized);
         }
         return repositoryService.findProfile(table, normalized);
@@ -90,7 +92,7 @@ public class AccountProfileService {
         }
         String avatarUrl = minioUrl(objectKey);
         int updated = repositoryService.updateAvatarUrl(table, normalized, avatarUrl);
-        if (updated != 1) {
+        if (updated < 1) {
             throw new IOException("Account key not found: " + normalized);
         }
         return repositoryService.findProfile(table, normalized);
