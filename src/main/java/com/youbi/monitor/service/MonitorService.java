@@ -1,6 +1,5 @@
 package com.youbi.monitor.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.TaskFlowDetail;
@@ -11,19 +10,16 @@ import com.youbi.monitor.model.WhisperWordTimestamp;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
 import com.youbi.monitor.repository.ISpeakerSegmentRepositoryService;
 import com.youbi.monitor.repository.ISubmitterAuthorRepositoryService;
-import com.youbi.monitor.repository.ITaskLifecycleRepositoryService;
 import com.youbi.monitor.repository.IUploadSubmissionRepositoryService;
 import com.youbi.monitor.repository.IWhisperProcessingRepositoryService;
 import io.minio.ListObjectsArgs;
 import io.minio.MinioClient;
-import io.minio.RemoveObjectArgs;
 import io.minio.Result;
 import io.minio.messages.Item;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.io.IOException;
 import java.net.URI;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -94,8 +90,6 @@ public class MonitorService {
     private final ISpeakerSegmentRepositoryService speakerSegmentRepositoryService;
     private final IUploadSubmissionRepositoryService uploadSubmissionRepositoryService;
     private final ISubmitterAuthorRepositoryService submitterAuthorRepositoryService;
-    private final ITaskLifecycleRepositoryService taskLifecycleRepositoryService;
-    private final DistributorLifecycleClient distributorLifecycleClient;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
@@ -106,8 +100,6 @@ public class MonitorService {
             ISpeakerSegmentRepositoryService speakerSegmentRepositoryService,
             IUploadSubmissionRepositoryService uploadSubmissionRepositoryService,
             ISubmitterAuthorRepositoryService submitterAuthorRepositoryService,
-            ITaskLifecycleRepositoryService taskLifecycleRepositoryService,
-            DistributorLifecycleClient distributorLifecycleClient,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -118,8 +110,6 @@ public class MonitorService {
         this.speakerSegmentRepositoryService = speakerSegmentRepositoryService;
         this.uploadSubmissionRepositoryService = uploadSubmissionRepositoryService;
         this.submitterAuthorRepositoryService = submitterAuthorRepositoryService;
-        this.taskLifecycleRepositoryService = taskLifecycleRepositoryService;
-        this.distributorLifecycleClient = distributorLifecycleClient;
         this.minioEndpoint = text(minioEndpoint);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
@@ -217,55 +207,6 @@ public class MonitorService {
         return speakerSegmentRepositoryService.updateSpeakerSegmentDstText(taskId, segmentId, dstText);
     }
 
-    public FailedUploadSubmissionList failedUploadSubmissions(String platform) {
-        return uploadSubmissionRepositoryService.listFailedUploadSubmissions(platform);
-    }
-
-    @Transactional
-    public UploadSubmissionRetryResult retryUploadSubmissions(String platform, List<Long> ids) {
-        return uploadSubmissionRepositoryService.retryFailedUploadSubmissions(platform, ids);
-    }
-
-    public DownloaderFailureList failedTasks() {
-        return taskLifecycleRepositoryService.listFailedTasks();
-    }
-
-    public DownloaderRollbackResult rollbackDownloaderFailures(List<Long> submissionIds) throws IOException {
-        return rollbackFailedTasks(submissionIds);
-    }
-
-    public DownloaderRollbackResult rollbackFailedTasks(List<Long> submissionIds) throws IOException {
-        List<Long> normalizedIds = submissionIds == null ? List.of() : submissionIds.stream()
-                .filter(id -> id != null && id > 0)
-                .distinct()
-                .toList();
-        if (normalizedIds.isEmpty()) {
-            throw new IllegalArgumentException("No failed task selected.");
-        }
-        DownloaderFailureList failures = taskLifecycleRepositoryService.listFailedTasks();
-        Map<Long, String> taskIdsBySubmission = failures.rows().stream()
-                .filter(row -> normalizedIds.contains(row.submissionId()))
-                .collect(java.util.stream.Collectors.toMap(
-                        DownloaderFailure::submissionId,
-                        DownloaderFailure::taskId
-                ));
-        if (taskIdsBySubmission.size() != normalizedIds.size()) {
-            throw new IllegalArgumentException("Some selected failed tasks no longer exist or are not rollbackable.");
-        }
-
-        int deletedObjects = 0;
-        for (Long submissionId : normalizedIds) {
-            deletedObjects += deleteTaskObjects(taskIdsBySubmission.get(submissionId));
-        }
-        DownloaderRollbackDatabaseResult databaseResult =
-                taskLifecycleRepositoryService.rollbackFailedTasks(normalizedIds);
-        return new DownloaderRollbackResult(
-                databaseResult.restoredSubmissionCount(),
-                databaseResult.deletedDatabaseRows(),
-                deletedObjects
-        );
-    }
-
     public UploadBackfillCandidateList uploadBackfillCandidates(String platform, String accountKey, String type) {
         return uploadSubmissionRepositoryService.listUploadBackfillCandidates(platform, accountKey, type);
     }
@@ -313,49 +254,6 @@ public class MonitorService {
 
     public SubmitterAuthorDeleteResult deleteAuthorType(String author) {
         return submitterAuthorRepositoryService.deleteSubmitterAuthorType(author);
-    }
-
-    public boolean markTaskReady(String taskId) {
-        distributorLifecycleClient.retry(taskId);
-        return true;
-    }
-
-    public TaskRestartResult restartTask(String taskId) throws IOException {
-        String status = taskLifecycleRepositoryService.findTaskStatus(taskId);
-        if (status == null) {
-            return null;
-        }
-        if ("running".equals(status) || taskLifecycleRepositoryService.hasRunningStage(taskId)) {
-            throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before restarting.");
-        }
-
-        int deletedObjects = deleteTaskObjects(taskId);
-        distributorLifecycleClient.restart(taskId);
-        return new TaskRestartResult("ready", deletedObjects);
-    }
-
-    @Transactional
-    public TaskDeleteResult deleteTask(String taskId) throws IOException {
-        String status = taskLifecycleRepositoryService.findTaskStatus(taskId);
-        if (status == null) {
-            return null;
-        }
-        if ("running".equals(status) || taskLifecycleRepositoryService.hasRunningStage(taskId)) {
-            throw new IllegalStateException("Task is running. Stop the worker or wait for it to finish before deleting.");
-        }
-
-        int deletedObjects = deleteTaskObjects(taskId);
-        int deletedRows = taskLifecycleRepositoryService.deleteTaskRows(taskId);
-        return new TaskDeleteResult("deleted", deletedRows, deletedObjects);
-    }
-
-    public TaskStopResult stopTask(String taskId) {
-        JsonNode result = distributorLifecycleClient.stop(taskId);
-        return new TaskStopResult(
-                result.path("status").asText("failed"),
-                result.path("stoppedStages").asInt(),
-                result.path("stoppedTask").asBoolean()
-        );
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
@@ -547,33 +445,6 @@ public class MonitorService {
             return new TaskFlowDetail.TaskFlowAsset(fieldName, stageKey, kindForField(fieldName, text), text, null, null, null);
         }
         return null;
-    }
-
-    private int deleteTaskObjects(String taskId) throws IOException {
-        String prefix = minioPrefix(taskId);
-        int deleted = 0;
-        Iterable<Result<Item>> objects = minioClient.listObjects(
-                ListObjectsArgs.builder()
-                        .bucket(minioBucket)
-                        .prefix(prefix)
-                        .recursive(true)
-                        .build()
-        );
-        try {
-            for (Result<Item> result : objects) {
-                Item item = result.get();
-                minioClient.removeObject(
-                        RemoveObjectArgs.builder()
-                                .bucket(minioBucket)
-                                .object(item.objectName())
-                                .build()
-                );
-                deleted++;
-            }
-        } catch (Exception exc) {
-            throw new IOException("Cannot delete MinIO objects under prefix " + prefix, exc);
-        }
-        return deleted;
     }
 
     private Object firstPresent(String name, Map<String, Object>... rows) {
