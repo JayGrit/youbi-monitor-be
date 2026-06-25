@@ -249,28 +249,9 @@ public class AccountOverviewService {
     }
 
     private String accountSelectSql(String extraWhere) {
-        String failedCountSql = columnExists("uploader_account", "failed_upload_count")
-                ? "COALESCE(ua.failed_upload_count, 0) AS failed_upload_count"
-                : "0 failed_upload_count";
-        boolean hasRunningTaskId = columnExists("uploader_account", "upload_running_task_id");
-        String runningTaskIdSql = hasRunningTaskId
-                ? "NULLIF(ua.upload_running_task_id, '') AS upload_running_task_id"
-                : "NULL AS upload_running_task_id";
-        String runningCountSql = hasRunningTaskId
-                ? "CASE WHEN NULLIF(ua.upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
-                : "COALESCE(ua.upload_running_count, 0) AS upload_running_count";
         String downloaderMaxStagedCountSql = columnExists("uploader_account", "downloader_max_staged_count")
                 ? "COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count"
                 : "5 downloader_max_staged_count";
-        String downloaderPendingCountSql = columnExists("uploader_account", "downloader_pending_count")
-                ? "COALESCE(ua.downloader_pending_count, 0) AS downloader_pending_count"
-                : "0 downloader_pending_count";
-        String stagedRunningCountSql = columnExists("uploader_account", "staged_running_count")
-                ? "COALESCE(ua.staged_running_count, 0) AS staged_running_count"
-                : "0 staged_running_count";
-        String stagedFailedCountSql = columnExists("uploader_account", "staged_failed_count")
-                ? "COALESCE(ua.staged_failed_count, 0) AS staged_failed_count"
-                : "0 staged_failed_count";
         String quietStartSql = columnExists("uploader_account", "upload_quiet_start_time")
                 ? "COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time"
                 : "TIME('01:00:00') upload_quiet_start_time";
@@ -287,14 +268,80 @@ public class AccountOverviewService {
                        %s,
                        %s,
                        %s,
-                       %s,
-                       %s,
-                       %s,
-                       COALESCE(ua.today_upload_count, 0) AS today_upload_count,
-                       COALESCE(ua.cooldown_waiting_count, 0) AS cooldown_waiting_count,
-                       %s,
-                       %s,
-                       %s,
+                       (
+                         SELECT COUNT(*)
+                         FROM downloader_submission submission
+                         WHERE submission.type = ol.account_key
+                           AND submission.status = 'ready'
+                       ) AS downloader_pending_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM downloader_submission submission
+                         JOIN task task ON task.id = submission.task_id
+                         WHERE submission.type = ol.account_key
+                           AND submission.status = 'success'
+                           AND NULLIF(submission.task_id, '') IS NOT NULL
+                           AND task.status <> 'failed'
+                           AND NOT EXISTS (
+                             SELECT 1
+                             FROM uploader_task upload_submission
+                             WHERE upload_submission.task_id = submission.task_id
+                               AND upload_submission.account_key = submission.type
+                           )
+                       ) AS staged_running_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM downloader_submission submission
+                         JOIN task task ON task.id = submission.task_id
+                         WHERE submission.type = ol.account_key
+                           AND submission.status = 'success'
+                           AND NULLIF(submission.task_id, '') IS NOT NULL
+                           AND task.status = 'failed'
+                           AND NOT EXISTS (
+                             SELECT 1
+                             FROM uploader_task upload_submission
+                             WHERE upload_submission.task_id = submission.task_id
+                               AND upload_submission.account_key = submission.type
+                           )
+                       ) AS staged_failed_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = ol.platform
+                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.status = 'success'
+                           AND DATE(upload_submission.completed_at) = CURDATE()
+                       ) AS today_upload_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = ol.platform
+                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.status = 'ready'
+                       ) AS cooldown_waiting_count,
+                       (
+                         SELECT upload_submission.task_id
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = ol.platform
+                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.status = 'running'
+                         ORDER BY upload_submission.started_at DESC, upload_submission.id DESC
+                         LIMIT 1
+                       ) AS upload_running_task_id,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = ol.platform
+                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.status = 'running'
+                       ) AS upload_running_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = ol.platform
+                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.status = 'failed'
+                       ) AS failed_upload_count,
                        COALESCE(ua.is_enabled, 1) AS is_enabled,
                        COALESCE(ua.is_available, ol.available) AS is_available,
                        NULL AS mid,
@@ -321,7 +368,7 @@ public class AccountOverviewService {
                       AND phone_profile.account_id = ol.id
                 WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
-                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql, extraWhere == null ? "" : extraWhere);
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -440,30 +487,6 @@ public class AccountOverviewService {
                     """
             );
         }
-        if (!columnExists("uploader_account", "downloader_pending_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN downloader_pending_count INT NOT NULL DEFAULT 0
-                    """
-            );
-        }
-        if (!columnExists("uploader_account", "staged_running_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN staged_running_count INT NOT NULL DEFAULT 0
-                    """
-            );
-        }
-        if (!columnExists("uploader_account", "staged_failed_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN staged_failed_count INT NOT NULL DEFAULT 0
-                    """
-            );
-        }
     }
 
     private void ensureQuietTimeColumns() {
@@ -495,7 +518,6 @@ public class AccountOverviewService {
         repository.update("""
                 ALTER TABLE uploader_account
                 ADD COLUMN is_deprecated TINYINT(1) NOT NULL DEFAULT 0
-                AFTER staged_failed_count
                 """);
     }
 
