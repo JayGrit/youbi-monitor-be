@@ -68,7 +68,7 @@ class FailureLogRepositoryServiceImplTest {
         String sql = invocation.getArgument(0);
         RowMapper<Object> mapper = invocation.getArgument(1);
         ResultSet resultSet = mock(ResultSet.class);
-        if (sql.contains("FROM `uploader_task_jinritoutiao`")) {
+        if (sql.contains("FROM `uploader_task`")) {
             when(resultSet.getLong("id")).thenReturn(525L);
             when(resultSet.getString("task_id")).thenReturn("Qf0ss86m0dY");
             when(resultSet.getString("account_key")).thenReturn("long_knowledge");

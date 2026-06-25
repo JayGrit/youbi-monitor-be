@@ -34,28 +34,9 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         if (!tableExists(TABLE)) {
             return Optional.empty();
         }
-        String failedCountSql = columnExists(TABLE, "failed_upload_count")
-                ? "failed_upload_count"
-                : "0 failed_upload_count";
-        boolean hasRunningTaskId = columnExists(TABLE, "upload_running_task_id");
-        String runningTaskIdSql = hasRunningTaskId
-                ? "NULLIF(upload_running_task_id, '') AS upload_running_task_id"
-                : "NULL AS upload_running_task_id";
-        String runningCountSql = hasRunningTaskId
-                ? "CASE WHEN NULLIF(upload_running_task_id, '') IS NULL THEN 0 ELSE 1 END AS upload_running_count"
-                : "upload_running_count";
         String downloaderMaxStagedCountSql = columnExists(TABLE, "downloader_max_staged_count")
                 ? "downloader_max_staged_count"
                 : "5 downloader_max_staged_count";
-        String downloaderPendingCountSql = columnExists(TABLE, "downloader_pending_count")
-                ? "downloader_pending_count"
-                : "0 downloader_pending_count";
-        String stagedRunningCountSql = columnExists(TABLE, "staged_running_count")
-                ? "staged_running_count"
-                : "0 staged_running_count";
-        String stagedFailedCountSql = columnExists(TABLE, "staged_failed_count")
-                ? "staged_failed_count"
-                : "0 staged_failed_count";
         String quietStartSql = columnExists(TABLE, "upload_quiet_start_time")
                 ? "upload_quiet_start_time"
                 : "TIME('01:00:00') upload_quiet_start_time";
@@ -67,13 +48,86 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
                        %s, %s,
-                       %s, %s, %s, %s, today_upload_count, cooldown_waiting_count, %s, %s,
                        %s,
+                       (
+                         SELECT COUNT(*)
+                         FROM downloader_submission submission
+                         WHERE submission.type = uploader_account.account_key
+                           AND submission.status = 'ready'
+                       ) downloader_pending_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM downloader_submission submission
+                         JOIN task task ON task.id = submission.task_id
+                         WHERE submission.type = uploader_account.account_key
+                           AND submission.status = 'success'
+                           AND NULLIF(submission.task_id, '') IS NOT NULL
+                           AND task.status <> 'failed'
+                           AND NOT EXISTS (
+                             SELECT 1
+                             FROM uploader_task upload_submission
+                             WHERE upload_submission.task_id = submission.task_id
+                               AND upload_submission.account_key = submission.type
+                           )
+                       ) staged_running_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM downloader_submission submission
+                         JOIN task task ON task.id = submission.task_id
+                         WHERE submission.type = uploader_account.account_key
+                           AND submission.status = 'success'
+                           AND NULLIF(submission.task_id, '') IS NOT NULL
+                           AND task.status = 'failed'
+                           AND NOT EXISTS (
+                             SELECT 1
+                             FROM uploader_task upload_submission
+                             WHERE upload_submission.task_id = submission.task_id
+                               AND upload_submission.account_key = submission.type
+                           )
+                       ) staged_failed_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = uploader_account.platform
+                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.status = 'success'
+                           AND DATE(upload_submission.completed_at) = CURDATE()
+                       ) today_upload_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = uploader_account.platform
+                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.status = 'ready'
+                       ) cooldown_waiting_count,
+                       (
+                         SELECT upload_submission.task_id
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = uploader_account.platform
+                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.status = 'running'
+                         ORDER BY upload_submission.started_at DESC, upload_submission.id DESC
+                         LIMIT 1
+                       ) upload_running_task_id,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = uploader_account.platform
+                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.status = 'running'
+                       ) upload_running_count,
+                       (
+                         SELECT COUNT(*)
+                         FROM uploader_task upload_submission
+                         WHERE upload_submission.platform = uploader_account.platform
+                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.status = 'failed'
+                       ) failed_upload_count,
                        is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
                 FROM uploader_account
                 WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 LIMIT 1
-                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, downloaderPendingCountSql, stagedRunningCountSql, stagedFailedCountSql, runningTaskIdSql, runningCountSql, failedCountSql),
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
                         rs.getString("platform"),
                         rs.getString("account_key"),
@@ -283,18 +337,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     @Override
     public int resetTodayUploadCounts() {
-        if (!tableExists(TABLE)) {
-            return 0;
-        }
-        return repository.update(
-                """
-                UPDATE uploader_account
-                SET today_upload_count = 0,
-                    metrics_updated_at = NOW(),
-                    updated_at = NOW()
-                WHERE today_upload_count <> 0 AND is_deprecated = 0
-                """
-        );
+        return 0;
     }
 
     private void ensureDeprecatedColumn() {
@@ -304,7 +347,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         repository.update("""
                 ALTER TABLE uploader_account
                 ADD COLUMN is_deprecated TINYINT(1) NOT NULL DEFAULT 0
-                AFTER staged_failed_count
                 """);
     }
 
@@ -344,30 +386,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                     """
                     ALTER TABLE uploader_account
                     ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
-                    """
-            );
-        }
-        if (!columnExists(TABLE, "downloader_pending_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN downloader_pending_count INT NOT NULL DEFAULT 0
-                    """
-            );
-        }
-        if (!columnExists(TABLE, "staged_running_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN staged_running_count INT NOT NULL DEFAULT 0
-                    """
-            );
-        }
-        if (!columnExists(TABLE, "staged_failed_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN staged_failed_count INT NOT NULL DEFAULT 0
                     """
             );
         }

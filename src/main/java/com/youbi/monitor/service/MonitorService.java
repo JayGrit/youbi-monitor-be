@@ -55,14 +55,14 @@ public class MonitorService {
             "uploader", "uploader"
     );
     private static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
-            "bilibili", "uploader_task_bilibili",
-            "douyin", "uploader_task_douyin",
-            "xiaohongshu", "uploader_task_xiaohongshu",
-            "shipinhao", "uploader_task_shipinhao",
-            "kuaishou", "uploader_task_kuaishou",
-            "jinritoutiao", "uploader_task_jinritoutiao",
-            "youtube", "uploader_task_youtube",
-            "x", "uploader_task_x"
+            "bilibili", "uploader_task",
+            "douyin", "uploader_task",
+            "xiaohongshu", "uploader_task",
+            "shipinhao", "uploader_task",
+            "kuaishou", "uploader_task",
+            "jinritoutiao", "uploader_task",
+            "youtube", "uploader_task",
+            "x", "uploader_task"
     );
     private static final Map<String, List<String>> STAGE_INPUT_FIELDS = Map.of(
             "downloader", List.of("source_url"),
@@ -333,7 +333,7 @@ public class MonitorService {
             }
             case "uploader" -> {
                 addLimitedTable(tables, "uploader", taskId, "task_id", "task_id");
-                UPLOADER_TASK_TABLES.forEach((platform, table) -> addUploaderTaskTable(tables, platform, table, taskId));
+                addLimitedTable(tables, "uploader_task", taskId, "task_id", "platform, account_key, id");
             }
             default -> {
             }
@@ -345,7 +345,9 @@ public class MonitorService {
         if (!taskQueryRepositoryService.tableExists(table)) {
             return;
         }
-        List<Map<String, Object>> rows = taskQueryRepositoryService.listTaskFlowRows(table, "task_id", taskId, "account_key, id", CHILD_ROW_LIMIT + 1);
+        List<Map<String, Object>> rows = taskQueryRepositoryService.listTaskFlowRows(table, "task_id", taskId, "platform, account_key, id", CHILD_ROW_LIMIT + 1).stream()
+                .filter(row -> platform.equals(String.valueOf(row.get("platform"))))
+                .toList();
         boolean truncated = rows.size() > CHILD_ROW_LIMIT;
         if (truncated) {
             rows = rows.subList(0, CHILD_ROW_LIMIT);
@@ -353,13 +355,7 @@ public class MonitorService {
         if (rows.isEmpty()) {
             return;
         }
-        List<Map<String, Object>> decorated = new ArrayList<>();
-        for (Map<String, Object> row : rows) {
-            java.util.LinkedHashMap<String, Object> decoratedRow = new java.util.LinkedHashMap<>(row);
-            decoratedRow.put("platform", platform);
-            decorated.add(decoratedRow);
-        }
-        tables.add(new TaskFlowDetail.TaskFlowTable(table, decorated, truncated));
+        tables.add(new TaskFlowDetail.TaskFlowTable(table, rows, truncated));
     }
 
     private void addLimitedTable(List<TaskFlowDetail.TaskFlowTable> tables, String table, String id, String idColumn, String orderBy) {

@@ -49,7 +49,8 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 LEFT JOIN video_info video_info ON video_info.task_id = submission.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 %s
-                WHERE submission.status = 'failed'
+                WHERE submission.platform = ?
+                  AND submission.status = 'failed'
                 ORDER BY submission.updated_at DESC, submission.id DESC
                 LIMIT 200
                 """.formatted(submissionTitleSql, accountExistsSql, quotedIdentifier(table), accountJoin), (rs, rowNum) -> {
@@ -71,7 +72,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                     accountExists,
                     retryBlockedReason
             );
-        });
+        }, normalized);
         return new MonitorService.FailedUploadSubmissionList(normalized, rows.size(), rows);
     }
 
@@ -115,6 +116,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 FROM %s submission
                 JOIN %s account ON account.account_key = submission.account_key
                 WHERE submission.id IN (%s)
+                  AND submission.platform = ?
                   AND submission.status = 'failed'
                 FOR UPDATE
                 """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders),
@@ -124,7 +126,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                         rs.getString("status"),
                         "ready"
                 ),
-                normalizedIds.toArray()
+                appendArg(normalizedIds.toArray(), normalized)
         );
         if (accountStatusChanges.isEmpty()) {
             return new MonitorService.UploadSubmissionRetryResult(normalized, 0, 0, 0);
@@ -135,8 +137,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 FROM %s submission
                 JOIN %s account ON account.account_key = submission.account_key
                 WHERE submission.id IN (%s)
+                  AND submission.platform = ?
                   AND submission.status = 'failed'
-                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), String.class, normalizedIds.toArray());
+                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), String.class, appendArg(normalizedIds.toArray(), normalized));
         if (taskIds.isEmpty()) {
             return new MonitorService.UploadSubmissionRetryResult(normalized, 0, 0, 0);
         }
@@ -156,12 +159,9 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                     submission.operator_next_check_at = NULL,
                     submission.operator_deadline_at = NULL
                 WHERE submission.id IN (%s)
+                  AND submission.platform = ?
                   AND submission.status = 'failed'
-                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), normalizedIds.toArray());
-        if (retried > 0) {
-            applyUploaderAccountStatusChanges(normalized, accountStatusChanges);
-        }
-
+                """.formatted(quotedIdentifier(table), quotedIdentifier(accountTable), placeholders), appendArg(normalizedIds.toArray(), normalized));
         String taskPlaceholders = placeholders(taskIds.size());
         Object[] taskArgs = taskIds.toArray();
         int uploaderUpdated = repository.update("""
@@ -240,7 +240,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 JOIN (
                   %s
                 ) sent ON sent.task_id = task.id
-                LEFT JOIN %s target ON target.task_id = task.id AND target.account_key = ?
+                LEFT JOIN %s target ON target.platform = ? AND target.task_id = task.id AND target.account_key = ?
                 LEFT JOIN %s platform_account ON platform_account.account_key = ?
                 LEFT JOIN %s account ON account.platform = ? AND account.account_key = ? AND account.is_deprecated = 0
                 WHERE video_info.type = ?
@@ -288,6 +288,7 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                             blockedReason
                     );
                 },
+                normalized,
                 normalizedAccountKey,
                 normalizedAccountKey,
                 normalized,
@@ -327,11 +328,12 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         }
 
         String taskPlaceholders = placeholders(normalizedTaskIds.size());
-        Object[] queryArgs = new Object[3 + normalizedTaskIds.size()];
+        Object[] queryArgs = new Object[4 + normalizedTaskIds.size()];
         queryArgs[0] = normalizedAccountKey;
         queryArgs[1] = normalized;
+        queryArgs[2] = normalized;
         for (int i = 0; i < normalizedTaskIds.size(); i++) {
-            queryArgs[i + 2] = normalizedTaskIds.get(i);
+            queryArgs[i + 3] = normalizedTaskIds.get(i);
         }
         queryArgs[queryArgs.length - 1] = normalizedType;
 
@@ -350,7 +352,10 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
                 JOIN (
                   %s
                 ) sent ON sent.task_id = task.id
-                LEFT JOIN %s target ON target.task_id = task.id AND target.account_key = account.account_key
+                LEFT JOIN %s target
+                  ON target.platform = ?
+                 AND target.task_id = task.id
+                 AND target.account_key = account.account_key
                 WHERE task.id IN (%s)
                   AND video_info.type = ?
                   AND COALESCE(NULLIF(%s, ''), '') <> ''
@@ -373,23 +378,19 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         }
 
         int registered = 0;
-        List<UploadAccountStatusChange> accountStatusChanges = new ArrayList<>();
         for (UploadBackfillInsertRow row : rows) {
             int inserted = repository.update("""
                     INSERT INTO %s (
-                        task_id, account_key, status
+                        platform, task_id, account_key, status
                     )
-                    VALUES (?, ?, 'ready')
+                    VALUES (?, ?, ?, 'ready')
                     """.formatted(quotedIdentifier(table)),
+                    normalized,
                     row.taskId(),
                     normalizedAccountKey
             );
             registered += inserted;
-            if (inserted > 0) {
-                accountStatusChanges.add(new UploadAccountStatusChange(row.taskId(), normalizedAccountKey, null, "ready"));
-            }
         }
-        applyUploaderAccountStatusChanges(normalized, accountStatusChanges);
 
         List<String> registeredTaskIds = rows.stream().map(UploadBackfillInsertRow::taskId).distinct().toList();
         String registeredPlaceholders = placeholders(registeredTaskIds.size());
@@ -434,5 +435,10 @@ public class UploadSubmissionRepositoryServiceImpl extends MonitorRepositorySqlS
         );
     }
 
+    private static Object[] appendArg(Object[] args, Object value) {
+        Object[] result = java.util.Arrays.copyOf(args, args.length + 1);
+        result[args.length] = value;
+        return result;
+    }
 
 }

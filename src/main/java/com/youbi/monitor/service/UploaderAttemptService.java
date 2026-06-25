@@ -11,14 +11,14 @@ import java.util.Map;
 public class UploaderAttemptService {
     private static final String ATTEMPT_COLUMN = "upload_attempt_no";
     private static final Map<String, String> PLATFORM_TABLES = Map.of(
-            "bilibili", "uploader_task_bilibili",
-            "douyin", "uploader_task_douyin",
-            "xiaohongshu", "uploader_task_xiaohongshu",
-            "shipinhao", "uploader_task_shipinhao",
-            "kuaishou", "uploader_task_kuaishou",
-            "jinritoutiao", "uploader_task_jinritoutiao",
-            "youtube", "uploader_task_youtube",
-            "x", "uploader_task_x"
+            "bilibili", "uploader_task",
+            "douyin", "uploader_task",
+            "xiaohongshu", "uploader_task",
+            "shipinhao", "uploader_task",
+            "kuaishou", "uploader_task",
+            "jinritoutiao", "uploader_task",
+            "youtube", "uploader_task",
+            "x", "uploader_task"
     );
 
     private final MonitorRepository repository;
@@ -49,13 +49,14 @@ public class UploaderAttemptService {
         int updated = 0;
         if (!normalizedAccountKey.isBlank()) {
             updated = repository.update(
-                    "UPDATE " + table + " SET " + ATTEMPT_COLUMN + " = LAST_INSERT_ID(" + ATTEMPT_COLUMN + " + 1) WHERE task_id = ? AND account_key = ?",
+                    "UPDATE " + table + " SET " + ATTEMPT_COLUMN + " = LAST_INSERT_ID(" + ATTEMPT_COLUMN + " + 1) WHERE platform = ? AND task_id = ? AND account_key = ?",
+                    normalizedPlatform,
                     normalizedTaskId,
                     normalizedAccountKey
             );
         }
         if (updated <= 0) {
-            updated = incrementByTaskId(table, normalizedTaskId);
+            updated = incrementByTaskId(table, normalizedPlatform, normalizedTaskId);
         }
         if (updated <= 0) {
             return fallbackRunId(normalizedTaskId, normalizedPlatform, normalizedAccountKey);
@@ -64,9 +65,10 @@ public class UploaderAttemptService {
         return buildRunId(normalizedTaskId, normalizedPlatform, normalizedAccountKey, attemptNo == null || attemptNo < 1 ? 1 : attemptNo);
     }
 
-    private int incrementByTaskId(String table, String taskId) {
+    private int incrementByTaskId(String table, String platform, String taskId) {
         int updated = repository.update(
-                "UPDATE " + table + " SET " + ATTEMPT_COLUMN + " = LAST_INSERT_ID(" + ATTEMPT_COLUMN + " + 1) WHERE task_id = ?",
+                "UPDATE " + table + " SET " + ATTEMPT_COLUMN + " = LAST_INSERT_ID(" + ATTEMPT_COLUMN + " + 1) WHERE platform = ? AND task_id = ?",
+                platform,
                 taskId
         );
         return updated;

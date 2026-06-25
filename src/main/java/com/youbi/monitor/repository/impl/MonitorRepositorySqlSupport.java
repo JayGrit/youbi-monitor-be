@@ -44,14 +44,14 @@ abstract class MonitorRepositorySqlSupport {
             "asr_segment"
     );
     protected static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
-            "bilibili", "uploader_task_bilibili",
-            "douyin", "uploader_task_douyin",
-            "xiaohongshu", "uploader_task_xiaohongshu",
-            "shipinhao", "uploader_task_shipinhao",
-            "kuaishou", "uploader_task_kuaishou",
-            "jinritoutiao", "uploader_task_jinritoutiao",
-            "youtube", "uploader_task_youtube",
-            "x", "uploader_task_x"
+            "bilibili", "uploader_task",
+            "douyin", "uploader_task",
+            "xiaohongshu", "uploader_task",
+            "shipinhao", "uploader_task",
+            "kuaishou", "uploader_task",
+            "jinritoutiao", "uploader_task",
+            "youtube", "uploader_task",
+            "x", "uploader_task"
     );
     protected static final Map<String, String> UPLOADER_ACCOUNT_TABLES = Map.of(
             "bilibili", "uploader_account_bilibili",
@@ -240,7 +240,7 @@ abstract class MonitorRepositorySqlSupport {
         return UPLOADER_TASK_TABLES.entrySet().stream()
                 .filter(entry -> !entry.getKey().equals(excludedPlatform))
                 .filter(entry -> tableExists(entry.getValue()))
-                .map(entry -> "SELECT task_id, '" + entry.getKey() + "' platform FROM " + quotedIdentifier(entry.getValue()) + " WHERE status = 'success'")
+                .map(entry -> "SELECT task_id, platform FROM " + quotedIdentifier(entry.getValue()) + " WHERE platform = '" + entry.getKey() + "' AND status = 'success'")
                 .reduce((left, right) -> left + "\nUNION ALL\n" + right)
                 .orElse("SELECT NULL task_id, NULL platform WHERE FALSE");
     }
@@ -269,204 +269,25 @@ abstract class MonitorRepositorySqlSupport {
         if (changes == null || changes.isEmpty() || !tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)) {
             return;
         }
-        boolean hasFailedUploadCount = columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "failed_upload_count");
-        boolean hasRunningTaskId = columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "upload_running_task_id");
-        Map<UploadAccountStatusDeltaKey, Integer> counts = new LinkedHashMap<>();
         for (UploadAccountStatusChange change : changes) {
             String accountKey = text(change.accountKey());
             if (accountKey.isBlank()) {
                 continue;
             }
-            UploadAccountStatusDeltaKey key = new UploadAccountStatusDeltaKey(
-                    accountKey,
-                    normalizeStatus(change.oldStatus()),
-                    normalizeStatus(change.newStatus())
-            );
-            counts.put(key, counts.getOrDefault(key, 0) + 1);
-        }
-        for (Map.Entry<UploadAccountStatusDeltaKey, Integer> entry : counts.entrySet()) {
-            UploadAccountStatusDeltaKey key = entry.getKey();
-            int count = entry.getValue();
-            ensureUploaderAccountRow(normalizedPlatform, key.accountKey());
-            int runningDelta = (runningContribution(key.newStatus()) - runningContribution(key.oldStatus())) * count;
-            int failedDelta = (failedContribution(key.newStatus()) - failedContribution(key.oldStatus())) * count;
-            int todayDelta = (successContribution(key.newStatus()) - successContribution(key.oldStatus())) * count;
-            int waitingDelta = (runningContribution(key.newStatus()) - runningContribution(key.oldStatus())) * count;
-            int readyDelta = (readyContribution(key.newStatus()) - readyContribution(key.oldStatus())) * count;
-            if (runningDelta == 0 && failedDelta == 0 && todayDelta == 0 && waitingDelta == 0 && readyDelta == 0) {
-                continue;
-            }
-
-            List<Object> args = new ArrayList<>();
-            if (!hasRunningTaskId) {
-                args.add(runningDelta);
-            }
-            if (hasFailedUploadCount) {
-                args.add(failedDelta);
-            }
-            args.add(todayDelta);
-            args.add(waitingDelta);
-            args.add(readyDelta);
-            args.add(normalizedPlatform);
-            args.add(key.accountKey());
-            repository.update("""
-                    UPDATE %s
-                    SET %s
-                        %s
-                        today_upload_count = GREATEST(0, today_upload_count + ?),
-                        cooldown_waiting_count = GREATEST(
-                            0,
-                            cooldown_waiting_count
-                            + ?
-                            + ?
-                        ),
-                        metrics_updated_at = NOW(),
-                        updated_at = NOW()
-                    WHERE platform = ? AND account_key = ?
-                    """.formatted(
-                            quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE),
-                            hasRunningTaskId
-                                    ? ""
-                                    : "upload_running_count = GREATEST(0, upload_running_count + ?),",
-                            hasFailedUploadCount
-                                    ? "failed_upload_count = GREATEST(0, failed_upload_count + ?),"
-                                    : ""
-                    ),
-                    args.toArray()
-            );
-        }
-        if (hasRunningTaskId) {
-            for (UploadAccountStatusChange change : changes) {
-                String accountKey = text(change.accountKey());
-                String taskId = text(change.taskId());
-                if (accountKey.isBlank() || taskId.isBlank()) {
-                    continue;
-                }
-                String oldStatus = normalizeStatus(change.oldStatus());
-                String newStatus = normalizeStatus(change.newStatus());
-                if ("running".equals(newStatus)) {
-                    ensureUploaderAccountRow(normalizedPlatform, accountKey);
-                    repository.update("""
-                            UPDATE %s
-                            SET upload_running_task_id = ?,
-                                metrics_updated_at = NOW(),
-                                updated_at = NOW()
-                            WHERE platform = ? AND account_key = ?
-                            """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
-                            taskId,
-                            normalizedPlatform,
-                            accountKey
-                    );
-                } else if ("running".equals(oldStatus)) {
-                    ensureUploaderAccountRow(normalizedPlatform, accountKey);
-                    repository.update("""
-                            UPDATE %s
-                            SET upload_running_task_id = CASE
-                                    WHEN upload_running_task_id = ? THEN NULL
-                                    ELSE upload_running_task_id
-                                END,
-                                metrics_updated_at = NOW(),
-                                updated_at = NOW()
-                            WHERE platform = ? AND account_key = ?
-                            """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
-                            taskId,
-                            normalizedPlatform,
-                            accountKey
-                    );
-                }
-            }
+            ensureUploaderAccountRow(normalizedPlatform, accountKey);
         }
     }
 
     protected void applyStagedPipelineFailure(String taskId, String oldTaskStatus) {
-        if ("failed".equals(normalizeStatus(oldTaskStatus))) {
-            return;
-        }
-        String accountKey = stagedAccountKeyForTask(taskId);
-        if (accountKey.isBlank()) {
-            return;
-        }
-        ensureUnifiedUploaderStagingColumns();
-        repository.update("""
-                UPDATE %s
-                SET staged_running_count = GREATEST(staged_running_count - 1, 0),
-                    staged_failed_count = staged_failed_count + 1,
-                    metrics_updated_at = NOW(),
-                    updated_at = NOW()
-                WHERE account_key = ?
-                """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)), accountKey);
+        return;
     }
 
     protected void applyStagedPipelineRetry(String taskId) {
-        String accountKey = stagedAccountKeyForTask(taskId);
-        if (accountKey.isBlank()) {
-            return;
-        }
-        ensureUnifiedUploaderStagingColumns();
-        repository.update("""
-                UPDATE %s
-                SET staged_running_count = staged_running_count + 1,
-                    staged_failed_count = GREATEST(staged_failed_count - 1, 0),
-                    metrics_updated_at = NOW(),
-                    updated_at = NOW()
-                WHERE account_key = ?
-                """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)), accountKey);
+        return;
     }
 
     protected int reconcileUploaderAccountStagedCounts() {
-        if (!tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)
-                || !tableExists("downloader_submission")
-                || !tableExists("task")) {
-            return 0;
-        }
-        ensureUnifiedUploaderStagingColumns();
-        String uploadExistsSql = uploadSubmissionExistsSql("submission");
-        List<Map<String, Object>> stagedRows = repository.query("""
-                SELECT
-                    submission.type AS account_key,
-                    SUM(CASE WHEN task.status = 'failed' THEN 0 ELSE 1 END) AS staged_count,
-                    SUM(CASE WHEN task.status = 'failed' THEN 1 ELSE 0 END) AS failed_count
-                FROM downloader_submission submission
-                JOIN task task ON task.id = submission.task_id
-                WHERE submission.status = 'success'
-                  AND NULLIF(submission.type, '') IS NOT NULL
-                  AND NULLIF(submission.task_id, '') IS NOT NULL
-                  AND NOT (%s)
-                GROUP BY submission.type
-                """.formatted(uploadExistsSql), (rs, rowNum) -> {
-                    Map<String, Object> row = new LinkedHashMap<>();
-                    row.put("account_key", rs.getString("account_key"));
-                    row.put("staged_count", rs.getInt("staged_count"));
-                    row.put("failed_count", rs.getInt("failed_count"));
-                    return row;
-                });
-        int updated = repository.update("""
-                UPDATE %s
-                SET staged_running_count = 0,
-                    staged_failed_count = 0,
-                    metrics_updated_at = NOW(),
-                    updated_at = NOW()
-                WHERE staged_running_count <> 0
-                   OR staged_failed_count <> 0
-                """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)));
-        for (Map<String, Object> row : stagedRows) {
-            String accountKey = stringValue(row.get("account_key"));
-            if (accountKey.isBlank()) {
-                continue;
-            }
-            updated += repository.update("""
-                    UPDATE %s
-                    SET staged_running_count = ?,
-                        staged_failed_count = ?,
-                        metrics_updated_at = NOW(),
-                        updated_at = NOW()
-                    WHERE account_key = ?
-                    """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
-                    row.get("staged_count"),
-                    row.get("failed_count"),
-                    accountKey);
-        }
-        return updated;
+        return 0;
     }
 
     private String stagedAccountKeyForTask(String taskId) {
@@ -509,21 +330,7 @@ abstract class MonitorRepositorySqlSupport {
     }
 
     private void ensureUnifiedUploaderStagingColumns() {
-        if (!tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)) {
-            return;
-        }
-        if (!columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "staged_running_count")) {
-            repository.update("""
-                    ALTER TABLE %s
-                    ADD COLUMN staged_running_count INT NOT NULL DEFAULT 0
-                    """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)));
-        }
-        if (!columnExists(UNIFIED_UPLOADER_ACCOUNT_TABLE, "staged_failed_count")) {
-            repository.update("""
-                    ALTER TABLE %s
-                    ADD COLUMN staged_failed_count INT NOT NULL DEFAULT 0
-                    """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)));
-        }
+        return;
     }
 
     private void ensureUploaderAccountRow(String platform, String accountKey) {

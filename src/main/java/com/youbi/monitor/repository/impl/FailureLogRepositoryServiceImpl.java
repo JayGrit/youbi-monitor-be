@@ -72,14 +72,14 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
         ActualPublishedSubmission submission = repository.queryForObject("""
                 SELECT id, task_id, account_key, status
                 FROM %s
-                WHERE id = ?
+                WHERE id = ? AND platform = ?
                 FOR UPDATE
                 """.formatted(quotedIdentifier(table)), (rs, rowNum) -> new ActualPublishedSubmission(
                 rs.getLong("id"),
                 rs.getString("task_id"),
                 rs.getString("account_key"),
                 rs.getString("status")
-        ), target.submissionId());
+        ), target.submissionId(), platform);
         if (!"failed".equals(submission.status())) {
             throw new IllegalStateException("上传子任务当前不是失败状态，无法标记实际发布。");
         }
@@ -107,24 +107,19 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                     error_message = NULL,
                     started_at = COALESCE(started_at, NOW()),
                     completed_at = NOW()
-                WHERE id = ? AND status = 'failed'
+                WHERE id = ? AND platform = ? AND status = 'failed'
                 """.formatted(quotedIdentifier(table), manualResultSql),
                 platform,
                 submission.taskId(),
                 submission.accountKey(),
                 submission.accountKey(),
-                submission.id()
+                submission.id(),
+                platform
         );
         if (submissionUpdated != 1) {
             throw new IllegalStateException("上传子任务状态已变化，请刷新后重试。");
         }
 
-        applyUploaderAccountStatusChanges(platform, List.of(new UploadAccountStatusChange(
-                submission.taskId(),
-                submission.accountKey(),
-                "failed",
-                "success"
-        )));
         updateUploaderPlatformResult(platform, submission, manualResultSql);
         markLatestMonitorUploadActualPublished(platform, submission);
 
@@ -153,9 +148,6 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
             args.add(submission.taskId());
             args.add(submission.accountKey());
             args.add(submission.accountKey());
-        }
-        if ("bilibili".equals(platform)) {
-            assignments.append(", biliup = NULL, playwright = 'success'");
         }
         String accountKeyColumn = platformAccountKeyColumn(platform);
         if (!accountKeyColumn.isBlank()) {
@@ -346,8 +338,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 LEFT JOIN uploader uploader ON uploader.task_id = submission.task_id
                 LEFT JOIN video_info video_info ON video_info.task_id = submission.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
-                WHERE submission.status = 'failed'
-                """.formatted(platform, platform, quotedIdentifier(table));
+                WHERE submission.platform = '%s'
+                  AND submission.status = 'failed'
+                """.formatted(platform, platform, quotedIdentifier(table), platform);
     }
 
     private String genericUploaderQuery() {

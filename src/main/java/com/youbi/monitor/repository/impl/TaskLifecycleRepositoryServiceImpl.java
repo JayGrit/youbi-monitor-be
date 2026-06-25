@@ -579,24 +579,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private void reconcileDownloaderPendingCounts() {
-        if (!tableExists("uploader_account")
-                || !tableExists("downloader_submission")
-                || !columnExists("uploader_account", "downloader_pending_count")) {
-            return;
-        }
-        repository.update("""
-                UPDATE uploader_account account
-                LEFT JOIN (
-                    SELECT type account_key, COUNT(*) pending_count
-                    FROM downloader_submission
-                    WHERE status = 'ready'
-                      AND NULLIF(type, '') IS NOT NULL
-                    GROUP BY type
-                ) pending ON pending.account_key = account.account_key
-                SET account.downloader_pending_count = COALESCE(pending.pending_count, 0),
-                    account.metrics_updated_at = NOW(),
-                    account.updated_at = NOW()
-                """);
+        return;
     }
 
     private List<String> taskScopedTables() {
