@@ -59,6 +59,8 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         assertThat(normalizedSql).contains("ch.task_id = ? AND ch.row_role = 'normal'");
         assertThat(normalizedSql).contains("FROM speaker_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("WHERE t.id = ?");
+        assertThat(normalizedSql).contains("u.youtube_upload_status");
+        assertThat(normalizedSql).contains("CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END");
         assertThat(capturedArgs.get()).containsExactly(
                 "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", 1, 0
         );
