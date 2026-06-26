@@ -51,4 +51,21 @@ public class MonitorStageController {
         }
         return result;
     }
+
+    @PatchMapping("/api/video-tasks/{taskId}/translator-segments/{itemIndex}/dst-text")
+    public MonitorService.TranslatorSegmentTextUpdateResult updateTranslatorSegmentDstText(
+            @PathVariable String taskId,
+            @PathVariable int itemIndex,
+            @RequestBody SpeakerSegmentTextUpdateRequest request
+    ) {
+        MonitorService.TranslatorSegmentTextUpdateResult result = monitorService.updateTranslatorSegmentDstText(
+                taskId,
+                itemIndex,
+                request == null ? null : request.dstText()
+        );
+        if (result == null) {
+            throw new ResponseStatusException(NOT_FOUND, "Translator segment does not exist.");
+        }
+        return result;
+    }
 }

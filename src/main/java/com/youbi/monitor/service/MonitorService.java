@@ -207,6 +207,10 @@ public class MonitorService {
         return speakerSegmentRepositoryService.updateSpeakerSegmentDstText(taskId, segmentId, dstText);
     }
 
+    public TranslatorSegmentTextUpdateResult updateTranslatorSegmentDstText(String taskId, int itemIndex, String dstText) {
+        return speakerSegmentRepositoryService.updateTranslatorSegmentDstText(taskId, itemIndex, dstText);
+    }
+
     public UploadBackfillCandidateList uploadBackfillCandidates(String platform, String accountKey, String type) {
         return uploadSubmissionRepositoryService.listUploadBackfillCandidates(platform, accountKey, type);
     }
@@ -572,6 +576,14 @@ public class MonitorService {
             long id,
             String taskId,
             Integer itemIndex,
+            String dstText,
+            LocalDateTime updatedAt
+    ) {
+    }
+
+    public record TranslatorSegmentTextUpdateResult(
+            String taskId,
+            int itemIndex,
             String dstText,
             LocalDateTime updatedAt
     ) {

@@ -41,5 +41,29 @@ public class SpeakerSegmentRepositoryServiceImpl extends MonitorRepositorySqlSup
         );
     }
 
+    public MonitorService.TranslatorSegmentTextUpdateResult updateTranslatorSegmentDstText(String taskId, int itemIndex, String dstText) {
+        String normalizedText = dstText == null ? "" : dstText;
+        int updated = repository.update("""
+                UPDATE translator_segment
+                SET dst_text = ?
+                WHERE task_id = ? AND item_index = ?
+                """, normalizedText, taskId, itemIndex);
+        if (updated == 0) {
+            return null;
+        }
+        List<Map<String, Object>> rows = repository.queryForList("""
+                SELECT *
+                FROM translator_segment
+                WHERE task_id = ? AND item_index = ?
+                LIMIT 1
+                """, taskId, itemIndex);
+        Map<String, Object> row = rows.isEmpty() ? Map.of() : rows.get(0);
+        return new MonitorService.TranslatorSegmentTextUpdateResult(
+                taskId,
+                itemIndex,
+                stringValue(row.get("dst_text")),
+                localDateTime(row.get("updated_at"))
+        );
+    }
 
 }
