@@ -319,6 +319,7 @@ public class MonitorService {
                 addLimitedTable(tables, "translator_api_task", taskId, "task_id", "id");
                 addLimitedTable(tables, "translator-chunk", taskId, "task_id", "chunk_index, row_order, id");
                 addLimitedTable(tables, "translator_segment", taskId, "task_id", "item_index");
+                addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
             }
             case "speaker" -> addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
             case "publisher" -> {
