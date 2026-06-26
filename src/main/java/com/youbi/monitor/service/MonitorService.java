@@ -480,35 +480,12 @@ public class MonitorService {
         if (value.isBlank() || value.startsWith("db://")) {
             return null;
         }
-        if (value.startsWith("s3://")) {
-            String withoutScheme = value.substring("s3://".length());
-            int slash = withoutScheme.indexOf('/');
-            if (slash > 0) {
-                String bucket = withoutScheme.substring(0, slash);
-                if (bucket.equals(minioBucket)) {
-                    return withoutScheme.substring(slash + 1);
-                }
-            }
-            return null;
-        }
-        if (value.startsWith(minioBucket + "/")) {
-            return value.substring(minioBucket.length() + 1);
-        }
-        if (value.matches("^[^:/]+/.+")) {
-            return value.replaceFirst("^/+", "");
-        }
-        if (value.startsWith("http://") || value.startsWith("https://")) {
+        if (value.startsWith("http://")) {
             try {
-                String path = URI.create(value).getPath();
-                String marker = "/minio/" + minioBucket + "/";
-                int markerIndex = path.indexOf(marker);
-                if (markerIndex >= 0) {
-                    return path.substring(markerIndex + marker.length());
-                }
-                String bucketPrefix = "/" + minioBucket + "/";
-                int bucketIndex = path.indexOf(bucketPrefix);
-                if (bucketIndex >= 0) {
-                    return path.substring(bucketIndex + bucketPrefix.length());
+                URI uri = URI.create(value);
+                String prefix = "/" + minioBucket + "/";
+                if ("120.53.92.66".equals(uri.getHost()) && uri.getPort() == 9000 && uri.getPath().startsWith(prefix)) {
+                    return uri.getPath().substring(prefix.length());
                 }
             } catch (IllegalArgumentException ignored) {
                 return null;

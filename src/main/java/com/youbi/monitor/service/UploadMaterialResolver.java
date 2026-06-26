@@ -187,14 +187,9 @@ final class UploadMaterialResolver {
         } catch (IllegalArgumentException exc) {
             throw new IOException("Invalid MinIO URL: " + ref, exc);
         }
-        if ("s3".equals(uri.getScheme())) {
-            return requiredObjectRef(TextSupport.text(uri.getHost()).isBlank() ? minioBucket : uri.getHost(), decode(uri.getPath()).replaceFirst("^/+", ""), ref);
-        }
-        if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(decode(uri.getPath())), ref);
-        }
-        if (value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(value), ref);
+        String objectName = objectNameFromTargetHttpUrl(uri);
+        if (objectName != null) {
+            return requiredObjectRef(minioBucket, objectName, ref);
         }
         throw new IOException("Unsupported MinIO URL: " + ref);
     }
@@ -207,26 +202,20 @@ final class UploadMaterialResolver {
         return new ObjectRef(TextSupport.text(bucket).isBlank() ? minioBucket : TextSupport.text(bucket), cleanObjectName);
     }
 
-    private String stripKnownPrefix(String path) {
-        String value = TextSupport.text(path).split("\\?", 2)[0].replaceFirst("^/+", "");
-        for (String prefix : List.of("minio/" + minioBucket + "/", minioBucket + "/")) {
-            if (value.startsWith(prefix)) {
-                return value.substring(prefix.length());
-            }
+    private String objectNameFromTargetHttpUrl(URI uri) {
+        if (!"http".equals(uri.getScheme()) || !"120.53.92.66".equals(uri.getHost()) || uri.getPort() != 9000) {
+            return null;
         }
-        return value;
+        String prefix = "/" + minioBucket + "/";
+        String path = decode(uri.getPath());
+        return path.startsWith(prefix) ? path.substring(prefix.length()) : null;
     }
 
     private boolean isMinioRef(String ref) {
         String value = TextSupport.text(ref);
-        if (value.startsWith("s3:") || value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return true;
-        }
         try {
             URI uri = URI.create(value);
-            String path = decode(uri.getPath());
-            return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
-                    && (path.startsWith("/minio/" + minioBucket + "/") || path.startsWith("/" + minioBucket + "/"));
+            return objectNameFromTargetHttpUrl(uri) != null;
         } catch (Exception ignored) {
             return false;
         }
