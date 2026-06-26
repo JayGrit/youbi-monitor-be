@@ -114,7 +114,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
+                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
               ) > 0 THEN 'failed' ELSE u.status END uploader_status,
               u.started_at uploader_started_at,
               u.completed_at uploader_completed_at,
@@ -125,7 +126,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END
+                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END
               ) uploader_completed_count,
               (
                 CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
@@ -134,7 +136,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
+                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
               ) uploader_failed_count,
               (
                 CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
@@ -143,7 +146,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
                 CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
+                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
+                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
               ) uploader_total_count,
               u.bilibili_upload_status,
               u.douyin_upload_status,
@@ -152,6 +156,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               u.kuaishou_upload_status,
               u.jinritoutiao_upload_status,
               u.youtube_upload_status,
+              ux.x_upload_status,
               u.bilibili_upload_uid,
               u.bilibili_upload_account_name,
               u.error_message uploader_error
@@ -166,6 +171,20 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN publisher pub ON pub.task_id = t.id
             LEFT JOIN publisher_result pr ON pr.task_id = t.id
             LEFT JOIN uploader u ON u.task_id = t.id
+            LEFT JOIN (
+              SELECT
+                task_id,
+                CASE
+                  WHEN SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) > 0 THEN 'failed'
+                  WHEN SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) > 0 THEN 'running'
+                  WHEN SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) > 0 THEN 'ready'
+                  WHEN COUNT(*) > 0 AND SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) = COUNT(*) THEN 'success'
+                  ELSE MAX(status)
+                END x_upload_status
+              FROM uploader_task
+              WHERE platform = 'x'
+              GROUP BY task_id
+            ) ux ON ux.task_id = t.id
             LEFT JOIN video_info vi ON vi.task_id = t.id
             LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
@@ -800,6 +819,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             addPlatformStatus(statuses, "kuaishou", rs.getString("kuaishou_upload_status"));
             addPlatformStatus(statuses, "jinritoutiao", rs.getString("jinritoutiao_upload_status"));
             addPlatformStatus(statuses, "youtube", rs.getString("youtube_upload_status"));
+            addPlatformStatus(statuses, "x", rs.getString("x_upload_status"));
             return statuses;
         }
 
