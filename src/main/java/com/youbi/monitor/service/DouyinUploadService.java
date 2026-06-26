@@ -1,14 +1,11 @@
 package com.youbi.monitor.service;
 
-import com.youbi.monitor.dto.AliDriveDownloadRequest;
-import com.youbi.monitor.dto.AliDriveTransferResult;
 import com.youbi.monitor.dto.DouyinAccountStatus;
 import com.youbi.monitor.dto.DouyinUploadRequest;
 import com.youbi.monitor.dto.DouyinUploadResult;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
-import io.minio.GetObjectArgs;
 import io.minio.MinioClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,21 +13,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
-import java.net.URLDecoder;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -44,12 +33,8 @@ public class DouyinUploadService {
     private static final Duration PUBLISH_TIMEOUT = Duration.ofMinutes(8);
 
     private final DouyinAccountService accountService;
-    private final AliDriveService aliDriveService;
-    private final MinioClient minioClient;
-    private final String minioBucket;
-    private final Path uploadWorkDir;
+    private final UploadMaterialResolver materialResolver;
     private final Path profileRootDir;
-    private final HttpClient httpClient;
     private final ConcurrentHashMap<String, Object> accountLocks = new ConcurrentHashMap<>();
     private final SocialHumanActions humanActions;
     private final SocialRiskDetector riskDetector;
@@ -76,15 +61,15 @@ public class DouyinUploadService {
         this.riskDetector = riskDetector;
         this.diagnosticArtifactService = diagnosticArtifactService;
         this.uploaderAttemptService = uploaderAttemptService;
-        this.aliDriveService = aliDriveService;
-        this.minioClient = MinioClient.builder()
+        MinioClient minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
-        this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
-        this.uploadWorkDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
+        String bucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
+        Path workDir = Path.of(uploadWorkDir).toAbsolutePath().normalize();
+        HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
+        this.materialResolver = new UploadMaterialResolver(minioClient, bucket, workDir, httpClient, aliDriveService, log, "Douyin upload", true);
         this.profileRootDir = Path.of(text(profileRootDir).isBlank() ? "/work/douyin-chrome-profiles" : text(profileRootDir)).toAbsolutePath().normalize();
-        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(60)).followRedirects(HttpClient.Redirect.NORMAL).build();
     }
 
     public DouyinUploadResult upload(DouyinUploadRequest request) throws IOException {
@@ -93,8 +78,8 @@ public class DouyinUploadService {
         String accountKey = accountService.normalizeAccountKey(request.accountKey());
         log.info("Douyin upload start taskId={} accountKey={} videoPath={} videoUrl={} minioUrl={} title={}",
                 taskId, accountKey, text(request.videoPath()), text(request.videoUrl()), text(request.minioUrl()), text(request.title()));
-        ResolvedFile resolvedVideo = resolveVideo(request);
-        ResolvedFile resolvedCover = resolveCover(request);
+        UploadMaterialResolver.ResolvedFile resolvedVideo = resolveVideo(request);
+        UploadMaterialResolver.ResolvedFile resolvedCover = resolveCover(request);
         String runId = uploaderAttemptService.nextRunId(taskId, DIAGNOSTIC_PLATFORM, accountKey);
         DiagnosticRunContext diagnostics = new DiagnosticRunContext(taskId, runId, DIAGNOSTIC_PLATFORM, DIAGNOSTIC_SOURCE, accountKey);
         diagnosticContext.set(diagnostics);
@@ -657,144 +642,20 @@ public class DouyinUploadService {
         ));
     }
 
-    private ResolvedFile resolveVideo(DouyinUploadRequest request) throws IOException {
-        if (isAliDriveVideo(request)) {
-            return new ResolvedFile(downloadAliDriveFile(request), true);
-        }
-        String minioUrl = firstText(request.videoUrl(), request.minioUrl());
-        if (!minioUrl.isBlank()) {
-            return new ResolvedFile(downloadMinioFile(minioUrl, request.taskId(), "video.mp4"), true);
-        }
-        return new ResolvedFile(Path.of(required(request.videoPath(), "videoPath")).toAbsolutePath().normalize(), false);
+    private UploadMaterialResolver.ResolvedFile resolveVideo(DouyinUploadRequest request) throws IOException {
+        return materialResolver.resolveVideo(
+                request.videoLocation(),
+                request.videoUrl(),
+                request.minioUrl(),
+                request.videoPath(),
+                request.alidriveFileId(),
+                request.alidriveRemotePath(),
+                request.taskId()
+        );
     }
 
-    private Path downloadAliDriveFile(DouyinUploadRequest request) throws IOException {
-        AliDriveRef ref = aliDriveRef(request.videoUrl(), request.minioUrl(), request.alidriveFileId(), request.alidriveRemotePath());
-        if (ref.fileId().isBlank() && ref.remotePath().isBlank()) {
-            throw new IOException("AliDrive video reference is missing");
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(request.taskId(), "manual"))).resolve(UUID.randomUUID().toString());
-        try {
-            AliDriveTransferResult result = aliDriveService.download(new AliDriveDownloadRequest(ref.remotePath(), ref.fileId(), taskDir.toString(), ""));
-            Path path = Path.of(required(result.localPath(), "localPath")).toAbsolutePath().normalize();
-            if (!Files.isRegularFile(path) || Files.size(path) == 0) {
-                throw new IOException("Downloaded AliDrive video is empty: " + path);
-            }
-            return path;
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted downloading AliDrive video", exception);
-        }
-    }
-
-    private ResolvedFile resolveCover(DouyinUploadRequest request) throws IOException {
-        if (hasText(request.coverPath())) {
-            return new ResolvedFile(Path.of(request.coverPath()).toAbsolutePath().normalize(), false);
-        }
-        if (!hasText(request.coverUrl())) {
-            return null;
-        }
-        String coverUrl = text(request.coverUrl());
-        if (isMinioRef(coverUrl)) {
-            return new ResolvedFile(downloadMinioFile(coverUrl, request.taskId(), "cover.jpg"), true);
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(request.taskId(), "manual"))).resolve(UUID.randomUUID().toString());
-        Files.createDirectories(taskDir);
-        Path destination = taskDir.resolve("cover.jpg");
-        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(coverUrl))
-                .timeout(Duration.ofMinutes(2))
-                .header("User-Agent", "Mozilla/5.0")
-                .GET()
-                .build();
-        try {
-            HttpResponse<byte[]> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofByteArray());
-            if (response.statusCode() / 100 != 2 || response.body().length == 0) {
-                throw new IOException("Cannot download coverUrl: " + response.statusCode() + " " + coverUrl);
-            }
-            Files.write(destination, response.body());
-            return new ResolvedFile(destination, true);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            throw new IOException("Interrupted downloading coverUrl", exception);
-        }
-    }
-
-    private Path downloadMinioFile(String minioUrl, String taskId, String fallbackFilename) throws IOException {
-        ObjectRef objectRef = parseObjectRef(minioUrl);
-        String filename = sanitizeFilename(Path.of(objectRef.objectName()).getFileName().toString());
-        if (filename.isBlank()) {
-            filename = fallbackFilename;
-        }
-        Path taskDir = uploadWorkDir.resolve(safeSegment(firstText(taskId, "manual"))).resolve(UUID.randomUUID().toString());
-        Path destination = taskDir.resolve(filename);
-        Files.createDirectories(taskDir);
-        long startedAt = System.currentTimeMillis();
-        log.info("Douyin upload download minio start taskId={} bucket={} object={} destination={}", firstText(taskId, "manual"), objectRef.bucket(), objectRef.objectName(), destination);
-        try (InputStream input = minioClient.getObject(
-                GetObjectArgs.builder()
-                        .bucket(objectRef.bucket())
-                        .object(objectRef.objectName())
-                        .build()
-        )) {
-            Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
-        } catch (Exception exc) {
-            throw new IOException("Cannot download MinIO file: " + minioUrl, exc);
-        }
-        log.info("Douyin upload download minio done taskId={} bytes={} elapsedMs={}", firstText(taskId, "manual"), Files.size(destination), System.currentTimeMillis() - startedAt);
-        return destination;
-    }
-
-    private ObjectRef parseObjectRef(String ref) throws IOException {
-        String value = text(ref);
-        URI uri;
-        try {
-            uri = URI.create(value);
-        } catch (IllegalArgumentException exc) {
-            throw new IOException("Invalid MinIO URL: " + ref, exc);
-        }
-        if ("s3".equals(uri.getScheme())) {
-            return requiredObjectRef(text(uri.getHost()).isBlank() ? minioBucket : uri.getHost(), decode(uri.getPath()).replaceFirst("^/+", ""), ref);
-        }
-        if ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme())) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(decode(uri.getPath())), ref);
-        }
-        if (value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return requiredObjectRef(minioBucket, stripKnownPrefix(value), ref);
-        }
-        throw new IOException("Unsupported MinIO URL: " + ref);
-    }
-
-    private ObjectRef requiredObjectRef(String bucket, String objectName, String ref) throws IOException {
-        String cleanObjectName = text(objectName).replaceFirst("^/+", "");
-        if (cleanObjectName.isBlank()) {
-            throw new IOException("Cannot resolve MinIO object from URL: " + ref);
-        }
-        return new ObjectRef(text(bucket).isBlank() ? minioBucket : text(bucket), cleanObjectName);
-    }
-
-    private String stripKnownPrefix(String path) {
-        String value = text(path).split("\\?", 2)[0].replaceFirst("^/+", "");
-        for (String prefix : List.of("minio/" + minioBucket + "/", minioBucket + "/")) {
-            if (value.startsWith(prefix)) {
-                return value.substring(prefix.length());
-            }
-        }
-        return value;
-    }
-
-    private boolean isMinioRef(String ref) {
-        String value = text(ref);
-        if (value.startsWith("s3:") || value.startsWith("/minio/") || value.startsWith("/" + minioBucket + "/") || value.startsWith(minioBucket + "/")) {
-            return true;
-        }
-        try {
-            URI uri = URI.create(value);
-            String path = decode(uri.getPath());
-            return ("http".equals(uri.getScheme()) || "https".equals(uri.getScheme()))
-                    && (path.startsWith("/minio/" + minioBucket + "/") || path.startsWith("/" + minioBucket + "/"));
-        } catch (Exception ignored) {
-            return false;
-        }
+    private UploadMaterialResolver.ResolvedFile resolveCover(DouyinUploadRequest request) throws IOException {
+        return materialResolver.resolveCover(request.coverPath(), request.coverUrl(), request.taskId());
     }
 
     private List<String> parseTags(String tags) {
@@ -804,10 +665,8 @@ public class DouyinUploadService {
                 .toList();
     }
 
-    private void cleanup(ResolvedFile file) throws IOException {
-        if (file != null && file.temporary()) {
-            Files.deleteIfExists(file.path());
-        }
+    private void cleanup(UploadMaterialResolver.ResolvedFile file) throws IOException {
+        materialResolver.cleanupThrowing(file);
     }
 
     private String truncate(String value, int max) {
@@ -847,58 +706,9 @@ public class DouyinUploadService {
         return value == null ? "" : value.trim();
     }
 
-    private String decode(String value) {
-        return URLDecoder.decode(text(value), StandardCharsets.UTF_8);
-    }
-
-    private String sanitizeFilename(String value) {
-        String sanitized = text(value).replaceAll("[\\\\/:*?\"<>|]+", "_");
-        return sanitized.isBlank() ? "" : sanitized;
-    }
-
     private String safeSegment(String value) {
         String sanitized = text(value).replaceAll("[^A-Za-z0-9._-]+", "_");
         return sanitized.isBlank() ? "manual" : sanitized;
-    }
-
-    private boolean isAliDriveVideo(DouyinUploadRequest request) {
-        String location = text(request.videoLocation()).toLowerCase();
-        return location.equals("adrive")
-                || location.equals("alidrive")
-                || location.equals("aliyun")
-                || location.equals("aliyundrive")
-                || hasText(request.alidriveFileId())
-                || hasText(request.alidriveRemotePath())
-                || isAliDriveRef(request.videoUrl())
-                || isAliDriveRef(request.minioUrl());
-    }
-
-    private boolean isAliDriveRef(String ref) {
-        return text(ref).startsWith("adrive://");
-    }
-
-    private AliDriveRef aliDriveRef(String videoUrl, String minioUrl, String fileId, String remotePath) {
-        String resolvedFileId = text(fileId);
-        String resolvedRemotePath = text(remotePath);
-        String ref = firstText(videoUrl, minioUrl);
-        if (resolvedFileId.isBlank() && resolvedRemotePath.isBlank() && isAliDriveRef(ref)) {
-            String value = text(ref).replaceFirst("^adrive://", "").trim();
-            if (value.startsWith("/")) {
-                resolvedRemotePath = value;
-            } else {
-                resolvedFileId = value;
-            }
-        }
-        return new AliDriveRef(resolvedFileId, resolvedRemotePath);
-    }
-
-    private record ObjectRef(String bucket, String objectName) {
-    }
-
-    private record ResolvedFile(Path path, boolean temporary) {
-    }
-
-    private record AliDriveRef(String fileId, String remotePath) {
     }
 
     private record UploadPaths(Path localPath, Path browserPath) {
