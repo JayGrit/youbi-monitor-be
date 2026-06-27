@@ -133,6 +133,7 @@ public class OperatorDiagnosticsService {
         result.put("platform", text(row.get("platform")));
         result.put("action", text(row.get("action")));
         result.put("taskType", text(row.get("taskType")));
+        result.put("taskTypeDisplayName", text(row.get("taskTypeDisplayName")));
         result.put("accountKey", text(row.get("accountKey")));
         result.put("status", text(row.get("status")));
         result.put("priority", number(row.get("priority")));

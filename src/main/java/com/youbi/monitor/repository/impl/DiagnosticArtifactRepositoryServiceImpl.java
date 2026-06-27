@@ -123,6 +123,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     t.platform,
                     t.action,
                     t.task_type AS taskType,
+                    type.display_name AS taskTypeDisplayName,
                     t.account_key AS accountKey,
                     t.status,
                     t.priority,
@@ -132,12 +133,13 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     t.error_code AS errorCode,
                     t.error_message AS errorMessage
                 FROM operator_task t
+                LEFT JOIN operator_task_type type ON type.task_type = t.task_type
                 %s
                 ORDER BY
                     CASE WHEN t.status = 'ready' THEN 0 ELSE 1 END ASC,
                     CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
-                    CASE WHEN t.status = 'ready' THEN t.created_at ELSE COALESCE(t.completed_at, t.started_at, t.created_at) END DESC,
-                    t.id DESC
+                    t.created_at ASC,
+                    t.id ASC
                 LIMIT ? OFFSET ?
                 """.formatted(parts.where()), args.toArray());
     }
