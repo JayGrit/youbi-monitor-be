@@ -136,7 +136,11 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 LEFT JOIN operator_task_type type ON type.task_type = t.task_type
                 %s
                 ORDER BY
-                    CASE WHEN t.status = 'ready' THEN 0 ELSE 1 END ASC,
+                    CASE
+                        WHEN t.status = 'ready' THEN 2
+                        WHEN t.status = 'running' THEN 1
+                        ELSE 0
+                    END ASC,
                     CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
                     t.created_at ASC,
                     t.id ASC
