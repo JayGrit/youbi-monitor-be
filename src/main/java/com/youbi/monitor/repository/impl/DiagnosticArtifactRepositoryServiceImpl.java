@@ -30,7 +30,16 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     public long countOperatorExecutions(Map<String, String> filters) {
         QueryParts parts = executionWhere(filters);
         Long count = repository.queryForObject(
-                "SELECT COUNT(*) FROM (SELECT op_id FROM " + OPERATOR_DIAGNOSTIC_TABLE + parts.where() + " GROUP BY op_id) t",
+                """
+                SELECT COUNT(*)
+                FROM (
+                    SELECT d.op_id
+                    FROM operator_diagnostic d
+                    LEFT JOIN operator_task t ON t.op_id = d.op_id
+                    %s
+                    GROUP BY d.op_id
+                ) grouped
+                """.formatted(parts.where()),
                 Long.class,
                 parts.args().toArray()
         );
@@ -45,30 +54,40 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         args.add(Math.max(0, offset));
         return repository.queryForList("""
                 SELECT
-                    op_id AS opId,
+                    d.op_id AS opId,
+                    MAX(NULLIF(t.task_id, '')) AS taskId,
+                    MAX(NULLIF(t.account_key, '')) AS accountKey,
                     COUNT(*) AS diagnosticCount,
-                    MIN(created_at) AS createdAt,
-                    MIN(created_at) AS startedAt,
-                    MAX(updated_at) AS completedAt,
-                    SUBSTRING_INDEX(
-                        SUBSTRING_INDEX(MIN(COALESCE(screenshot_url, html_url, '')), '/diagnostics/', -1),
-                        '/',
-                        1
+                    COALESCE(MIN(t.created_at), MIN(d.created_at)) AS createdAt,
+                    COALESCE(MIN(t.started_at), MIN(d.created_at)) AS startedAt,
+                    COALESCE(MAX(t.completed_at), MAX(d.updated_at)) AS completedAt,
+                    COALESCE(
+                        MAX(NULLIF(t.platform, '')),
+                        SUBSTRING_INDEX(
+                            SUBSTRING_INDEX(MIN(COALESCE(d.screenshot_url, d.html_url, '')), '/diagnostics/', -1),
+                            '/',
+                            1
+                        )
                     ) AS platform,
                     SUBSTRING_INDEX(
-                        SUBSTRING_INDEX(MIN(COALESCE(screenshot_url, html_url, '')), '/diagnostics/', -1),
+                        SUBSTRING_INDEX(MIN(COALESCE(d.screenshot_url, d.html_url, '')), '/diagnostics/', -1),
                         '/',
                         2
                     ) AS diagnosticPath,
+                    MAX(NULLIF(t.action, '')) AS taskAction,
                     CASE
-                        WHEN SUM(CASE WHEN error_message IS NOT NULL AND error_message <> '' THEN 1 ELSE 0 END) > 0 THEN 'failed'
-                        WHEN SUM(CASE WHEN status IS NOT NULL AND status NOT IN ('uploaded', 'success') THEN 1 ELSE 0 END) > 0 THEN 'failed'
+                        WHEN SUM(CASE WHEN t.status = 'running' THEN 1 ELSE 0 END) > 0 THEN 'running'
+                        WHEN SUM(CASE WHEN t.status = 'ready' THEN 1 ELSE 0 END) > 0 THEN 'ready'
+                        WHEN SUM(CASE WHEN t.status = 'failed' THEN 1 ELSE 0 END) > 0 THEN 'failed'
+                        WHEN SUM(CASE WHEN d.error_message IS NOT NULL AND d.error_message <> '' THEN 1 ELSE 0 END) > 0 THEN 'failed'
+                        WHEN SUM(CASE WHEN d.status IS NOT NULL AND d.status NOT IN ('uploaded', 'success') THEN 1 ELSE 0 END) > 0 THEN 'failed'
                         ELSE 'success'
                     END AS status,
-                    MAX(NULLIF(error_message, '')) AS errorMessage
-                FROM operator_diagnostic
+                    COALESCE(MAX(NULLIF(t.error_message, '')), MAX(NULLIF(d.error_message, ''))) AS errorMessage
+                FROM operator_diagnostic d
+                LEFT JOIN operator_task t ON t.op_id = d.op_id
                 %s
-                GROUP BY op_id
+                GROUP BY d.op_id
                 ORDER BY completedAt DESC, opId DESC
                 LIMIT ? OFFSET ?
                 """.formatted(parts.where()), args.toArray());
@@ -98,23 +117,38 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     private QueryParts executionWhere(Map<String, String> filters) {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
-        addLike(conditions, args, "op_id", filters.get("opId"));
-        addLike(conditions, args, "op_id", filters.get("taskId"));
-        addLike(conditions, args, "COALESCE(screenshot_url, html_url, '')", filters.get("platform"));
-        addLike(conditions, args, "COALESCE(screenshot_url, html_url, '')", filters.get("action"));
-        addDateLowerBound(conditions, args, "created_at", filters.get("createdFrom"));
-        addDateUpperBound(conditions, args, "created_at", filters.get("createdTo"));
+        addLike(conditions, args, "d.op_id", filters.get("opId"));
+        addLike(conditions, args, "t.task_id", filters.get("taskId"));
+        addLike(conditions, args, "t.account_key", filters.get("accountKey"));
+        addPlatformFilter(conditions, args, filters.get("platform"));
+        addLike(conditions, args, "COALESCE(t.action, d.screenshot_url, d.html_url, '')", filters.get("action"));
+        addDateLowerBound(conditions, args, "COALESCE(t.created_at, d.created_at)", filters.get("createdFrom"));
+        addDateUpperBound(conditions, args, "COALESCE(t.created_at, d.created_at)", filters.get("createdTo"));
         String status = text(filters.get("status"));
         if (!status.isBlank()) {
-            if ("failed".equals(status)) {
-                conditions.add("(error_message IS NOT NULL AND error_message <> '' OR status NOT IN ('uploaded', 'success'))");
+            if ("ready".equals(status) || "running".equals(status)) {
+                conditions.add("t.status = ?");
+                args.add(status);
+            } else if ("failed".equals(status)) {
+                conditions.add("(t.status = 'failed' OR d.error_message IS NOT NULL AND d.error_message <> '' OR d.status NOT IN ('uploaded', 'success'))");
             } else if ("success".equals(status)) {
-                conditions.add("(error_message IS NULL OR error_message = '')");
-                conditions.add("(status IS NULL OR status IN ('uploaded', 'success'))");
+                conditions.add("(t.status IS NULL OR t.status = 'success')");
+                conditions.add("(d.error_message IS NULL OR d.error_message = '')");
+                conditions.add("(d.status IS NULL OR d.status IN ('uploaded', 'success'))");
             }
         }
         String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
         return new QueryParts(where, args);
+    }
+
+    private void addPlatformFilter(List<String> conditions, List<Object> args, String value) {
+        String text = text(value);
+        if (text.isBlank()) {
+            return;
+        }
+        conditions.add("(t.platform = ? OR COALESCE(d.screenshot_url, d.html_url, '') LIKE ?)");
+        args.add(text);
+        args.add("%/diagnostics/" + text + "/%");
     }
 
     private void addLike(List<String> conditions, List<Object> args, String column, String value) {

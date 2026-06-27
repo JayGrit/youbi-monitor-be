@@ -79,18 +79,18 @@ public class OperatorDiagnosticsService {
         String opId = text(row.get("opId"));
         String platform = text(row.get("platform"));
         String diagnosticPath = text(row.get("diagnosticPath"));
-        String action = "";
+        String action = text(row.get("taskAction"));
         if (!diagnosticPath.isBlank()) {
             String[] parts = diagnosticPath.split("/", 2);
-            if (parts.length > 1) {
+            if (action.isBlank() && parts.length > 1) {
                 action = parts[1];
             }
         }
         result.put("opId", opId);
-        result.put("taskId", opId);
+        result.put("taskId", text(row.get("taskId")));
         result.put("platform", platform);
         result.put("action", action);
-        result.put("accountKey", "");
+        result.put("accountKey", text(row.get("accountKey")));
         result.put("status", text(row.get("status")));
         result.put("diagnosticCount", number(row.get("diagnosticCount")));
         result.put("createdAt", row.get("createdAt"));
