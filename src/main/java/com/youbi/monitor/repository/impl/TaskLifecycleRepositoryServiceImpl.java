@@ -314,29 +314,6 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 if (!tableExists(table)) {
                     return;
                 }
-                List<UploadAccountStatusChange> accountStatusChanges = repository.query("""
-                        SELECT submission.task_id, submission.account_key, submission.status
-                        FROM %s submission
-                        JOIN video_info video_info ON video_info.task_id = submission.task_id
-                        LEFT JOIN uploader uploader ON uploader.task_id = submission.task_id
-                        WHERE submission.task_id = ?
-                          AND submission.status IN ('failed', 'running')
-                          AND submission.account_key = video_info.type
-                          AND (
-                              COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
-                              OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
-                          )
-                        FOR UPDATE
-                        """.formatted(quotedIdentifier(table)),
-                        (rs, rowNum) -> new UploadAccountStatusChange(
-                                rs.getString("task_id"),
-                                rs.getString("account_key"),
-                                rs.getString("status"),
-                                "ready"
-                        ),
-                        taskId,
-                        platform
-                );
                 repository.update("""
                         UPDATE %s submission
                         JOIN video_info video_info ON video_info.task_id = submission.task_id
@@ -353,7 +330,6 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                               OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
                           )
                         """.formatted(quotedIdentifier(table)), taskId, platform);
-                applyUploaderAccountStatusChanges(platform, accountStatusChanges);
                 repository.update("""
                         UPDATE uploader
                         SET %s = 'ready'

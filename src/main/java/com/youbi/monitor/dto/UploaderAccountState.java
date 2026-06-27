@@ -24,12 +24,10 @@ public record UploaderAccountState(
         boolean enabled,
         Boolean available,
         String sourceTable,
-        LocalDateTime sourceUpdatedAt,
-        LocalDateTime metricsUpdatedAt
+        LocalDateTime sourceUpdatedAt
 ) {
     public static UploaderAccountState defaults(String platform, String accountKey) {
         return new UploaderAccountState(platform, accountKey, null, null, 3600, 7200,
-                LocalTime.of(1, 0), LocalTime.of(7, 0),
-                5, 0, 0, 0, 0, 0, null, 0, 0, true, null, null, null, null);
+                LocalTime.of(1, 0), LocalTime.of(7, 0), 5, 0, 0, 0, 0, 0, null, 0, 0, true, null, null, null);
     }
 }

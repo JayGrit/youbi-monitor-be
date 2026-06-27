@@ -19,6 +19,4 @@ public interface IUploaderAccountRepositoryService {
     boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime);
 
     boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount);
-
-    int resetTodayUploadCounts();
 }

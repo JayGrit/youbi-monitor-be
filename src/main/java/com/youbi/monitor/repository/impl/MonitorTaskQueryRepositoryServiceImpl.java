@@ -157,8 +157,32 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               u.jinritoutiao_upload_status,
               u.youtube_upload_status,
               ux.x_upload_status,
-              u.bilibili_upload_uid,
-              u.bilibili_upload_account_name,
+              (
+                SELECT submission.account_key
+                FROM uploader_task submission
+                WHERE submission.task_id = t.id
+                  AND submission.platform = 'bilibili'
+                ORDER BY FIELD(submission.status, 'success', 'running', 'ready', 'failed'), submission.id DESC
+                LIMIT 1
+              ) bilibili_upload_account_key,
+              (
+                SELECT COALESCE(phone_profile.display_name, loginstate.account_key, submission.account_key)
+                FROM uploader_task submission
+                LEFT JOIN operator_loginstate loginstate
+                  ON loginstate.platform = submission.platform
+                 AND loginstate.account_key = submission.account_key
+                LEFT JOIN (
+                  SELECT platform, account_id, MAX(display_name) AS display_name
+                  FROM uploader_phone_account
+                  GROUP BY platform, account_id
+                ) phone_profile
+                  ON phone_profile.platform = loginstate.platform
+                 AND phone_profile.account_id = loginstate.id
+                WHERE submission.task_id = t.id
+                  AND submission.platform = 'bilibili'
+                ORDER BY FIELD(submission.status, 'success', 'running', 'ready', 'failed'), submission.id DESC
+                LIMIT 1
+              ) bilibili_upload_account_name,
               u.error_message uploader_error
             FROM task t
             LEFT JOIN downloader d ON d.task_id = t.id
@@ -743,7 +767,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     taskStartedAt,
                     taskCompletedAt,
                     elapsedSeconds(taskStartedAt, taskCompletedAt, now),
-                    rs.getString("bilibili_upload_uid"),
+                    rs.getString("bilibili_upload_account_key"),
                     rs.getString("bilibili_upload_account_name"),
                     rs.getString("error_message"),
                     distributorStages(rs),

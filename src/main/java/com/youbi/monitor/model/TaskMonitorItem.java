@@ -20,7 +20,7 @@ public record TaskMonitorItem(
         LocalDateTime startedAt,
         LocalDateTime completedAt,
         long elapsedSeconds,
-        String bilibiliUploadUid,
+        String bilibiliUploadAccountKey,
         String bilibiliUploadAccountName,
         String errorMessage,
         List<String> distributorStages,

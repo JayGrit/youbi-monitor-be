@@ -255,27 +255,11 @@ abstract class MonitorRepositorySqlSupport {
                   NULLIF(video_info.final_video_url, ''),
                   NULLIF(CONCAT('adrive://', COALESCE(
                     NULLIF(uploader.final_video_alidrive_remote_path, ''),
-                    NULLIF(uploader.alidrive_final_video_remote_path, ''),
-                    NULLIF(uploader.final_video_alidrive_file_id, ''),
-                    NULLIF(uploader.alidrive_final_video_file_id, '')
+                    NULLIF(uploader.final_video_alidrive_file_id, '')
                   )), 'adrive://'),
                   ''
                 )
                 """;
-    }
-
-    protected void applyUploaderAccountStatusChanges(String platform, List<UploadAccountStatusChange> changes) {
-        String normalizedPlatform = normalizeUploadPlatform(platform);
-        if (changes == null || changes.isEmpty() || !tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)) {
-            return;
-        }
-        for (UploadAccountStatusChange change : changes) {
-            String accountKey = text(change.accountKey());
-            if (accountKey.isBlank()) {
-                continue;
-            }
-            ensureUploaderAccountRow(normalizedPlatform, accountKey);
-        }
     }
 
     protected void applyStagedPipelineFailure(String taskId, String oldTaskStatus) {
@@ -383,9 +367,6 @@ abstract class MonitorRepositorySqlSupport {
     protected record UploadBackfillInsertRow(
             String taskId
     ) {
-    }
-
-    protected record UploadAccountStatusChange(String taskId, String accountKey, String oldStatus, String newStatus) {
     }
 
     private record UploadAccountStatusDeltaKey(String accountKey, String oldStatus, String newStatus) {

@@ -123,7 +123,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                            AND upload_submission.account_key = uploader_account.account_key
                            AND upload_submission.status = 'failed'
                        ) failed_upload_count,
-                       is_enabled, is_available, source_table, source_updated_at, metrics_updated_at
+                       is_enabled, is_available, source_table, source_updated_at
                 FROM uploader_account
                 WHERE platform = ? AND account_key = ? AND is_deprecated = 0
                 LIMIT 1
@@ -149,8 +149,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         rs.getBoolean("is_enabled"),
                         nullableBoolean(rs, "is_available"),
                         rs.getString("source_table"),
-                        toLocalDateTime(rs.getTimestamp("source_updated_at")),
-                        toLocalDateTime(rs.getTimestamp("metrics_updated_at"))
+                        toLocalDateTime(rs.getTimestamp("source_updated_at"))
                 ),
                 normalizePlatform(platform),
                 normalizeAccountKey(accountKey)
@@ -317,11 +316,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 normalizeAccountKey(accountKey)
         );
         return updated == 1;
-    }
-
-    @Override
-    public int resetTodayUploadCounts() {
-        return 0;
     }
 
     private void ensureDeprecatedColumn() {
