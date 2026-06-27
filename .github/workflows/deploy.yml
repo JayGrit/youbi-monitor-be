@@ -139,10 +139,29 @@ jobs:
             docker rmi -f "${OLD_MONITOR_BE_IMAGE}" || true
           fi
           docker image prune -f --filter "until=24h" || true
-          docker buildx prune -af \
-            --builder monitor-be-builder \
-            --max-used-space 5gb \
-            --min-free-space 10gb \
-            --reserved-space 2gb || echo "Warning: docker buildx prune failed; deploy already completed."
+
+          prune_buildx_builder() {
+            local builder_name="$1"
+            local reserved_space="$2"
+            if ! docker buildx inspect "${builder_name}" >/dev/null 2>&1; then
+              return 0
+            fi
+            echo "Pruning buildx cache for ${builder_name}; reserved space: ${reserved_space}"
+            docker buildx prune -af \
+              --builder "${builder_name}" \
+              --max-used-space 5gb \
+              --min-free-space 10gb \
+              --reserved-space "${reserved_space}" \
+              || echo "Warning: docker buildx prune failed for ${builder_name}; deploy already completed."
+          }
+
+          prune_buildx_builder monitor-be-builder 2gb
+          prune_buildx_builder default 5gb
+          for BUILDER_NAME in $(docker buildx ls | awk 'NR > 1 && $1 !~ /^\\_/ {gsub(/\*/, "", $1); print $1}' | sort -u); do
+            case "${BUILDER_NAME}" in
+              default|monitor-be-builder) continue ;;
+              *) prune_buildx_builder "${BUILDER_NAME}" 2gb ;;
+            esac
+          done
           docker system df || true
           EOF
