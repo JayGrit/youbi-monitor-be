@@ -79,7 +79,7 @@ public class MonitorService {
             "speaker", List.of("tts_segments_dir"),
             "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
             "publisher", List.of("upload_title", "upload_description", "upload_tags", "cover_text", "clean_cover_url", "final_cover_url"),
-            "uploader", List.of("shipinhao_upload_account_key", "shipinhao_upload_account_name", "shipinhao_upload_result_json", "kuaishou_upload_account_key", "kuaishou_upload_account_name", "kuaishou_upload_result_json", "youtube_upload_account_key", "youtube_upload_account_name", "youtube_upload_result_json", "youtube_video_url", "x_upload_account_key", "x_upload_account_name", "x_upload_result_json", "x_post_url")
+            "uploader", List.of()
     );
 
     private final IMonitorTaskQueryRepositoryService taskQueryRepositoryService;

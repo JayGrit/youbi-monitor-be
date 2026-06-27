@@ -59,11 +59,10 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         assertThat(normalizedSql).contains("ch.task_id = ? AND ch.row_role = 'normal'");
         assertThat(normalizedSql).contains("FROM speaker_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("WHERE t.id = ?");
-        assertThat(normalizedSql).contains("u.youtube_upload_status");
-        assertThat(normalizedSql).contains("CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END");
-        assertThat(normalizedSql).contains("FROM uploader_task WHERE platform = 'x'");
-        assertThat(normalizedSql).contains("ux.x_upload_status");
-        assertThat(normalizedSql).contains("CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END");
+        assertThat(normalizedSql).contains("FROM uploader_task_status GROUP BY task_id");
+        assertThat(normalizedSql).contains("us.youtube_upload_status");
+        assertThat(normalizedSql).contains("us.x_upload_status");
+        assertThat(normalizedSql).contains("SUM(CASE WHEN COALESCE(NULLIF(status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END) uploader_total_count");
         assertThat(capturedArgs.get()).containsExactly(
                 "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", 1, 0
         );

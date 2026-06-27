@@ -107,56 +107,20 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               pub.completed_at publisher_completed_at,
               COALESCE(NULLIF(pub.error_message, ''), pr.error_message) publisher_error,
 
-              CASE WHEN (
-                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
-              ) > 0 THEN 'failed' ELSE u.status END uploader_status,
+              CASE WHEN COALESCE(us.uploader_failed_count, 0) > 0 THEN 'failed' ELSE u.status END uploader_status,
               u.started_at uploader_started_at,
               u.completed_at uploader_completed_at,
-              (
-                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') = 'success' THEN 1 ELSE 0 END
-              ) uploader_completed_count,
-              (
-                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') = 'failed' THEN 1 ELSE 0 END
-              ) uploader_failed_count,
-              (
-                CASE WHEN COALESCE(NULLIF(u.bilibili_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.douyin_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.xiaohongshu_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.shipinhao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.kuaishou_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.jinritoutiao_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(u.youtube_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END +
-                CASE WHEN COALESCE(NULLIF(ux.x_upload_status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END
-              ) uploader_total_count,
-              u.bilibili_upload_status,
-              u.douyin_upload_status,
-              u.xiaohongshu_upload_status,
-              u.shipinhao_upload_status,
-              u.kuaishou_upload_status,
-              u.jinritoutiao_upload_status,
-              u.youtube_upload_status,
-              ux.x_upload_status,
+              COALESCE(us.uploader_completed_count, 0) uploader_completed_count,
+              COALESCE(us.uploader_failed_count, 0) uploader_failed_count,
+              COALESCE(us.uploader_total_count, 0) uploader_total_count,
+              us.bilibili_upload_status,
+              us.douyin_upload_status,
+              us.xiaohongshu_upload_status,
+              us.shipinhao_upload_status,
+              us.kuaishou_upload_status,
+              us.jinritoutiao_upload_status,
+              us.youtube_upload_status,
+              us.x_upload_status,
               (
                 SELECT submission.account_key
                 FROM uploader_task submission
@@ -198,17 +162,20 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN (
               SELECT
                 task_id,
-                CASE
-                  WHEN SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) > 0 THEN 'failed'
-                  WHEN SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) > 0 THEN 'running'
-                  WHEN SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) > 0 THEN 'ready'
-                  WHEN COUNT(*) > 0 AND SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) = COUNT(*) THEN 'success'
-                  ELSE MAX(status)
-                END x_upload_status
-              FROM uploader_task
-              WHERE platform = 'x'
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) uploader_completed_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) uploader_failed_count,
+                SUM(CASE WHEN COALESCE(NULLIF(status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END) uploader_total_count,
+                MAX(CASE WHEN platform = 'bilibili' THEN status END) bilibili_upload_status,
+                MAX(CASE WHEN platform = 'douyin' THEN status END) douyin_upload_status,
+                MAX(CASE WHEN platform = 'xiaohongshu' THEN status END) xiaohongshu_upload_status,
+                MAX(CASE WHEN platform = 'shipinhao' THEN status END) shipinhao_upload_status,
+                MAX(CASE WHEN platform = 'kuaishou' THEN status END) kuaishou_upload_status,
+                MAX(CASE WHEN platform = 'jinritoutiao' THEN status END) jinritoutiao_upload_status,
+                MAX(CASE WHEN platform = 'youtube' THEN status END) youtube_upload_status,
+                MAX(CASE WHEN platform = 'x' THEN status END) x_upload_status
+              FROM uploader_task_status
               GROUP BY task_id
-            ) ux ON ux.task_id = t.id
+            ) us ON us.task_id = t.id
             LEFT JOIN video_info vi ON vi.task_id = t.id
             LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__

@@ -326,15 +326,15 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                           AND submission.status IN ('failed', 'running')
                           AND submission.account_key = video_info.type
                           AND (
-                              COALESCE(NULLIF(uploader.upload_platforms, ''), '') = ''
-                              OR FIND_IN_SET(?, REPLACE(uploader.upload_platforms, ' ', '')) > 0
+                              COALESCE(NULLIF(video_info.upload_platforms, ''), '') = ''
+                              OR FIND_IN_SET(?, REPLACE(video_info.upload_platforms, ' ', '')) > 0
                           )
                         """.formatted(quotedIdentifier(table)), taskId, platform);
                 repository.update("""
-                        UPDATE uploader
-                        SET %s = 'ready'
-                        WHERE task_id = ?
-                        """.formatted(quotedIdentifier(uploadStatusColumn(platform))), taskId);
+                        INSERT INTO uploader_task_status (task_id, platform, status)
+                        VALUES (?, ?, 'ready')
+                        ON DUPLICATE KEY UPDATE status = VALUES(status)
+                        """, taskId, platform);
             });
         }
     }
