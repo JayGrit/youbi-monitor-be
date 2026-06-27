@@ -12,6 +12,10 @@ public interface IDiagnosticArtifactRepositoryService {
 
     List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters, int offset, int limit);
 
+    long countOperatorQueue(Map<String, String> filters);
+
+    List<Map<String, Object>> listOperatorQueue(Map<String, String> filters, int offset, int limit);
+
     long countOperatorDiagnostics(String opId);
 
     List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId, int offset, int limit);

@@ -45,6 +45,27 @@ public class OperatorDiagnosticsService {
         );
     }
 
+    public Map<String, Object> listQueue(MultiValueMap<String, String> query) {
+        int page = positiveInt(first(query, "page"), 1);
+        int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), 50));
+        Map<String, String> filters = filters(query);
+        long total = repositoryService.countOperatorQueue(filters);
+        int pageCount = total == 0 ? 0 : (int) Math.ceil((double) total / limit);
+        int normalizedPage = pageCount == 0 ? 1 : Math.min(page, pageCount);
+        int offset = (normalizedPage - 1) * limit;
+        List<Map<String, Object>> items = repositoryService.listOperatorQueue(filters, offset, limit)
+                .stream()
+                .map(this::normalizeQueueTask)
+                .toList();
+        return Map.of(
+                "items", items,
+                "total", total,
+                "page", normalizedPage,
+                "limit", limit,
+                "pageCount", pageCount
+        );
+    }
+
     public Map<String, Object> getTask(String opId) {
         Map<String, String> filters = Map.of("opId", TextSupport.text(opId));
         return repositoryService.listOperatorExecutions(filters, 0, 1)
@@ -99,6 +120,32 @@ public class OperatorDiagnosticsService {
         String errorMessage = text(row.get("errorMessage"));
         if (!errorMessage.isBlank()) {
             result.put("error", Map.of("message", errorMessage));
+        }
+        return result;
+    }
+
+    private Map<String, Object> normalizeQueueTask(Map<String, Object> row) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", row.get("id"));
+        result.put("opId", text(row.get("opId")));
+        result.put("runId", text(row.get("runId")));
+        result.put("taskId", text(row.get("taskId")));
+        result.put("platform", text(row.get("platform")));
+        result.put("action", text(row.get("action")));
+        result.put("taskType", text(row.get("taskType")));
+        result.put("accountKey", text(row.get("accountKey")));
+        result.put("status", text(row.get("status")));
+        result.put("priority", number(row.get("priority")));
+        result.put("createdAt", row.get("createdAt"));
+        result.put("startedAt", row.get("startedAt"));
+        result.put("completedAt", row.get("completedAt"));
+        String errorCode = text(row.get("errorCode"));
+        String errorMessage = text(row.get("errorMessage"));
+        if (!errorCode.isBlank()) {
+            result.put("errorCode", errorCode);
+        }
+        if (!errorMessage.isBlank()) {
+            result.put("errorMessage", errorMessage);
         }
         return result;
     }

@@ -94,6 +94,51 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     }
 
     @Override
+    public long countOperatorQueue(Map<String, String> filters) {
+        QueryParts parts = taskWhere(filters);
+        Long count = repository.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM operator_task t
+                %s
+                """.formatted(parts.where()),
+                Long.class,
+                parts.args().toArray()
+        );
+        return count == null ? 0 : count;
+    }
+
+    @Override
+    public List<Map<String, Object>> listOperatorQueue(Map<String, String> filters, int offset, int limit) {
+        QueryParts parts = taskWhere(filters);
+        List<Object> args = new ArrayList<>(parts.args());
+        args.add(Math.max(1, limit));
+        args.add(Math.max(0, offset));
+        return repository.queryForList("""
+                SELECT
+                    t.id,
+                    t.op_id AS opId,
+                    t.run_id AS runId,
+                    t.task_id AS taskId,
+                    t.platform,
+                    t.action,
+                    t.task_type AS taskType,
+                    t.account_key AS accountKey,
+                    t.status,
+                    t.priority,
+                    t.created_at AS createdAt,
+                    t.started_at AS startedAt,
+                    t.completed_at AS completedAt,
+                    t.error_code AS errorCode,
+                    t.error_message AS errorMessage
+                FROM operator_task t
+                %s
+                ORDER BY t.priority DESC, t.created_at ASC, t.id ASC
+                LIMIT ? OFFSET ?
+                """.formatted(parts.where()), args.toArray());
+    }
+
+    @Override
     public long countOperatorDiagnostics(String opId) {
         Long count = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + OPERATOR_DIAGNOSTIC_TABLE + " WHERE op_id = ?",
@@ -137,6 +182,29 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 conditions.add("(d.status IS NULL OR d.status IN ('uploaded', 'success'))");
             }
         }
+        String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
+        return new QueryParts(where, args);
+    }
+
+    private QueryParts taskWhere(Map<String, String> filters) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+        addLike(conditions, args, "t.op_id", filters.get("opId"));
+        addLike(conditions, args, "t.task_id", filters.get("taskId"));
+        addLike(conditions, args, "t.account_key", filters.get("accountKey"));
+        addLike(conditions, args, "COALESCE(t.task_type, t.action, '')", filters.get("action"));
+        String platform = text(filters.get("platform"));
+        if (!platform.isBlank()) {
+            conditions.add("t.platform = ?");
+            args.add(platform);
+        }
+        String status = text(filters.get("status"));
+        if (!status.isBlank()) {
+            conditions.add("t.status = ?");
+            args.add(status);
+        }
+        addDateLowerBound(conditions, args, "t.created_at", filters.get("createdFrom"));
+        addDateUpperBound(conditions, args, "t.created_at", filters.get("createdTo"));
         String where = conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions);
         return new QueryParts(where, args);
     }

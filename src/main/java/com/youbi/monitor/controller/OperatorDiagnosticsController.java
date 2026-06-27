@@ -24,6 +24,11 @@ public class OperatorDiagnosticsController {
         return operatorDiagnosticsService.listTasks(query);
     }
 
+    @GetMapping("/queue")
+    public Map<String, Object> queue(@RequestParam MultiValueMap<String, String> query) {
+        return operatorDiagnosticsService.listQueue(query);
+    }
+
     @GetMapping("/tasks/{opId}")
     public Map<String, Object> task(@PathVariable String opId) {
         return operatorDiagnosticsService.getTask(opId);
