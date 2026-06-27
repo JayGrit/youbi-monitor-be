@@ -29,16 +29,9 @@ Override Spring datasource settings with environment variables such as
 
 ## API
 
-- `GET /health`
 - `GET /api/video-tasks/monitor?limit=100`
-- `GET /api/bilibili/account`
-- `GET /api/bilibili/account?accountKey=default`
-- `GET /api/bilibili/accounts`
-- `POST /api/bilibili/account/qrcode`
-- `POST /api/bilibili/account/qrcode?accountKey=default`
-- `POST /api/bilibili/account/{accountKey}/qrcode/{authCode}/poll`
-- `POST /api/bilibili/account/renew`
-- `POST /api/bilibili/account/renew?accountKey=default`
+- `GET /api/accounts/overview`
+- `GET /api/accounts/{platform}/{accountKey}`
 
 The service only reads existing `task` and stage tables. It does not create,
 resume, or mutate processing tasks.

@@ -364,11 +364,6 @@ abstract class MonitorRepositorySqlSupport {
     ) {
     }
 
-    protected record UploadBackfillInsertRow(
-            String taskId
-    ) {
-    }
-
     private record UploadAccountStatusDeltaKey(String accountKey, String oldStatus, String newStatus) {
     }
 }

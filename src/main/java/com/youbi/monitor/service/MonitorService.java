@@ -9,8 +9,6 @@ import com.youbi.monitor.model.WhisperProcessingDetail;
 import com.youbi.monitor.model.WhisperWordTimestamp;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
 import com.youbi.monitor.repository.ISpeakerSegmentRepositoryService;
-import com.youbi.monitor.repository.ISubmitterAuthorRepositoryService;
-import com.youbi.monitor.repository.IUploadSubmissionRepositoryService;
 import com.youbi.monitor.repository.IWhisperProcessingRepositoryService;
 import io.minio.ListObjectsArgs;
 import io.minio.MinioClient;
@@ -18,7 +16,6 @@ import io.minio.Result;
 import io.minio.messages.Item;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.net.URI;
 import java.sql.Timestamp;
@@ -88,8 +85,6 @@ public class MonitorService {
     private final IMonitorTaskQueryRepositoryService taskQueryRepositoryService;
     private final IWhisperProcessingRepositoryService whisperProcessingRepositoryService;
     private final ISpeakerSegmentRepositoryService speakerSegmentRepositoryService;
-    private final IUploadSubmissionRepositoryService uploadSubmissionRepositoryService;
-    private final ISubmitterAuthorRepositoryService submitterAuthorRepositoryService;
     private final MinioClient minioClient;
     private final String minioEndpoint;
     private final String minioBucket;
@@ -98,8 +93,6 @@ public class MonitorService {
             IMonitorTaskQueryRepositoryService taskQueryRepositoryService,
             IWhisperProcessingRepositoryService whisperProcessingRepositoryService,
             ISpeakerSegmentRepositoryService speakerSegmentRepositoryService,
-            IUploadSubmissionRepositoryService uploadSubmissionRepositoryService,
-            ISubmitterAuthorRepositoryService submitterAuthorRepositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
@@ -108,8 +101,6 @@ public class MonitorService {
         this.taskQueryRepositoryService = taskQueryRepositoryService;
         this.whisperProcessingRepositoryService = whisperProcessingRepositoryService;
         this.speakerSegmentRepositoryService = speakerSegmentRepositoryService;
-        this.uploadSubmissionRepositoryService = uploadSubmissionRepositoryService;
-        this.submitterAuthorRepositoryService = submitterAuthorRepositoryService;
         this.minioEndpoint = text(minioEndpoint);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
@@ -209,55 +200,6 @@ public class MonitorService {
 
     public TranslatorSegmentTextUpdateResult updateTranslatorSegmentDstText(String taskId, int itemIndex, String dstText) {
         return speakerSegmentRepositoryService.updateTranslatorSegmentDstText(taskId, itemIndex, dstText);
-    }
-
-    public UploadBackfillCandidateList uploadBackfillCandidates(String platform, String accountKey, String type) {
-        return uploadSubmissionRepositoryService.listUploadBackfillCandidates(platform, accountKey, type);
-    }
-
-    @Transactional
-    public UploadBackfillRegisterResult registerUploadBackfill(String platform, String accountKey, String type, List<String> taskIds) {
-        return uploadSubmissionRepositoryService.registerUploadBackfill(platform, accountKey, type, taskIds);
-    }
-
-    public SubmitterAuthorType authorType(String author) {
-        return submitterAuthorRepositoryService.findSubmitterAuthorType(author);
-    }
-
-    public List<SubmitterAuthorType> authorTypes() {
-        return submitterAuthorRepositoryService.listSubmitterAuthorTypes();
-    }
-
-    public List<DistributorTaskType> distributorTaskTypes() {
-        return submitterAuthorRepositoryService.listDistributorTaskTypes();
-    }
-
-    public SubmitterAuthorType saveAuthorType(
-            String author,
-            String type,
-            String taskType,
-            Boolean hasBackgroundAudio,
-            String sourceLanguage,
-            String targetLanguage,
-            Boolean resetCover,
-            String coverOrientation,
-            Boolean fetchNewVideos
-    ) {
-        return submitterAuthorRepositoryService.saveSubmitterAuthorType(
-                author,
-                type,
-                taskType,
-                hasBackgroundAudio,
-                sourceLanguage,
-                targetLanguage,
-                resetCover,
-                coverOrientation,
-                fetchNewVideos
-        );
-    }
-
-    public SubmitterAuthorDeleteResult deleteAuthorType(String author) {
-        return submitterAuthorRepositoryService.deleteSubmitterAuthorType(author);
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
@@ -637,72 +579,4 @@ public class MonitorService {
     ) {
     }
 
-    public record UploadBackfillCandidate(
-            String taskId,
-            String title,
-            String coverUrl,
-            String finalVideoUrl,
-            List<String> uploadedPlatforms,
-            LocalDateTime completedAt,
-            boolean selectable,
-            String blockedReason
-    ) {
-    }
-
-    public record UploadBackfillCandidateList(
-            String platform,
-            String accountKey,
-            String type,
-            int count,
-            List<UploadBackfillCandidate> rows
-    ) {
-    }
-
-    public record UploadBackfillRegisterRequest(String platform, String accountKey, String type, List<String> taskIds) {
-    }
-
-    public record UploadBackfillRegisterResult(
-            String platform,
-            String accountKey,
-            String type,
-            int registeredCount,
-            int skippedCount,
-            int uploaderTaskCount,
-            int taskCount
-    ) {
-    }
-
-    public record SubmitterAuthorType(
-            String author,
-            String type,
-            String taskType,
-            boolean hasBackgroundAudio,
-            String sourceLanguage,
-            String targetLanguage,
-            boolean resetCover,
-            String coverOrientation,
-            boolean fetchNewVideos,
-            int updatedSubmissionRows,
-            int updatedVideoInfoRows
-    ) {
-    }
-
-    public record DistributorTaskType(String taskType, String name, String description) {
-    }
-
-    public record SubmitterAuthorTypeUpdateRequest(
-            String author,
-            String type,
-            String taskType,
-            Boolean hasBackgroundAudio,
-            String sourceLanguage,
-            String targetLanguage,
-            Boolean resetCover,
-            String coverOrientation,
-            Boolean fetchNewVideos
-    ) {
-    }
-
-    public record SubmitterAuthorDeleteResult(String status, String author, int deletedAuthorRows, int deletedVideoRows) {
-    }
 }
