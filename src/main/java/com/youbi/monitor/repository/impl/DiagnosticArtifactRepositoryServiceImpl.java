@@ -133,7 +133,11 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     t.error_message AS errorMessage
                 FROM operator_task t
                 %s
-                ORDER BY t.priority DESC, t.created_at ASC, t.id ASC
+                ORDER BY
+                    CASE WHEN t.status = 'ready' THEN 0 ELSE 1 END ASC,
+                    CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
+                    CASE WHEN t.status = 'ready' THEN t.created_at ELSE COALESCE(t.completed_at, t.started_at, t.created_at) END DESC,
+                    t.id DESC
                 LIMIT ? OFFSET ?
                 """.formatted(parts.where()), args.toArray());
     }
