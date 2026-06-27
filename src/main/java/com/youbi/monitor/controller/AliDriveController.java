@@ -21,6 +21,7 @@ public class AliDriveController {
         this.aliDriveService = aliDriveService;
     }
 
+    // 查询当前阿里云盘账号信息。
     @GetMapping("/api/alidrive/me")
     public Map<String, Object> me() {
         try {
@@ -33,6 +34,7 @@ public class AliDriveController {
         }
     }
 
+    // 列出阿里云盘指定路径下的文件。
     @GetMapping("/api/alidrive/list")
     public Map<String, Object> list(@RequestParam(defaultValue = "/") String path) {
         try {
@@ -45,6 +47,7 @@ public class AliDriveController {
         }
     }
 
+    // 将本地文件上传到阿里云盘。
     @PostMapping("/api/alidrive/upload")
     public AliDriveTransferResult upload(@RequestBody AliDriveUploadRequest request) {
         try {
@@ -57,6 +60,7 @@ public class AliDriveController {
         }
     }
 
+    // 从阿里云盘下载文件到本地。
     @PostMapping("/api/alidrive/download")
     public AliDriveTransferResult download(@RequestBody AliDriveDownloadRequest request) {
         try {

@@ -30,6 +30,7 @@ public class BilibiliAccountController {
         this.accountProfileService = accountProfileService;
     }
 
+    // 查询 Bilibili 账号登录状态或指定账号状态。
     @GetMapping("/api/bilibili/account")
     public Object account(@RequestParam(defaultValue = "") String accountKey) throws IOException {
         if (accountKey == null || accountKey.isBlank()) {
@@ -41,26 +42,31 @@ public class BilibiliAccountController {
         return accountService.status(accountKey);
     }
 
+    // 查询所有 Bilibili 账号列表。
     @GetMapping("/api/bilibili/accounts")
     public Object accounts() {
         return accountService.accounts();
     }
 
+    // 创建 Bilibili 账号扫码登录二维码。
     @PostMapping("/api/bilibili/account/qrcode")
     public BilibiliQrCode qrcode(@RequestParam(defaultValue = "_auto") String accountKey) throws IOException, InterruptedException {
         return accountService.createQrCode(accountKey);
     }
 
+    // 轮询指定 Bilibili 账号二维码登录结果。
     @PostMapping("/api/bilibili/account/{accountKey}/qrcode/{authCode}/poll")
     public BilibiliQrPollResult poll(@PathVariable String accountKey, @PathVariable String authCode) throws IOException, InterruptedException {
         return accountService.pollQrCode(accountKey, authCode);
     }
 
+    // 轮询默认 Bilibili 账号二维码登录结果。
     @PostMapping("/api/bilibili/account/qrcode/{authCode}/poll")
     public BilibiliQrPollResult pollDefault(@PathVariable String authCode) throws IOException, InterruptedException {
         return accountService.pollQrCode("default", authCode);
     }
 
+    // 续期指定 Bilibili 账号登录态。
     @PostMapping("/api/bilibili/account/renew")
     public ResponseEntity<?> renew(@RequestParam(defaultValue = "default") String accountKey) {
         try {
@@ -70,6 +76,7 @@ public class BilibiliAccountController {
         }
     }
 
+    // 修改指定 Bilibili 账号的账号标识。
     @PostMapping("/api/bilibili/account/{accountKey}/key")
     public ResponseEntity<?> renameKey(@PathVariable String accountKey, @RequestBody BilibiliAccountKeyUpdateRequest request) {
         try {
@@ -79,6 +86,7 @@ public class BilibiliAccountController {
         }
     }
 
+    // 启用或停用指定 Bilibili 账号。
     @PostMapping("/api/bilibili/account/{accountKey}/enabled")
     public ResponseEntity<?> setEnabled(@PathVariable String accountKey, @RequestBody Map<String, Object> request) {
         try {
@@ -89,6 +97,7 @@ public class BilibiliAccountController {
         }
     }
 
+    // 更新指定 Bilibili 账号的上传冷却时间。
     @PostMapping("/api/bilibili/account/{accountKey}/cooldown")
     public ResponseEntity<?> setCooldown(@PathVariable String accountKey, @RequestBody AccountCooldownUpdateRequest request) {
         try {
@@ -102,6 +111,7 @@ public class BilibiliAccountController {
         }
     }
 
+    // 更新指定 Bilibili 账号的资料信息。
     @PostMapping("/api/bilibili/account/{accountKey}/profile")
     public ResponseEntity<?> updateProfile(@PathVariable String accountKey, @RequestBody AccountProfileUpdateRequest request) {
         try {
@@ -111,6 +121,7 @@ public class BilibiliAccountController {
         }
     }
 
+    // 上传指定 Bilibili 账号的头像文件。
     @PostMapping(value = "/api/bilibili/account/{accountKey}/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadAvatar(@PathVariable String accountKey, @RequestParam("file") MultipartFile file) {
         try {

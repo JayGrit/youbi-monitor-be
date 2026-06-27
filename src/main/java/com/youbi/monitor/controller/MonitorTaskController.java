@@ -28,6 +28,7 @@ public class MonitorTaskController {
         this.monitorService = monitorService;
     }
 
+    // 分页查询监控页的视频任务列表。
     @GetMapping("/api/video-tasks/monitor")
     public MonitorResponse monitor(
             @RequestParam(defaultValue = "1") int page,
@@ -43,11 +44,13 @@ public class MonitorTaskController {
         return monitorService.listTasks(boundedPage, boundedLimit, status, type, stage, taskId, sort);
     }
 
+    // 查询各流水线服务的心跳状态。
     @GetMapping("/api/services/heartbeats")
     public List<ServiceHeartbeat> heartbeats() {
         return monitorService.listServiceHeartbeats();
     }
 
+    // 查询指定任务在指定阶段的流转详情。
     @GetMapping("/api/video-tasks/{taskId}/flow")
     public TaskFlowDetail flow(
             @PathVariable String taskId,
@@ -60,6 +63,7 @@ public class MonitorTaskController {
         return detail;
     }
 
+    // 查询指定任务的整体进度详情。
     @GetMapping("/api/video-tasks/{taskId}/progress")
     public TaskProgressDetail progress(@PathVariable String taskId) {
         TaskProgressDetail detail = monitorService.getTaskProgress(taskId);
@@ -69,6 +73,7 @@ public class MonitorTaskController {
         return detail;
     }
 
+    // 批量查询多个任务的整体进度详情。
     @PostMapping("/api/video-tasks/progress/batch")
     public List<TaskProgressDetail> progressBatch(@RequestBody TaskProgressBatchRequest request) {
         List<String> taskIds = request == null || request.taskIds() == null

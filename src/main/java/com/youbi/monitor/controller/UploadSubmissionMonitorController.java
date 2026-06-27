@@ -22,6 +22,7 @@ public class UploadSubmissionMonitorController {
         this.monitorService = monitorService;
     }
 
+    // 查询可补登记上传记录的候选任务。
     @GetMapping("/api/upload-backfill/candidates")
     public MonitorService.UploadBackfillCandidateList uploadBackfillCandidates(
             @RequestParam String platform,
@@ -35,6 +36,7 @@ public class UploadSubmissionMonitorController {
         }
     }
 
+    // 批量补登记指定任务的上传记录。
     @PostMapping("/api/upload-backfill/register")
     public MonitorService.UploadBackfillRegisterResult registerUploadBackfill(
             @RequestBody MonitorService.UploadBackfillRegisterRequest request

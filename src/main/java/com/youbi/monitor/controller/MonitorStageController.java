@@ -25,16 +25,19 @@ public class MonitorStageController {
         this.monitorService = monitorService;
     }
 
+    // 查询指定任务的 Whisper 词级时间戳。
     @GetMapping("/api/video-tasks/{taskId}/whisper-word-timestamps")
     public List<WhisperWordTimestamp> whisperWordTimestamps(@PathVariable String taskId) {
         return monitorService.whisperWordTimestamps(taskId);
     }
 
+    // 查询指定任务的 Whisper 处理详情。
     @GetMapping("/api/video-tasks/{taskId}/whisper-processing")
     public WhisperProcessingDetail whisperProcessing(@PathVariable String taskId) {
         return monitorService.whisperProcessing(taskId);
     }
 
+    // 修改指定 speaker 段落的目标文本。
     @PatchMapping("/api/video-tasks/{taskId}/speaker-segments/{segmentId}/dst-text")
     public MonitorService.SpeakerSegmentTextUpdateResult updateSpeakerSegmentDstText(
             @PathVariable String taskId,
@@ -52,6 +55,7 @@ public class MonitorStageController {
         return result;
     }
 
+    // 修改指定 translator 段落的目标文本。
     @PatchMapping("/api/video-tasks/{taskId}/translator-segments/{itemIndex}/dst-text")
     public MonitorService.TranslatorSegmentTextUpdateResult updateTranslatorSegmentDstText(
             @PathVariable String taskId,

@@ -17,6 +17,7 @@ public class FailureLogController {
         this.failureLogRepositoryService = failureLogRepositoryService;
     }
 
+    // 查询流水线失败日志列表。
     @GetMapping("/api/failure-logs")
     public FailureLogResponse failureLogs() {
         var rows = failureLogRepositoryService.listFailureLogs();

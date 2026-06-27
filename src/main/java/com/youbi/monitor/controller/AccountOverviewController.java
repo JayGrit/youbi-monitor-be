@@ -32,41 +32,49 @@ public class AccountOverviewController {
         this.accountProfileService = accountProfileService;
     }
 
+    // 查询各平台账号总览信息。
     @GetMapping("/api/accounts/overview")
     public Map<String, List<Map<String, Object>>> overview() {
         return accountOverviewService.overview();
     }
 
+    // 查询当前支持的账号平台类型。
     @GetMapping("/api/accounts/types")
     public Map<String, List<String>> types() {
         return Map.of("items", accountOverviewService.types());
     }
 
+    // 查询账号备份服务的最近状态。
     @GetMapping("/api/accounts/backupper-status")
     public BackupperStatus backupperStatus() {
         return accountOverviewService.latestBackupperStatus();
     }
 
+    // 查询指定平台账号的详细信息。
     @GetMapping("/api/accounts/{platform}/{accountKey}")
     public Map<String, Object> account(@PathVariable String platform, @PathVariable String accountKey) {
         return accountOverviewService.account(platform, accountKey);
     }
 
+    // 修改指定平台账号的账号标识。
     @PostMapping("/api/accounts/{platform}/{accountKey}/key")
     public Map<String, Object> renameKey(@PathVariable String platform, @PathVariable String accountKey, @RequestBody SocialAccountKeyUpdateRequest request) {
         return accountOverviewService.renameAccountKey(platform, accountKey, request.newAccountKey());
     }
 
+    // 启用或停用指定平台账号。
     @PostMapping("/api/accounts/{platform}/{accountKey}/enabled")
     public Map<String, Object> setEnabled(@PathVariable String platform, @PathVariable String accountKey, @RequestBody Map<String, Object> request) {
         return accountOverviewService.updateEnabled(platform, accountKey, Boolean.TRUE.equals(request == null ? null : request.get("enabled")));
     }
 
+    // 更新指定平台账号的上传冷却时间。
     @PostMapping("/api/accounts/{platform}/{accountKey}/cooldown")
     public Map<String, Object> setCooldown(@PathVariable String platform, @PathVariable String accountKey, @RequestBody(required = false) AccountCooldownUpdateRequest request) {
         return accountOverviewService.updateCooldown(platform, accountKey, request == null ? null : request.minSeconds(), request == null ? null : request.maxSeconds());
     }
 
+    // 更新指定平台账号的资料信息。
     @PostMapping("/api/accounts/{platform}/{accountKey}/profile")
     public ResponseEntity<?> updateProfile(@PathVariable String platform, @PathVariable String accountKey, @RequestBody AccountProfileUpdateRequest request) {
         try {
@@ -76,6 +84,7 @@ public class AccountOverviewController {
         }
     }
 
+    // 上传指定平台账号的头像文件。
     @PostMapping(value = "/api/accounts/{platform}/{accountKey}/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadAvatar(@PathVariable String platform, @PathVariable String accountKey, @RequestParam("file") MultipartFile file) {
         try {
@@ -85,6 +94,7 @@ public class AccountOverviewController {
         }
     }
 
+    // 更新指定平台账号的下一次允许上传时间。
     @PostMapping("/api/accounts/{platform}/{accountKey}/next-upload-allowed-at")
     public Map<String, Object> updateNextUploadAllowedAt(
             @PathVariable String platform,
@@ -98,6 +108,7 @@ public class AccountOverviewController {
         );
     }
 
+    // 更新指定平台账号的 downloader 最大暂存任务数。
     @PostMapping("/api/accounts/{platform}/{accountKey}/downloader-max-staged-count")
     public Map<String, Object> updateDownloaderMaxStagedCount(
             @PathVariable String platform,
@@ -111,6 +122,7 @@ public class AccountOverviewController {
         );
     }
 
+    // 更新指定平台账号的静默时间段。
     @PostMapping("/api/accounts/{platform}/{accountKey}/quiet-time")
     public Map<String, Object> updateQuietTime(
             @PathVariable String platform,

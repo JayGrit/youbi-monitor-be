@@ -23,6 +23,7 @@ public class NarrationManualController {
         this.narrationManualService = narrationManualService;
     }
 
+    // 手动提交指定任务的口播分段内容。
     @PostMapping("/api/video-tasks/{taskId}/publisher/narration/segments")
     public ResponseEntity<?> submitSegments(
             @PathVariable String taskId,
@@ -38,6 +39,7 @@ public class NarrationManualController {
         }
     }
 
+    // 上传指定任务口播发布所需的图片。
     @PostMapping(
             value = "/api/video-tasks/{taskId}/publisher/narration/images/{kind}",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE

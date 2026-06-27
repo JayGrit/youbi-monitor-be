@@ -23,21 +23,25 @@ public class SubmitterAuthorTypeController {
         this.monitorService = monitorService;
     }
 
+    // 查询指定作者的投稿类型配置。
     @GetMapping("/api/submitter-author-types")
     public MonitorService.SubmitterAuthorType submitterAuthorType(@RequestParam String author) {
         return monitorService.authorType(author);
     }
 
+    // 查询全部作者投稿类型配置。
     @GetMapping("/api/submitter-author-types/all")
     public List<MonitorService.SubmitterAuthorType> submitterAuthorTypes() {
         return monitorService.authorTypes();
     }
 
+    // 查询可选的分发任务类型。
     @GetMapping("/api/submitter-author-types/task-types")
     public List<MonitorService.DistributorTaskType> distributorTaskTypes() {
         return monitorService.distributorTaskTypes();
     }
 
+    // 保存作者投稿类型配置。
     @PostMapping("/api/submitter-author-types")
     public MonitorService.SubmitterAuthorType saveSubmitterAuthorType(
             @RequestBody MonitorService.SubmitterAuthorTypeUpdateRequest request
@@ -59,6 +63,7 @@ public class SubmitterAuthorTypeController {
         }
     }
 
+    // 删除指定作者的投稿类型配置。
     @DeleteMapping("/api/submitter-author-types")
     public MonitorService.SubmitterAuthorDeleteResult deleteSubmitterAuthorType(@RequestParam String author) {
         try {

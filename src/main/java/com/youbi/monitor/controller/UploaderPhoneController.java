@@ -19,11 +19,13 @@ public class UploaderPhoneController {
         this.uploaderPhoneService = uploaderPhoneService;
     }
 
+    // 查询上传手机与平台账号的绑定矩阵。
     @GetMapping("/api/uploader-phones")
     public Object matrix() {
         return uploaderPhoneService.matrix();
     }
 
+    // 更新指定上传手机在指定平台的账号绑定。
     @PostMapping("/api/uploader-phones/{phoneId}/platform/{platform}")
     public ResponseEntity<?> updatePlatformAccount(
             @PathVariable long phoneId,
