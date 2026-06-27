@@ -27,15 +27,6 @@ youbi:
     read-timeout: ${YDBI_OPERATOR_READ_TIMEOUT:PT15S}
   distributor:
     base-url: ${YDBI_DISTRIBUTOR_BASE_URL:http://127.0.0.1:8210}
-  upload-task-timeout-seconds: ${YDBI_UPLOAD_TASK_TIMEOUT_SECONDS:480}
-  alidrive-upload-task-timeout-seconds: ${YDBI_ALIDRIVE_UPLOAD_TASK_TIMEOUT_SECONDS:900}
-  playwright:
-    default-locale: ${YDBI_PLAYWRIGHT_DEFAULT_LOCALE:zh-CN}
-    default-timezone: ${YDBI_PLAYWRIGHT_DEFAULT_TIMEZONE:Asia/Shanghai}
-    default-viewport-width: ${YDBI_PLAYWRIGHT_DEFAULT_VIEWPORT_WIDTH:1400}
-    default-viewport-height: ${YDBI_PLAYWRIGHT_DEFAULT_VIEWPORT_HEIGHT:900}
-    accept-language: ${YDBI_PLAYWRIGHT_ACCEPT_LANGUAGE:zh-CN,zh;q=0.9,en;q=0.8}
-    user-agent: ${YDBI_PLAYWRIGHT_USER_AGENT:Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36}
   minio:
     endpoint: ${YDBI_MINIO_ENDPOINT:http://120.53.92.66:9000}
     access-key: ${YDBI_MINIO_ACCESS_KEY:minioadmin}
@@ -46,36 +37,3 @@ youbi:
     account-key: ${YDBI_ALIDRIVE_ACCOUNT_KEY:default}
     refresh-token: ${YDBI_ALIDRIVE_REFRESH_TOKEN:}
     work-dir: ${YDBI_ALIDRIVE_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/alidrive}
-  xiaohongshu:
-    headless: ${YDBI_XHS_HEADLESS:true}
-    browser-channel: ${YDBI_XHS_BROWSER_CHANNEL:chrome}
-    stealth-script-path: ${YDBI_XHS_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-  douyin:
-    headless: ${YDBI_DOUYIN_HEADLESS:true}
-    browser-channel: ${YDBI_DOUYIN_BROWSER_CHANNEL:chrome}
-    stealth-script-path: ${YDBI_DOUYIN_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-    profile-root-dir: ${YDBI_DOUYIN_PROFILE_ROOT_DIR:/work/douyin-chrome-profiles}
-  bilibili:
-    playwright:
-      headless: ${YDBI_BILIBILI_PLAYWRIGHT_HEADLESS:false}
-      browser-channel: ${YDBI_BILIBILI_PLAYWRIGHT_BROWSER_CHANNEL:chrome}
-      stealth-script-path: ${YDBI_BILIBILI_PLAYWRIGHT_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-      cdp-url: ${YDBI_BILIBILI_PLAYWRIGHT_CDP_URL:}
-      browser-upload-work-dir: ${YDBI_BILIBILI_PLAYWRIGHT_BROWSER_UPLOAD_WORK_DIR:}
-  shipinhao:
-    headless: ${YDBI_SHIPINHAO_HEADLESS:true}
-    browser-channel: ${YDBI_SHIPINHAO_BROWSER_CHANNEL:chrome}
-    stealth-script-path: ${YDBI_SHIPINHAO_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-  kuaishou:
-    headless: ${YDBI_KUAISHOU_HEADLESS:true}
-    browser-channel: ${YDBI_KUAISHOU_BROWSER_CHANNEL:chrome}
-    stealth-script-path: ${YDBI_KUAISHOU_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-  jinritoutiao:
-    headless: ${YDBI_JINRITOUTIAO_HEADLESS:true}
-    browser-channel: ${YDBI_JINRITOUTIAO_BROWSER_CHANNEL:chrome}
-    stealth-script-path: ${YDBI_JINRITOUTIAO_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-  youtube:
-    headless: ${YDBI_YOUTUBE_HEADLESS:true}
-    browser-channel: ${YDBI_YOUTUBE_BROWSER_CHANNEL:chrome}
-    stealth-script-path: ${YDBI_YOUTUBE_STEALTH_SCRIPT_PATH:/opt/youbi/playwright/stealth.min.js}
-    proxy-server: ${YDBI_YOUTUBE_PROXY_SERVER:http://127.0.0.1:7890}

@@ -2,11 +2,11 @@
 
 Spring Boot 3 / Java 17 backend for the YouBi video generation monitor.
 
-## Deprecated browser uploads
+## Browser uploads
 
-Upload execution and Playwright automation are deprecated in monitor-be. Their controllers, services, and browser repositories are excluded from Spring component scanning; source code and dependencies remain temporarily for staged removal. Operator is the only active browser execution service.
+Upload execution and Playwright automation have been removed from monitor-be. Operator is the only active browser execution service.
 
-Database-backed account overview and configuration APIs remain active; they are isolated from the deprecated browser account controllers and services.
+Database-backed account overview and configuration APIs remain active.
 
 ## Run
 
@@ -39,16 +39,6 @@ Override Spring datasource settings with environment variables such as
 - `POST /api/bilibili/account/{accountKey}/qrcode/{authCode}/poll`
 - `POST /api/bilibili/account/renew`
 - `POST /api/bilibili/account/renew?accountKey=default`
-- `POST /api/bilibili/upload` with `videoUrl` or `minioUrl` pointing to the
-  final video in MinIO. `videoPath` remains accepted only for compatibility.
-- `GET /api/xiaohongshu/account?accountKey=default`
-- `GET /api/xiaohongshu/accounts`
-- `POST /api/xiaohongshu/account/qrcode`
-- `POST /api/xiaohongshu/account/qrcode?accountKey=default`
-- `POST /api/xiaohongshu/account/{accountKey}/qrcode/{authCode}/poll`
-- `POST /api/xiaohongshu/account/{accountKey}/key`
-- `POST /api/xiaohongshu/upload` with `videoUrl` or `minioUrl` pointing to the
-  final video in MinIO. `videoPath` remains accepted for local/manual upload.
 
 The service only reads existing `task` and stage tables. It does not create,
 resume, or mutate processing tasks.
