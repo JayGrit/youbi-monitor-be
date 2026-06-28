@@ -123,7 +123,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     t.platform,
                     t.action,
                     t.task_type AS taskType,
-                    type.display_name AS taskTypeDisplayName,
+                    COALESCE(NULLIF(type.note, ''), type.display_name) AS taskTypeDisplayName,
                     t.account_key AS accountKey,
                     t.status,
                     t.priority,

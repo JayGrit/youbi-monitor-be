@@ -80,7 +80,7 @@ public class QueueMonitorService {
                     t.run_id AS runId,
                     t.task_id AS taskId,
                     t.task_type AS taskType,
-                    type.display_name AS taskTypeDisplayName,
+                    COALESCE(NULLIF(type.note, ''), type.display_name) AS taskTypeDisplayName,
                     t.run_number AS runNumber,
                     t.status,
                     t.priority,
@@ -137,7 +137,7 @@ public class QueueMonitorService {
                 SELECT
                     t.id,
                     t.task_type AS taskType,
-                    type.name AS taskTypeDisplayName,
+                    COALESCE(NULLIF(type.note, ''), type.name) AS taskTypeDisplayName,
                     t.caller,
                     t.upstream_task_id AS upstreamTaskId,
                     t.request_key AS requestKey,
@@ -180,6 +180,7 @@ public class QueueMonitorService {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addEqual(conditions, args, "t.status", filters.get("status"));
+        addPrefix(conditions, args, "t.task_type", filters.get("taskTypePrefix"));
         addLike(conditions, args, "t.task_type", filters.get("taskType"));
         addLike(conditions, args, "t.task_id", filters.get("taskId"));
         addLike(conditions, args, "t.op_id", filters.get("opId"));
@@ -263,7 +264,7 @@ public class QueueMonitorService {
 
     private Map<String, String> filters(MultiValueMap<String, String> query) {
         Map<String, String> filters = new LinkedHashMap<>();
-        for (String key : List.of("status", "taskType", "taskId", "opId", "workerId", "caller", "upstreamTaskId", "requestKey", "operator")) {
+        for (String key : List.of("status", "taskType", "taskTypePrefix", "taskId", "opId", "workerId", "caller", "upstreamTaskId", "requestKey", "operator")) {
             String value = first(query, key);
             if (value != null && !value.isBlank()) {
                 filters.put(key, value.trim());
@@ -313,6 +314,15 @@ public class QueueMonitorService {
         }
         conditions.add(column + " LIKE ?");
         args.add("%" + text + "%");
+    }
+
+    private void addPrefix(List<String> conditions, List<Object> args, String column, String value) {
+        String text = TextSupport.text(value);
+        if (text.isBlank()) {
+            return;
+        }
+        conditions.add(column + " LIKE ?");
+        args.add(text + "%");
     }
 
     private void addDateLowerBound(List<String> conditions, List<Object> args, String column, String value) {
