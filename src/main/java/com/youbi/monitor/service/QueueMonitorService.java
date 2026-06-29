@@ -150,8 +150,10 @@ public class QueueMonitorService {
                     detail.input_chars AS inputChars,
                     detail.output_chars AS outputChars,
                     detail.request_json AS requestJson,
+                    detail.rendered_messages_json AS renderedMessagesJson,
                     detail.response_json AS responseJson,
                     detail.raw_response_json AS rawResponseJson,
+                    detail.prompt_version AS promptVersion,
                     t.created_at AS createdAt,
                     t.started_at AS startedAt,
                     t.completed_at AS completedAt,
@@ -253,8 +255,10 @@ public class QueueMonitorService {
         putNumber(result, row, "inputChars");
         putNumber(result, row, "outputChars");
         putText(result, row, "requestJson");
+        putText(result, row, "renderedMessagesJson");
         putText(result, row, "responseJson");
         putText(result, row, "rawResponseJson");
+        putText(result, row, "promptVersion");
         put(result, row, "createdAt");
         put(result, row, "startedAt");
         put(result, row, "completedAt");
