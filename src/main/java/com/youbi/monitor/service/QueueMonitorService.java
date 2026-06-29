@@ -101,15 +101,13 @@ public class QueueMonitorService {
                 %s
                 ORDER BY
                     CASE
-                        WHEN t.status = 'running' THEN 3
                         WHEN t.status = 'ready' THEN 2
-                        WHEN t.status = 'failed' THEN 1
+                        WHEN t.status = 'running' THEN 1
                         ELSE 0
-                    END DESC,
+                    END ASC,
                     CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
-                    t.available_at ASC,
-                    t.created_at DESC,
-                    t.id DESC
+                    t.created_at ASC,
+                    t.id ASC
                 LIMIT ? OFFSET ?
                 """.formatted(parts.where()), args.toArray());
     }
@@ -151,6 +149,9 @@ public class QueueMonitorService {
                     detail.api_key_id AS apiKeyId,
                     detail.input_chars AS inputChars,
                     detail.output_chars AS outputChars,
+                    detail.request_json AS requestJson,
+                    detail.response_json AS responseJson,
+                    detail.raw_response_json AS rawResponseJson,
                     t.created_at AS createdAt,
                     t.started_at AS startedAt,
                     t.completed_at AS completedAt,
@@ -163,15 +164,13 @@ public class QueueMonitorService {
                 %s
                 ORDER BY
                     CASE
-                        WHEN t.status = 'running' THEN 3
                         WHEN t.status = 'pending' THEN 2
-                        WHEN t.status = 'failed' THEN 1
+                        WHEN t.status = 'running' THEN 1
                         ELSE 0
-                    END DESC,
+                    END ASC,
                     CASE WHEN t.status = 'pending' THEN t.priority ELSE 0 END DESC,
-                    t.next_run_at ASC,
-                    t.created_at DESC,
-                    t.id DESC
+                    t.created_at ASC,
+                    t.id ASC
                 LIMIT ? OFFSET ?
                 """.formatted(parts.where()), args.toArray());
     }
@@ -253,6 +252,9 @@ public class QueueMonitorService {
         putNumber(result, row, "apiKeyId");
         putNumber(result, row, "inputChars");
         putNumber(result, row, "outputChars");
+        putText(result, row, "requestJson");
+        putText(result, row, "responseJson");
+        putText(result, row, "rawResponseJson");
         put(result, row, "createdAt");
         put(result, row, "startedAt");
         put(result, row, "completedAt");
