@@ -6,8 +6,10 @@ import com.youbi.monitor.repository.MonitorRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport implements IFailureLogRepositoryService {
@@ -29,13 +31,17 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
     public List<FailureLogItem> listFailureLogs() {
         List<String> queries = new ArrayList<>();
         for (Map.Entry<String, String> entry : STAGE_TABLES.entrySet()) {
-            queries.add(stageQuery(entry.getKey(), entry.getValue()));
-        }
-        for (Map.Entry<String, String> entry : UPLOADER_TASK_TABLES.entrySet()) {
             if (!tableExists(entry.getValue())) {
                 continue;
             }
-            queries.add(uploadQuery(entry.getKey(), entry.getValue()));
+            queries.add(stageQuery(entry.getKey(), entry.getValue()));
+        }
+        Set<String> uploadTaskTables = new LinkedHashSet<>(UPLOADER_TASK_TABLES.values());
+        for (String table : uploadTaskTables) {
+            if (!tableExists(table)) {
+                continue;
+            }
+            queries.add(uploadQuery(table));
         }
         queries.add(genericUploaderQuery());
 
@@ -80,15 +86,15 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 """.formatted(stage, stage, quotedIdentifier(table));
     }
 
-    private static String uploadQuery(String platform, String table) {
+    private static String uploadQuery(String table) {
         return """
                 SELECT
-                  CONCAT('uploader:%s:', submission.id) id,
+                  CONCAT('uploader:', submission.platform, ':', submission.id) id,
                   submission.task_id,
                   COALESCE(NULLIF(video_info.upload_title, ''), NULLIF(source_video.title, ''), submission.task_id) title,
                   COALESCE(NULLIF(video_info.type, ''), '未分类') type,
                   'uploader' stage,
-                  '%s' platform,
+                  submission.platform platform,
                   COALESCE(submission.account_key, '') account_key,
                   COALESCE(NULLIF(submission.error_message, ''), NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(submission.completed_at, submission.updated_at, submission.started_at, submission.created_at) failed_at
@@ -100,9 +106,8 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                  AND uploader.sub_stage = 'main'
                 LEFT JOIN video_info video_info ON video_info.task_id = submission.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
-                WHERE submission.platform = '%s'
-                  AND submission.status = 'failed'
-                """.formatted(platform, platform, quotedIdentifier(table), platform);
+                WHERE submission.status = 'failed'
+                """.formatted(quotedIdentifier(table));
     }
 
     private String genericUploaderQuery() {
