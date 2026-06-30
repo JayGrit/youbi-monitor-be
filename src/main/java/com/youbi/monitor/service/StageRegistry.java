@@ -37,7 +37,7 @@ public class StageRegistry {
     }
 
     private static void register(Map<String, StagePolicy> policies, String stage, String label) {
-        policies.put(stage, new StagePolicy(stage, stage, label));
+        policies.put(stage, new StagePolicy(stage, "distributor_task_stages", label));
     }
 
     public record StagePolicy(String stage, String tableName, String label) {

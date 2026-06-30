@@ -94,7 +94,10 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   COALESCE(submission.completed_at, submission.updated_at, submission.started_at, submission.created_at) failed_at
                 FROM %s submission
                 JOIN task task ON task.id = submission.task_id
-                LEFT JOIN uploader uploader ON uploader.task_id = submission.task_id
+                LEFT JOIN distributor_task_stages uploader
+                  ON uploader.task_id = submission.task_id
+                 AND uploader.stage_name = 'uploader'
+                 AND uploader.sub_stage = 'main'
                 LEFT JOIN video_info video_info ON video_info.task_id = submission.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
                 WHERE submission.platform = '%s'
@@ -123,11 +126,13 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   '' account_key,
                   COALESCE(NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(uploader.completed_at, uploader.started_at, task.completed_at, task.started_at, task.created_at) failed_at
-                FROM uploader uploader
+                FROM distributor_task_stages uploader
                 JOIN task task ON task.id = uploader.task_id
                 LEFT JOIN video_info video_info ON video_info.task_id = uploader.task_id
                 LEFT JOIN submitter_video source_video ON source_video.id = video_info.submitter_video_id
-                WHERE uploader.status = 'failed'
+                WHERE uploader.stage_name = 'uploader'
+                  AND uploader.sub_stage = 'main'
+                  AND uploader.status = 'failed'
                   AND NOT (%s)
                 """.formatted(failedUploadExists);
     }

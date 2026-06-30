@@ -193,9 +193,9 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         String currentStage = currentStages.get(0);
         List<RouteNode> candidates = route.stream().filter(node -> node.stage().equals(currentStage)).toList();
         if (candidates.size() == 1) return candidates.get(0);
-        if ("combiner".equals(currentStage) && tableExists("combiner")) {
+        if ("combiner".equals(currentStage) && tableExists("distributor_task_stages")) {
             List<String> subStages = repository.queryForList(
-                    "SELECT sub_stage FROM combiner WHERE task_id = ?",
+                    "SELECT sub_stage FROM distributor_task_stages WHERE task_id = ? AND stage_name = 'combiner'",
                     String.class,
                     taskId
             );
@@ -228,6 +228,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
         List<Object> arguments = new ArrayList<>();
         if (setSubStage) arguments.add(node.subStage());
         arguments.add(taskId);
+        arguments.add(node.stage());
         repository.update("""
                 UPDATE %s
                 SET status = 'ready',
@@ -235,7 +236,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                     completed_at = NULL,
                     error_message = NULL,
                     `operator` = NULL%s
-                WHERE task_id = ?
+                WHERE task_id = ? AND stage_name = ?
                 """.formatted(
                 quotedIdentifier(node.tableName()),
                 setSubStage ? ", sub_stage = ?" : ""
@@ -257,8 +258,8 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                         completed_at = NULL,
                         error_message = NULL,
                         `operator` = NULL
-                    WHERE task_id = ?
-                    """.formatted(quotedIdentifier(node.tableName())), taskId);
+                    WHERE task_id = ? AND stage_name = ?
+                    """.formatted(quotedIdentifier(node.tableName())), taskId, node.stage());
         }
     }
 
@@ -317,7 +318,10 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 repository.update("""
                         UPDATE %s submission
                         JOIN video_info video_info ON video_info.task_id = submission.task_id
-                        LEFT JOIN uploader uploader ON uploader.task_id = submission.task_id
+                        LEFT JOIN distributor_task_stages uploader
+                          ON uploader.task_id = submission.task_id
+                         AND uploader.stage_name = 'uploader'
+                         AND uploader.sub_stage = 'main'
                         SET submission.status = 'ready',
                             submission.started_at = NULL,
                             submission.completed_at = NULL,

@@ -149,16 +149,16 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               ) bilibili_upload_account_name,
               u.error_message uploader_error
             FROM task t
-            LEFT JOIN downloader d ON d.task_id = t.id
-            LEFT JOIN demucs de ON de.task_id = t.id
-            LEFT JOIN whisper w ON w.task_id = t.id
-            LEFT JOIN translator tr ON tr.task_id = t.id
-            LEFT JOIN speaker sp ON sp.task_id = t.id
+            LEFT JOIN distributor_task_stages d ON d.task_id = t.id AND d.stage_name = 'downloader' AND d.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages de ON de.task_id = t.id AND de.stage_name = 'demucs' AND de.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages w ON w.task_id = t.id AND w.stage_name = 'whisper' AND w.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages tr ON tr.task_id = t.id AND tr.stage_name = 'translator' AND tr.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages sp ON sp.task_id = t.id AND sp.stage_name = 'speaker' AND sp.sub_stage = 'main'
             __ASSETER_JOIN__
-            LEFT JOIN combiner m ON m.task_id = t.id
-            LEFT JOIN publisher pub ON pub.task_id = t.id
+            LEFT JOIN distributor_task_stages m ON m.task_id = t.id AND m.stage_name = 'combiner' AND m.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages pub ON pub.task_id = t.id AND pub.stage_name = 'publisher' AND pub.sub_stage = 'main'
             LEFT JOIN publisher_result pr ON pr.task_id = t.id
-            LEFT JOIN uploader u ON u.task_id = t.id
+            LEFT JOIN distributor_task_stages u ON u.task_id = t.id AND u.stage_name = 'uploader' AND u.sub_stage = 'main'
             LEFT JOIN (
               SELECT
                 task_id,
@@ -476,14 +476,14 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 NULL asseter_error,
                 """;
         String asseterJoin = "";
-        if (tableExists("asseter")) {
+        if (tableExists("distributor_task_stages")) {
             asseterSelect = """
                     a.status asseter_status,
                     a.started_at asseter_started_at,
                     a.completed_at asseter_completed_at,
                     a.error_message asseter_error,
                     """;
-            asseterJoin = "LEFT JOIN asseter a ON a.task_id = t.id";
+            asseterJoin = "LEFT JOIN distributor_task_stages a ON a.task_id = t.id AND a.stage_name = 'asseter' AND a.sub_stage = 'main'";
         }
         String distributorStagesSelect = "NULL distributor_stages,";
         if (tableExists("distributor_type_stages")) {

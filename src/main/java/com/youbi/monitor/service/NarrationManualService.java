@@ -163,7 +163,7 @@ public class NarrationManualService {
         List<NarrationRow> rows = repository.query("""
                 SELECT id, cover_prompt, cover_image_url, background_prompt, background_image_url
                 FROM product_narration
-                WHERE task_id = ?
+                WHERE task_id = ? AND stage_name = 'publisher'
                 """, (rs, rowNum) -> new NarrationRow(
                 rs.getLong("id"),
                 rs.getString("cover_prompt"),
@@ -307,13 +307,13 @@ public class NarrationManualService {
 
     private void resumePublisher(String taskId) {
         repository.update("""
-                UPDATE publisher
+                UPDATE distributor_task_stages
                 SET status = 'ready',
                     started_at = NULL,
                     completed_at = NULL,
                     error_message = NULL,
                     `operator` = NULL
-                WHERE task_id = ?
+                WHERE task_id = ? AND stage_name = 'publisher' AND sub_stage = 'segment_plan'
                 """, taskId);
         repository.update("""
                 INSERT INTO publisher_result (task_id, status, error_message)
@@ -332,7 +332,7 @@ public class NarrationManualService {
 
     private String currentSubStage(String taskId) {
         List<String> rows = repository.queryForList(
-                "SELECT sub_stage FROM publisher WHERE task_id = ?",
+                "SELECT sub_stage FROM distributor_task_stages WHERE task_id = ? AND stage_name = 'publisher'",
                 String.class,
                 taskId
         );
@@ -358,11 +358,11 @@ public class NarrationManualService {
                     error_message = NULL
                 """, taskId, resultJson);
         repository.update("""
-                UPDATE publisher
+                UPDATE distributor_task_stages
                 SET status = 'success',
                     completed_at = NOW(),
                     error_message = NULL
-                WHERE task_id = ?
+                WHERE task_id = ? AND stage_name = 'publisher' AND sub_stage = 'main'
                 """, taskId);
         restoreRunningTask(taskId);
     }
@@ -412,7 +412,7 @@ public class NarrationManualService {
                     error_message = NULL
                 """, taskId, resultJson);
         repository.update("""
-                UPDATE publisher
+                UPDATE distributor_task_stages
                 SET status = 'success',
                     completed_at = NOW(),
                     error_message = NULL
@@ -474,11 +474,11 @@ public class NarrationManualService {
                     error_message = NULL
                 """, taskId, resultJson);
         repository.update("""
-                UPDATE publisher
+                UPDATE distributor_task_stages
                 SET status = 'success',
                     completed_at = NOW(),
                     error_message = NULL
-                WHERE task_id = ? AND sub_stage = 'publish_metadata'
+                WHERE task_id = ? AND stage_name = 'publisher' AND sub_stage = 'publish_metadata'
                 """, taskId);
         restoreRunningTask(taskId);
         return true;
