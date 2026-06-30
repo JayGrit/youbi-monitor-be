@@ -287,15 +287,20 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     public void ensureMonitorSchema() {
         dropColumnIfExists("task", "operator");
         repository.update("""
-                CREATE TABLE IF NOT EXISTS publisher (
-                    task_id VARCHAR(64) PRIMARY KEY,
+                CREATE TABLE IF NOT EXISTS distributor_task_stages (
+                    task_id VARCHAR(64) NOT NULL,
+                    stage_name VARCHAR(64) NOT NULL,
+                    sub_stage VARCHAR(64) NOT NULL DEFAULT 'main',
                     status VARCHAR(32) NOT NULL DEFAULT 'pending',
                     started_at DATETIME NULL,
                     completed_at DATETIME NULL,
                     error_message TEXT NULL,
                     `operator` VARCHAR(128) NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    PRIMARY KEY (task_id, stage_name, sub_stage),
+                    KEY idx_distributor_task_stages_stage_status (stage_name, status, sub_stage, task_id),
+                    KEY idx_distributor_task_stages_status_operator (status, `operator`, stage_name, updated_at)
                 )
                 """);
         repository.update("""
