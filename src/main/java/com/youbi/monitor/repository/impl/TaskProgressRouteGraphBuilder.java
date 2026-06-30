@@ -145,6 +145,21 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
 
     private Map<String, PhysicalStageState> loadPhysicalSubStageStates(String taskId, LocalDateTime now) {
         Map<String, PhysicalStageState> states = new HashMap<>();
+        if (tableExists("distributor_task_stages")) {
+            repository.query("""
+                    SELECT stage_name, sub_stage, status, started_at, completed_at, error_message
+                    FROM distributor_task_stages
+                    WHERE task_id = ? AND sub_stage <> 'main'
+                    """, (rs, rowNum) -> {
+                LocalDateTime startedAt = timestamp(rs, "started_at");
+                LocalDateTime completedAt = timestamp(rs, "completed_at");
+                states.put(routeId(rs.getString("stage_name"), rs.getString("sub_stage")), new PhysicalStageState(
+                        rs.getString("status"), startedAt, completedAt,
+                        elapsedSeconds(startedAt, completedAt, now), rs.getString("error_message")
+                ));
+                return rs.getString("stage_name");
+            }, taskId);
+        }
         for (String stage : List.of("downloader", "publisher", "whisper", "asseter", "combiner")) {
             if (!tableExists(stage) || !columnExists(stage, "sub_stage")) {
                 continue;
@@ -155,7 +170,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
                     (rs, rowNum) -> {
                         LocalDateTime startedAt = timestamp(rs, "started_at");
                         LocalDateTime completedAt = timestamp(rs, "completed_at");
-                        states.put(routeId(stage, rs.getString("sub_stage")), new PhysicalStageState(
+                        states.putIfAbsent(routeId(stage, rs.getString("sub_stage")), new PhysicalStageState(
                                 rs.getString("status"), startedAt, completedAt,
                                 elapsedSeconds(startedAt, completedAt, now), rs.getString("error_message")
                         ));

@@ -3,7 +3,7 @@ package com.youbi.monitor.service;
 import com.youbi.monitor.dto.MonitorResponse;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.TaskFlowDetail;
-import com.youbi.monitor.model.TaskMonitorSummary;
+import com.youbi.monitor.model.TaskMonitorItem;
 import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.WhisperProcessingDetail;
 import com.youbi.monitor.model.WhisperWordTimestamp;
@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -113,7 +114,7 @@ public class MonitorService {
     public MonitorResponse listTasks(int page, int limit, String status, String type, String stage, String taskId, String sort) {
         LocalDateTime now = LocalDateTime.now();
         int offset = Math.max(0, page - 1) * limit;
-        List<TaskMonitorSummary> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, type, stage, taskId, sort);
+        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, type, stage, taskId, sort);
         long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, type, stage, taskId);
         return new MonitorResponse(tasks, now, page, limit, totalCount);
     }
@@ -211,7 +212,7 @@ public class MonitorService {
             LocalDateTime now
     ) {
         String table = STAGE_TABLES.get(definition.key());
-        Map<String, Object> stageRow = taskQueryRepositoryService.findTaskFlowRow(table, "task_id", taskId);
+        Map<String, Object> stageRow = mergedStageRow(taskId, definition.key(), table);
         LocalDateTime startedAt = localDateTime(stageRow.get("started_at"));
         LocalDateTime completedAt = localDateTime(stageRow.get("completed_at"));
         String status = stringValue(stageRow.getOrDefault("status", "pending"));
@@ -229,6 +230,35 @@ public class MonitorService {
                 flowFields(definition.key(), STAGE_OUTPUT_FIELDS, task, videoInfo, stageRow, minioObjects),
                 tables
         );
+    }
+
+    private Map<String, Object> mergedStageRow(String taskId, String stageKey, String stageTable) {
+        Map<String, Object> physicalRow = taskQueryRepositoryService.findTaskFlowRow(stageTable, "task_id", taskId);
+        Map<String, Object> distributorRow = distributorStageRow(taskId, stageKey, "main");
+        if (distributorRow.isEmpty()) {
+            return physicalRow;
+        }
+        Map<String, Object> merged = new LinkedHashMap<>(physicalRow);
+        for (String column : List.of("status", "started_at", "completed_at", "error_message", "operator", "created_at", "updated_at")) {
+            if (distributorRow.containsKey(column)) {
+                merged.put(column, distributorRow.get(column));
+            }
+        }
+        if (!merged.containsKey("task_id")) {
+            merged.put("task_id", taskId);
+        }
+        return merged;
+    }
+
+    private Map<String, Object> distributorStageRow(String taskId, String stageKey, String subStage) {
+        if (!taskQueryRepositoryService.tableExists("distributor_task_stages")) {
+            return Map.of();
+        }
+        return taskQueryRepositoryService.listTaskFlowRows("distributor_task_stages", "task_id", taskId, "stage_name, sub_stage", CHILD_ROW_LIMIT).stream()
+                .filter(row -> stageKey.equals(stringValue(row.get("stage_name")))
+                        && subStage.equals(stringValue(row.get("sub_stage"))))
+                .findFirst()
+                .orElse(Map.of());
     }
 
     private List<TaskFlowDetail.TaskFlowField> flowFields(
@@ -263,7 +293,7 @@ public class MonitorService {
             }
             case "translator" -> {
                 addLimitedTable(tables, "translator_api_task", taskId, "task_id", "id");
-                addLimitedTable(tables, "translator-chunk", taskId, "task_id", "chunk_index, row_order, id");
+                addLimitedTable(tables, translatorChunkTable(), taskId, "task_id", "chunk_index, row_order, id");
                 addLimitedTable(tables, "translator_segment", taskId, "task_id", "item_index");
                 addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
             }
@@ -306,6 +336,9 @@ public class MonitorService {
     }
 
     private void addLimitedTable(List<TaskFlowDetail.TaskFlowTable> tables, String table, String id, String idColumn, String orderBy) {
+        if (table == null || table.isBlank()) {
+            return;
+        }
         if (!taskQueryRepositoryService.tableExists(table)) {
             return;
         }
@@ -317,6 +350,16 @@ public class MonitorService {
         if (!rows.isEmpty()) {
             tables.add(new TaskFlowDetail.TaskFlowTable(table, rows, truncated));
         }
+    }
+
+    private String translatorChunkTable() {
+        if (taskQueryRepositoryService.tableExists("translator_chunk")) {
+            return "translator_chunk";
+        }
+        if (taskQueryRepositoryService.tableExists("translator-chunk")) {
+            return "translator-chunk";
+        }
+        return null;
     }
 
     private List<TaskFlowDetail.TaskFlowAsset> listTaskAssets(String taskId) {

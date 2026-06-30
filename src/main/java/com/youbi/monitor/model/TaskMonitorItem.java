@@ -24,6 +24,8 @@ public record TaskMonitorItem(
         String bilibiliUploadAccountName,
         String errorMessage,
         List<String> distributorStages,
-        List<StageNode> nodes
+        List<StageNode> nodes,
+        List<TaskProgressRouteNode> routeNodes,
+        List<RouteEdge> routeEdges
 ) {
 }

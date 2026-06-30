@@ -5,7 +5,6 @@ import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.StageNode;
 import com.youbi.monitor.model.StageError;
 import com.youbi.monitor.model.TaskMonitorItem;
-import com.youbi.monitor.model.TaskMonitorSummary;
 import com.youbi.monitor.model.TaskProgressDetail;
 import com.youbi.monitor.model.UploadPlatformStatus;
 import com.youbi.monitor.repository.IMonitorTaskQueryRepositoryService;
@@ -191,24 +190,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               __TRANSLATOR_SEGMENT_TASK_FILTER__
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
-            LEFT JOIN (
-              SELECT
-                chunk_progress.task_id,
-                SUM(CASE WHEN chunk_progress.normal_count > 0 AND chunk_progress.translated_count >= chunk_progress.normal_count THEN 1 ELSE 0 END) translator_completed_count,
-                COUNT(*) translator_total_count
-              FROM (
-                SELECT
-                  ch.task_id,
-                  ch.chunk_index,
-                  COUNT(*) normal_count,
-                  COUNT(s.task_id) translated_count
-                FROM `translator-chunk` ch
-                LEFT JOIN translator_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
-                WHERE __TRANSLATOR_CHUNK_TASK_FILTER__ ch.row_role = 'normal'
-                GROUP BY ch.task_id, ch.chunk_index
-              ) chunk_progress
-              GROUP BY chunk_progress.task_id
-            ) tc ON tc.task_id = t.id
+            __TRANSLATOR_CHUNK_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(DISTINCT item_index) translator_failed_count
               FROM translator_api_task
@@ -241,15 +223,134 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               vi.minio_storage_object_count,
               vi.minio_storage_updated_at,
               vi.type task_type,
+              vi.task_type distributor_task_type,
+              vi.has_background_audio,
+              __DISTRIBUTOR_STAGES_SELECT__
               t.status,
               t.current_stage,
               t.created_at,
               t.started_at,
               t.completed_at,
-              t.error_message
+              t.error_message,
+
+              d.status downloader_status,
+              d.started_at downloader_started_at,
+              d.completed_at downloader_completed_at,
+              d.error_message downloader_error,
+              __DOWNLOADER_PROGRESS_SELECT__
+
+              de.status demucs_status,
+              de.started_at demucs_started_at,
+              de.completed_at demucs_completed_at,
+              de.error_message demucs_error,
+
+              w.status whisper_status,
+              w.started_at whisper_started_at,
+              w.completed_at whisper_completed_at,
+              w.error_message whisper_error,
+
+              tr.status translator_status,
+              tr.started_at translator_started_at,
+              tr.completed_at translator_completed_at,
+              tr.error_message translator_error,
+              NULL translator_completed_count,
+              NULL translator_failed_count,
+              NULL translator_total_count,
+              NULL translator_child_error,
+
+              sp.status speaker_status,
+              sp.started_at speaker_started_at,
+              sp.completed_at speaker_completed_at,
+              sp.error_message speaker_error,
+              NULL speaker_completed_count,
+              NULL speaker_failed_count,
+              NULL speaker_total_count,
+              NULL speaker_child_error,
+
+              __ASSETER_SELECT__
+
+              m.status combiner_status,
+              m.started_at combiner_started_at,
+              m.completed_at combiner_completed_at,
+              m.error_message combiner_error,
+
+              pub.status publisher_status,
+              pub.started_at publisher_started_at,
+              pub.completed_at publisher_completed_at,
+              COALESCE(NULLIF(pub.error_message, ''), pr.error_message) publisher_error,
+
+              CASE WHEN COALESCE(us.uploader_failed_count, 0) > 0 THEN 'failed' ELSE u.status END uploader_status,
+              u.started_at uploader_started_at,
+              u.completed_at uploader_completed_at,
+              COALESCE(us.uploader_completed_count, 0) uploader_completed_count,
+              COALESCE(us.uploader_failed_count, 0) uploader_failed_count,
+              COALESCE(us.uploader_total_count, 0) uploader_total_count,
+              us.bilibili_upload_status,
+              us.douyin_upload_status,
+              us.xiaohongshu_upload_status,
+              us.shipinhao_upload_status,
+              us.kuaishou_upload_status,
+              us.jinritoutiao_upload_status,
+              us.youtube_upload_status,
+              us.x_upload_status,
+              (
+                SELECT submission.account_key
+                FROM uploader_task submission
+                WHERE submission.task_id = t.id
+                  AND submission.platform = 'bilibili'
+                ORDER BY FIELD(submission.status, 'success', 'running', 'ready', 'failed'), submission.id DESC
+                LIMIT 1
+              ) bilibili_upload_account_key,
+              (
+                SELECT COALESCE(phone_profile.display_name, loginstate.account_key, submission.account_key)
+                FROM uploader_task submission
+                LEFT JOIN operator_loginstate loginstate
+                  ON loginstate.platform = submission.platform
+                 AND loginstate.account_key = submission.account_key
+                LEFT JOIN (
+                  SELECT platform, account_id, MAX(display_name) AS display_name
+                  FROM uploader_phone_account
+                  GROUP BY platform, account_id
+                ) phone_profile
+                  ON phone_profile.platform = loginstate.platform
+                 AND phone_profile.account_id = loginstate.id
+                WHERE submission.task_id = t.id
+                  AND submission.platform = 'bilibili'
+                ORDER BY FIELD(submission.status, 'success', 'running', 'ready', 'failed'), submission.id DESC
+                LIMIT 1
+              ) bilibili_upload_account_name,
+              u.error_message uploader_error
             FROM task t
+            LEFT JOIN distributor_task_stages d ON d.task_id = t.id AND d.stage_name = 'downloader' AND d.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages de ON de.task_id = t.id AND de.stage_name = 'demucs' AND de.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages w ON w.task_id = t.id AND w.stage_name = 'whisper' AND w.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages tr ON tr.task_id = t.id AND tr.stage_name = 'translator' AND tr.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages sp ON sp.task_id = t.id AND sp.stage_name = 'speaker' AND sp.sub_stage = 'main'
+            __ASSETER_JOIN__
+            LEFT JOIN distributor_task_stages m ON m.task_id = t.id AND m.stage_name = 'combiner' AND m.sub_stage = 'main'
+            LEFT JOIN distributor_task_stages pub ON pub.task_id = t.id AND pub.stage_name = 'publisher' AND pub.sub_stage = 'main'
+            LEFT JOIN publisher_result pr ON pr.task_id = t.id
+            LEFT JOIN distributor_task_stages u ON u.task_id = t.id AND u.stage_name = 'uploader' AND u.sub_stage = 'main'
+            LEFT JOIN (
+              SELECT
+                task_id,
+                SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) uploader_completed_count,
+                SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) uploader_failed_count,
+                SUM(CASE WHEN COALESCE(NULLIF(status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END) uploader_total_count,
+                MAX(CASE WHEN platform = 'bilibili' THEN status END) bilibili_upload_status,
+                MAX(CASE WHEN platform = 'douyin' THEN status END) douyin_upload_status,
+                MAX(CASE WHEN platform = 'xiaohongshu' THEN status END) xiaohongshu_upload_status,
+                MAX(CASE WHEN platform = 'shipinhao' THEN status END) shipinhao_upload_status,
+                MAX(CASE WHEN platform = 'kuaishou' THEN status END) kuaishou_upload_status,
+                MAX(CASE WHEN platform = 'jinritoutiao' THEN status END) jinritoutiao_upload_status,
+                MAX(CASE WHEN platform = 'youtube' THEN status END) youtube_upload_status,
+                MAX(CASE WHEN platform = 'x' THEN status END) x_upload_status
+              FROM uploader_task_status
+              GROUP BY task_id
+            ) us ON us.task_id = t.id
             LEFT JOIN video_info vi ON vi.task_id = t.id
             LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
+            __DOWNLOADER_PROGRESS_JOIN__
             __TASK_MONITOR_WHERE__
             __TASK_MONITOR_ORDER_BY__
             LIMIT ? OFFSET ?
@@ -336,15 +437,16 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public List<TaskMonitorSummary> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort) {
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort) {
         SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
-        String sql = MONITOR_SUMMARY_SQL
+        String sql = monitorSql(MONITOR_SUMMARY_SQL, filter, sort)
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
-        return repository.query(sql, new TaskSummaryRowMapper(now), args.toArray());
+        List<TaskMonitorItem> rows = repository.query(sql, new TaskRowMapper(now), args.toArray());
+        return withRouteGraphs(rows, now);
     }
 
     @Override
@@ -358,9 +460,13 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     public TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now) {
         SqlFilter filter = new SqlFilter("WHERE t.id = ?", List.of(taskId));
         List<Object> args = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
+        args.add(taskId); // asr_segment
+        args.add(taskId); // translator_segment
+        if (translatorChunkTable() != null) {
             args.add(taskId);
         }
+        args.add(taskId); // translator_api_task
+        args.add(taskId); // speaker_segment
         args.add(taskId);
         args.add(1);
         args.add(0);
@@ -376,6 +482,22 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         List<StageNode> nodes = withStructuredErrors(taskId, row.nodes());
         TaskProgressRouteGraphBuilder.RouteGraph graph = routeGraphBuilder.build(taskId, nodes, now);
         return new TaskProgressDetail(taskId, row.distributorStages(), nodes, graph.nodes(), graph.edges());
+    }
+
+    private List<TaskMonitorItem> withRouteGraphs(List<TaskMonitorItem> rows, LocalDateTime now) {
+        List<TaskMonitorItem> enriched = new ArrayList<>(rows.size());
+        for (TaskMonitorItem row : rows) {
+            TaskProgressRouteGraphBuilder.RouteGraph graph = routeGraphBuilder.build(row.taskId(), row.nodes(), now);
+            enriched.add(new TaskMonitorItem(
+                    row.taskId(), row.title(), row.sourceUrl(), row.sourceWebpageUrl(), row.sourceThumbnailUrl(),
+                    row.sourceDurationSeconds(), row.minioStorageBytes(), row.minioStorageObjectCount(),
+                    row.minioStorageUpdatedAt(), row.taskType(), row.status(), row.currentStage(), row.createdAt(),
+                    row.startedAt(), row.completedAt(), row.elapsedSeconds(), row.bilibiliUploadAccountKey(),
+                    row.bilibiliUploadAccountName(), row.errorMessage(), row.distributorStages(), row.nodes(),
+                    graph.nodes(), graph.edges()
+            ));
+        }
+        return enriched;
     }
 
     private List<StageNode> withStructuredErrors(String taskId, List<StageNode> nodes) {
@@ -454,6 +576,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
     private String progressSql(String template, SqlFilter filter) {
         return applyCapabilities(template)
+                .replace("__TRANSLATOR_CHUNK_JOIN__", translatorChunkJoin())
                 .replace("__ASR_TASK_FILTER__", "WHERE task_id = ?")
                 .replace("__TRANSLATOR_SEGMENT_TASK_FILTER__", "WHERE task_id = ?")
                 .replace("__TRANSLATOR_CHUNK_TASK_FILTER__", "ch.task_id = ? AND")
@@ -505,7 +628,50 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 .replace("__DOWNLOADER_PROGRESS_JOIN__", progressJoin)
                 .replace("__ASSETER_SELECT__", asseterSelect)
                 .replace("__ASSETER_JOIN__", asseterJoin)
-                .replace("__DISTRIBUTOR_STAGES_SELECT__", distributorStagesSelect);
+                .replace("__DISTRIBUTOR_STAGES_SELECT__", distributorStagesSelect)
+                .replace("__TRANSLATOR_CHUNK_JOIN__", translatorChunkJoin());
+    }
+
+    private String translatorChunkJoin() {
+        String table = translatorChunkTable();
+        if (table == null) {
+            return """
+                    LEFT JOIN (
+                      SELECT NULL task_id, NULL translator_completed_count, NULL translator_total_count
+                      WHERE FALSE
+                    ) tc ON tc.task_id = t.id
+                    """;
+        }
+        return """
+                LEFT JOIN (
+                  SELECT
+                    chunk_progress.task_id,
+                    SUM(CASE WHEN chunk_progress.normal_count > 0 AND chunk_progress.translated_count >= chunk_progress.normal_count THEN 1 ELSE 0 END) translator_completed_count,
+                    COUNT(*) translator_total_count
+                  FROM (
+                    SELECT
+                      ch.task_id,
+                      ch.chunk_index,
+                      COUNT(*) normal_count,
+                      COUNT(s.task_id) translated_count
+                    FROM %s ch
+                    LEFT JOIN translator_segment s ON s.task_id = ch.task_id AND s.item_index = ch.item_index
+                    WHERE __TRANSLATOR_CHUNK_TASK_FILTER__ ch.row_role = 'normal'
+                    GROUP BY ch.task_id, ch.chunk_index
+                  ) chunk_progress
+                  GROUP BY chunk_progress.task_id
+                ) tc ON tc.task_id = t.id
+                """.formatted(quotedIdentifier(table));
+    }
+
+    private String translatorChunkTable() {
+        if (tableExists("translator_chunk")) {
+            return "translator_chunk";
+        }
+        if (tableExists("translator-chunk")) {
+            return "translator-chunk";
+        }
+        return null;
     }
 
     private static String monitorOrderBy(String sort) {
@@ -743,7 +909,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     rs.getString("bilibili_upload_account_name"),
                     rs.getString("error_message"),
                     distributorStages(rs),
-                    nodes
+                    nodes,
+                    List.of(),
+                    List.of()
             );
         }
 
@@ -827,49 +995,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             statuses.add(new UploadPlatformStatus(platform, status));
         }
 
-    }
-
-    private static class TaskSummaryRowMapper implements RowMapper<TaskMonitorSummary> {
-        private final LocalDateTime now;
-
-        private TaskSummaryRowMapper(LocalDateTime now) {
-            this.now = now;
-        }
-
-        @Override
-        public TaskMonitorSummary mapRow(ResultSet rs, int rowNum) throws SQLException {
-            LocalDateTime startedAt = timestamp(rs, "started_at");
-            LocalDateTime completedAt = timestamp(rs, "completed_at");
-            return new TaskMonitorSummary(
-                    rs.getString("id"),
-                    rs.getString("title"),
-                    rs.getString("source_url"),
-                    rs.getString("source_webpage_url"),
-                    rs.getString("source_thumbnail_url"),
-                    doubleOrNull(rs, "source_duration_seconds"),
-                    nullableLong(rs, "minio_storage_bytes"),
-                    integerOrNull(rs, "minio_storage_object_count"),
-                    timestamp(rs, "minio_storage_updated_at"),
-                    rs.getString("task_type"),
-                    rs.getString("status"),
-                    rs.getString("current_stage"),
-                    timestamp(rs, "created_at"),
-                    startedAt,
-                    completedAt,
-                    elapsedSeconds(startedAt, completedAt, now),
-                    rs.getString("error_message")
-            );
-        }
-
-        private static Double doubleOrNull(ResultSet rs, String column) throws SQLException {
-            double value = rs.getDouble(column);
-            return rs.wasNull() ? null : value;
-        }
-
-        private static Integer integerOrNull(ResultSet rs, String column) throws SQLException {
-            int value = rs.getInt(column);
-            return rs.wasNull() ? null : value;
-        }
     }
 
     private record SqlFilter(String clause, List<Object> args) {

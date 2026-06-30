@@ -41,7 +41,13 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         MonitorRepository repository = mock(MonitorRepository.class);
         AtomicReference<String> capturedSql = new AtomicReference<>();
         AtomicReference<Object[]> capturedArgs = new AtomicReference<>();
-        when(repository.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenReturn(0);
+        when(repository.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = Arrays.copyOfRange(invocation.getArguments(), 2, invocation.getArguments().length);
+            if (args.length > 0 && "translator_chunk".equals(args[0])) {
+                return 1;
+            }
+            return 0;
+        });
         when(repository.query(anyString(), any(RowMapper.class), any(Object[].class))).thenAnswer(invocation -> {
             capturedSql.set(invocation.getArgument(0));
             capturedArgs.set(Arrays.copyOfRange(invocation.getArguments(), 2, invocation.getArguments().length));
@@ -56,6 +62,8 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         assertThat(sql).doesNotContain("__");
         assertThat(normalizedSql).contains("FROM asr_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("FROM translator_segment WHERE task_id = ?");
+        assertThat(normalizedSql).contains("FROM `translator_chunk` ch");
+        assertThat(normalizedSql).doesNotContain("FROM `translator-chunk` ch");
         assertThat(normalizedSql).contains("ch.task_id = ? AND ch.row_role = 'normal'");
         assertThat(normalizedSql).contains("FROM speaker_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("WHERE t.id = ?");

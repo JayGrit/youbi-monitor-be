@@ -1,11 +1,11 @@
 package com.youbi.monitor.dto;
 
-import com.youbi.monitor.model.TaskMonitorSummary;
+import com.youbi.monitor.model.TaskMonitorItem;
 import java.time.LocalDateTime;
 import java.util.List;
 
 public record MonitorResponse(
-        List<TaskMonitorSummary> tasks,
+        List<TaskMonitorItem> tasks,
         LocalDateTime serverTime,
         int page,
         int pageSize,
