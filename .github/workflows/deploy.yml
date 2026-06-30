@@ -88,28 +88,10 @@ jobs:
             exit 1
           fi
 
-          DOUYIN_CDP_URL=""
-          if curl -fsS http://127.0.0.1:9333/json/version >/tmp/douyin-cdp-version.json 2>/dev/null; then
-            DOUYIN_CDP_URL="$(python3 -c 'import json,sys; print(json.load(open("/tmp/douyin-cdp-version.json")).get("webSocketDebuggerUrl", ""))')"
-          fi
           DOCKER_ENV_ARGS=()
-          if [ -n "${DOUYIN_CDP_URL}" ]; then
-            DOCKER_ENV_ARGS+=(-e "YDBI_DOUYIN_CDP_URL=${DOUYIN_CDP_URL}")
-            echo "Douyin CDP URL detected; monitor-be will connect to existing Chrome."
-          else
-            echo "Douyin CDP URL not detected; monitor-be will use storage-state mode."
-          fi
           DOCKER_ENV_ARGS+=(
             -e "YDBI_MONITOR_UPLOAD_WORK_DIR=/work/monitor-be/uploads"
-            -e "YDBI_DOUYIN_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js"
-            -e "YDBI_XHS_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js"
-            -e "YDBI_BILIBILI_PLAYWRIGHT_STEALTH_SCRIPT_PATH=/opt/youbi/playwright/stealth.min.js"
-            -e "YDBI_DOUYIN_BROWSER_UPLOAD_WORK_DIR=/hoshuuch/YouBi/workfolder/monitor-be/uploads"
-            -e "YDBI_BILIBILI_PLAYWRIGHT_BROWSER_CHANNEL=chrome"
-            -e "YDBI_BILIBILI_PLAYWRIGHT_HEADLESS=true"
-            -e "YDBI_BILIBILI_PLAYWRIGHT_BROWSER_UPLOAD_WORK_DIR=/hoshuuch/YouBi/workfolder/monitor-be/uploads"
           )
-          echo "Bilibili Playwright will launch system Chrome in headless mode."
 
           docker rm -f monitor-be || true
           docker run -d \
@@ -122,7 +104,7 @@ jobs:
 
           MONITOR_HEALTHY=false
           for attempt in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:8200/health >/dev/null 2>&1; then
+            if curl -fsS http://127.0.0.1:8200/actuator/health >/dev/null 2>&1; then
               MONITOR_HEALTHY=true
               break
             fi

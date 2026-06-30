@@ -2,9 +2,9 @@
 
 Spring Boot 3 / Java 17 backend for the YouBi video generation monitor.
 
-## Browser uploads
+## Upload execution
 
-Upload execution and Playwright automation have been removed from monitor-be. Operator is the only active browser execution service.
+monitor-be only exposes monitoring and management APIs. Upload execution is handled outside this service.
 
 Database-backed account overview and configuration APIs remain active.
 
