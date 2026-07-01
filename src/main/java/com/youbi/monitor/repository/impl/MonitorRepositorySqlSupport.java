@@ -40,6 +40,7 @@ abstract class MonitorRepositorySqlSupport {
             "speaker_segment",
             "translator_segment",
             "translator_api_task",
+            "translator_jobs",
             "whisper_word_timestamp",
             "asr_segment"
     );

@@ -292,7 +292,7 @@ public class MonitorService {
                 addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_index, word_index, id");
             }
             case "translator" -> {
-                addLimitedTable(tables, "translator_api_task", taskId, "task_id", "id");
+                addLimitedTable(tables, translatorJobTable(), taskId, "task_id", "id");
                 addLimitedTable(tables, translatorChunkTable(), taskId, "task_id", "chunk_index, row_order, id");
                 addLimitedTable(tables, "translator_segment", taskId, "task_id", "item_index");
                 addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
@@ -358,6 +358,16 @@ public class MonitorService {
         }
         if (taskQueryRepositoryService.tableExists("translator-chunk")) {
             return "translator-chunk";
+        }
+        return null;
+    }
+
+    private String translatorJobTable() {
+        if (taskQueryRepositoryService.tableExists("translator_api_task")) {
+            return "translator_api_task";
+        }
+        if (taskQueryRepositoryService.tableExists("translator_jobs")) {
+            return "translator_jobs";
         }
         return null;
     }

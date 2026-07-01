@@ -191,12 +191,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               GROUP BY task_id
             ) ts ON ts.task_id = t.id
             __TRANSLATOR_CHUNK_JOIN__
-            LEFT JOIN (
-              SELECT task_id, COUNT(DISTINCT item_index) translator_failed_count
-              FROM translator_api_task
-              WHERE __TRANSLATOR_FAILURE_TASK_FILTER__ status = 'failed' AND request_key LIKE 'chunk:%'
-              GROUP BY task_id
-            ) tf ON tf.task_id = t.id
+            __TRANSLATOR_FAILURE_JOIN__
             LEFT JOIN (
               SELECT
                 task_id,
@@ -465,7 +460,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         if (translatorChunkTable() != null) {
             args.add(taskId);
         }
-        args.add(taskId); // translator_api_task
+        if (translatorJobTable() != null) {
+            args.add(taskId);
+        }
         args.add(taskId); // speaker_segment
         args.add(taskId);
         args.add(1);
@@ -504,7 +501,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         List<StageNode> enriched = new ArrayList<>(nodes.size());
         for (StageNode node : nodes) {
             if ("translator".equals(node.key())) {
-                enriched.add(withErrors(node, translatorErrors(taskId), errorCount("translator_api_task", taskId)));
+                String translatorJobTable = translatorJobTable();
+                enriched.add(withErrors(node, translatorErrors(taskId, translatorJobTable), errorCount(translatorJobTable, taskId)));
             } else if ("speaker".equals(node.key())) {
                 enriched.add(withErrors(node, speakerErrors(taskId), errorCount("speaker_segment", taskId)));
             } else {
@@ -514,14 +512,18 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return enriched;
     }
 
-    private List<StageError> translatorErrors(String taskId) {
+    private List<StageError> translatorErrors(String taskId, String table) {
+        if (table == null) {
+            return List.of();
+        }
         return repository.query("""
                 SELECT item_index, COALESCE(NULLIF(error_message, ''), status) message
-                FROM translator_api_task
+                FROM %s
                 WHERE task_id = ? AND status = 'failed'
                 ORDER BY id DESC
                 LIMIT 20
-                """, (rs, rowNum) -> new StageError(integerOrNull(rs, "item_index"), rs.getString("message")), taskId);
+                """.formatted(quotedIdentifier(table)),
+                (rs, rowNum) -> new StageError(integerOrNull(rs, "item_index"), rs.getString("message")), taskId);
     }
 
     private List<StageError> speakerErrors(String taskId) {
@@ -535,6 +537,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     private int errorCount(String table, String taskId) {
+        if (table == null || !tableExists(table)) {
+            return 0;
+        }
         Integer count = repository.queryForObject(
                 "SELECT COUNT(*) FROM " + quotedIdentifier(table) + " WHERE task_id = ? AND status = 'failed'",
                 Integer.class,
@@ -577,10 +582,10 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private String progressSql(String template, SqlFilter filter) {
         return applyCapabilities(template)
                 .replace("__TRANSLATOR_CHUNK_JOIN__", translatorChunkJoin())
+                .replace("__TRANSLATOR_FAILURE_JOIN__", translatorFailureJoin())
                 .replace("__ASR_TASK_FILTER__", "WHERE task_id = ?")
                 .replace("__TRANSLATOR_SEGMENT_TASK_FILTER__", "WHERE task_id = ?")
                 .replace("__TRANSLATOR_CHUNK_TASK_FILTER__", "ch.task_id = ? AND")
-                .replace("__TRANSLATOR_FAILURE_TASK_FILTER__", "task_id = ? AND")
                 .replace("__SPEAKER_SEGMENT_TASK_FILTER__", "WHERE task_id = ?")
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", "");
@@ -672,6 +677,36 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             return "translator-chunk";
         }
         return null;
+    }
+
+    private String translatorJobTable() {
+        if (tableExists("translator_api_task")) {
+            return "translator_api_task";
+        }
+        if (tableExists("translator_jobs")) {
+            return "translator_jobs";
+        }
+        return null;
+    }
+
+    private String translatorFailureJoin() {
+        String table = translatorJobTable();
+        if (table == null) {
+            return """
+                    LEFT JOIN (
+                      SELECT NULL task_id, NULL translator_failed_count
+                      WHERE FALSE
+                    ) tf ON tf.task_id = t.id
+                    """;
+        }
+        return """
+                LEFT JOIN (
+                  SELECT task_id, COUNT(DISTINCT item_index) translator_failed_count
+                  FROM %s
+                  WHERE task_id = ? AND status = 'failed' AND request_key LIKE 'chunk:%%'
+                  GROUP BY task_id
+                ) tf ON tf.task_id = t.id
+                """.formatted(quotedIdentifier(table));
     }
 
     private static String monitorOrderBy(String sort) {

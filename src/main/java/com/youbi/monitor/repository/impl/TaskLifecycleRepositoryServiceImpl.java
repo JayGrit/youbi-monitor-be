@@ -113,16 +113,17 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             }
         }
 
-        if (tableExists("translator_api_task")) {
-            ensureOperatorColumn("translator_api_task");
+        String translatorJobTable = translatorJobTable();
+        if (translatorJobTable != null) {
+            ensureOperatorColumn(translatorJobTable);
             stoppedStages += repository.update("""
-                    UPDATE translator_api_task
+                    UPDATE %s
                     SET status = 'failed',
                         completed_at = NOW(),
                         error_message = ?,
                         `operator` = NULL
                     WHERE task_id = ? AND status IN ('pending', 'running')
-                    """, message, taskId);
+                    """.formatted(quotedIdentifier(translatorJobTable)), message, taskId);
         }
         if (tableExists("speaker_segment")) {
             ensureOperatorColumn("speaker_segment");
@@ -209,16 +210,17 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private boolean hasExhaustedTranslatorApiTasks(String taskId) {
-        if (!tableExists("translator_api_task")) {
+        String translatorJobTable = translatorJobTable();
+        if (translatorJobTable == null) {
             return false;
         }
         Integer count = repository.queryForObject("""
                 SELECT COUNT(*)
-                FROM translator_api_task
+                FROM %s
                 WHERE task_id = ?
                   AND status = 'failed'
                   AND attempt_count >= max_attempts
-                """, Integer.class, taskId);
+                """.formatted(quotedIdentifier(translatorJobTable)), Integer.class, taskId);
         return count != null && count > 0;
     }
 
@@ -265,10 +267,11 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
 
     private void resetStageChildren(String taskId, RouteNode failedNode) {
         if ("translator".equals(failedNode.stage())) {
-            if (tableExists("translator_api_task")) {
-                ensureOperatorColumn("translator_api_task");
+            String translatorJobTable = translatorJobTable();
+            if (translatorJobTable != null) {
+                ensureOperatorColumn(translatorJobTable);
                 repository.update("""
-                        UPDATE translator_api_task
+                        UPDATE %s
                         SET status = 'pending',
                             attempt_count = 0,
                             started_at = NULL,
@@ -278,7 +281,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                             next_run_at = NOW(),
                             `operator` = NULL
                         WHERE task_id = ? AND status IN ('failed', 'running')
-                        """, taskId);
+                        """.formatted(quotedIdentifier(translatorJobTable)), taskId);
             }
             return;
         }
@@ -362,12 +365,13 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
     }
 
     private void resetExhaustedTranslatorApiTasks(String taskId) {
-        if (!tableExists("translator_api_task")) {
+        String translatorJobTable = translatorJobTable();
+        if (translatorJobTable == null) {
             return;
         }
-        ensureOperatorColumn("translator_api_task");
+        ensureOperatorColumn(translatorJobTable);
         repository.update("""
-                UPDATE translator_api_task
+                UPDATE %s
                 SET status = 'pending',
                     attempt_count = 0,
                     started_at = NULL,
@@ -379,7 +383,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 WHERE task_id = ?
                   AND status = 'failed'
                   AND attempt_count >= max_attempts
-                """, taskId);
+                """.formatted(quotedIdentifier(translatorJobTable)), taskId);
     }
 
     @Override
@@ -397,7 +401,12 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                 return true;
             }
         }
-        for (String childTable : List.of("translator_api_task", "speaker_segment", "asseter_jobs")) {
+        List<String> childTables = new ArrayList<>();
+        String translatorJobTable = translatorJobTable();
+        if (translatorJobTable != null) childTables.add(translatorJobTable);
+        childTables.add("speaker_segment");
+        childTables.add("asseter_jobs");
+        for (String childTable : childTables) {
             if (!tableExists(childTable)) continue;
             Integer count = repository.queryForObject(
                     "SELECT COUNT(*) FROM " + quotedIdentifier(childTable) + " WHERE task_id = ? AND status = 'running'",
@@ -405,6 +414,16 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
             if (count != null && count > 0) return true;
         }
         return false;
+    }
+
+    private String translatorJobTable() {
+        if (tableExists("translator_api_task")) {
+            return "translator_api_task";
+        }
+        if (tableExists("translator_jobs")) {
+            return "translator_jobs";
+        }
+        return null;
     }
 
     @Override

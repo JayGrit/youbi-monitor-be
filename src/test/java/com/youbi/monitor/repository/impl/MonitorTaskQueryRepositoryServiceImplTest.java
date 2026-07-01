@@ -43,7 +43,7 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         AtomicReference<Object[]> capturedArgs = new AtomicReference<>();
         when(repository.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenAnswer(invocation -> {
             Object[] args = Arrays.copyOfRange(invocation.getArguments(), 2, invocation.getArguments().length);
-            if (args.length > 0 && "translator_chunk".equals(args[0])) {
+            if (args.length > 0 && ("translator_chunk".equals(args[0]) || "translator_api_task".equals(args[0]))) {
                 return 1;
             }
             return 0;
@@ -71,6 +71,36 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         assertThat(normalizedSql).contains("us.youtube_upload_status");
         assertThat(normalizedSql).contains("us.x_upload_status");
         assertThat(normalizedSql).contains("SUM(CASE WHEN COALESCE(NULLIF(status, ''), 'no_need') <> 'no_need' THEN 1 ELSE 0 END) uploader_total_count");
+        assertThat(capturedArgs.get()).containsExactly(
+                "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", 1, 0
+        );
+    }
+
+    @Test
+    void progressFallsBackToTranslatorJobsWhenApiTaskTableDoesNotExist() {
+        MonitorRepository repository = mock(MonitorRepository.class);
+        AtomicReference<String> capturedSql = new AtomicReference<>();
+        AtomicReference<Object[]> capturedArgs = new AtomicReference<>();
+        when(repository.queryForObject(anyString(), eq(Integer.class), any(Object[].class))).thenAnswer(invocation -> {
+            Object[] args = Arrays.copyOfRange(invocation.getArguments(), 2, invocation.getArguments().length);
+            if (args.length > 0 && ("translator_chunk".equals(args[0]) || "translator_jobs".equals(args[0]))) {
+                return 1;
+            }
+            return 0;
+        });
+        when(repository.query(anyString(), any(RowMapper.class), any(Object[].class))).thenAnswer(invocation -> {
+            capturedSql.set(invocation.getArgument(0));
+            capturedArgs.set(Arrays.copyOfRange(invocation.getArguments(), 2, invocation.getArguments().length));
+            return List.of();
+        });
+
+        MonitorTaskQueryRepositoryServiceImpl service = new MonitorTaskQueryRepositoryServiceImpl(repository);
+        assertThat(service.findTaskProgress("task-1", LocalDateTime.now())).isNull();
+
+        String normalizedSql = capturedSql.get().replaceAll("\\s+", " ");
+        assertThat(normalizedSql).contains("FROM `translator_jobs`");
+        assertThat(normalizedSql).doesNotContain("FROM translator_api_task");
+        assertThat(normalizedSql).contains("WHERE task_id = ? AND status = 'failed' AND request_key LIKE 'chunk:%'");
         assertThat(capturedArgs.get()).containsExactly(
                 "task-1", "task-1", "task-1", "task-1", "task-1", "task-1", 1, 0
         );
