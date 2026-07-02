@@ -2,9 +2,24 @@ package com.youbi.monitor.service;
 
 import com.youbi.monitor.model.DiagnosticArtifactRecord;
 import com.youbi.monitor.repository.IDiagnosticArtifactRepositoryService;
+import io.minio.GetObjectArgs;
+import io.minio.GetObjectResponse;
+import io.minio.MinioClient;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
+import java.net.URI;
+import java.net.URLDecoder;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -19,9 +34,21 @@ public class OperatorDiagnosticsService {
     private static final DateTimeFormatter SQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final IDiagnosticArtifactRepositoryService repositoryService;
+    private final MinioClient minioClient;
+    private final String minioEndpointHost;
 
-    public OperatorDiagnosticsService(IDiagnosticArtifactRepositoryService repositoryService) {
+    public OperatorDiagnosticsService(
+            IDiagnosticArtifactRepositoryService repositoryService,
+            @Value("${youbi.minio.endpoint}") String minioEndpoint,
+            @Value("${youbi.minio.access-key}") String minioAccessKey,
+            @Value("${youbi.minio.secret-key}") String minioSecretKey
+    ) {
         this.repositoryService = repositoryService;
+        this.minioClient = MinioClient.builder()
+                .endpoint(minioEndpoint)
+                .credentials(minioAccessKey, minioSecretKey)
+                .build();
+        this.minioEndpointHost = endpointHost(minioEndpoint);
     }
 
     public Map<String, Object> listTasks(MultiValueMap<String, String> query) {
@@ -95,6 +122,37 @@ public class OperatorDiagnosticsService {
         );
     }
 
+    public ResponseEntity<StreamingResponseBody> getDiagnosticArtifact(long id, String kind) {
+        DiagnosticArtifactRecord row = repositoryService.getOperatorDiagnostic(id);
+        if (row == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "diagnostic artifact not found");
+        }
+        String url = switch (text(kind)) {
+            case "screenshot" -> row.screenshotUrl();
+            case "html" -> row.htmlUrl();
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "unsupported artifact kind");
+        };
+        MinioObjectRef objectRef = minioObjectRef(url);
+        if (objectRef == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "diagnostic artifact url is empty or unsupported");
+        }
+        String filename = filename(objectRef.objectName());
+        StreamingResponseBody body = output -> {
+            try (GetObjectResponse input = minioClient.getObject(GetObjectArgs.builder()
+                    .bucket(objectRef.bucket())
+                    .object(objectRef.objectName())
+                    .build())) {
+                input.transferTo(output);
+            } catch (Exception exception) {
+                throw exception instanceof IOException ioException ? ioException : new IOException("Failed to read diagnostic artifact", exception);
+            }
+        };
+        return ResponseEntity.ok()
+                .contentType(mediaType(filename, kind))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline().filename(filename, StandardCharsets.UTF_8).build().toString())
+                .body(body);
+    }
+
     private Map<String, Object> normalizeExecution(Map<String, Object> row) {
         Map<String, Object> result = new LinkedHashMap<>();
         String opId = text(row.get("opId"));
@@ -164,8 +222,12 @@ public class OperatorDiagnosticsService {
         result.put("step_name", row.stepName());
         result.put("screenshotUrl", row.screenshotUrl());
         result.put("screenshot_url", row.screenshotUrl());
+        result.put("screenshotProxyPath", "operator/diagnostics/" + row.id() + "/screenshot");
+        result.put("screenshot_proxy_path", "operator/diagnostics/" + row.id() + "/screenshot");
         result.put("htmlUrl", row.htmlUrl());
         result.put("html_url", row.htmlUrl());
+        result.put("htmlProxyPath", "operator/diagnostics/" + row.id() + "/html");
+        result.put("html_proxy_path", "operator/diagnostics/" + row.id() + "/html");
         result.put("screenshotSizeBytes", row.screenshotSizeBytes());
         result.put("htmlSizeBytes", row.htmlSizeBytes());
         result.put("screenshotWidth", row.screenshotWidth());
@@ -229,6 +291,70 @@ public class OperatorDiagnosticsService {
         return value == null ? "" : String.valueOf(value).trim();
     }
 
+    private MinioObjectRef minioObjectRef(String url) {
+        String text = text(url);
+        if (text.isBlank()) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(text);
+            String host = endpointHost(uri);
+            if (!minioEndpointHost.isBlank() && !minioEndpointHost.equals(host)) {
+                return null;
+            }
+            String path = uri.getRawPath() == null ? "" : uri.getRawPath().replaceFirst("^/+", "");
+            String[] parts = path.split("/", 2);
+            if (parts.length < 2 || parts[0].isBlank() || parts[1].isBlank()) {
+                return null;
+            }
+            return new MinioObjectRef(decode(parts[0]), decode(parts[1]));
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    private String endpointHost(String endpoint) {
+        try {
+            return endpointHost(URI.create(endpoint));
+        } catch (Exception exception) {
+            return "";
+        }
+    }
+
+    private String endpointHost(URI uri) {
+        String host = text(uri.getHost()).toLowerCase();
+        int port = uri.getPort();
+        return port > 0 ? host + ":" + port : host;
+    }
+
+    private String decode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    private String filename(String objectName) {
+        String text = text(objectName);
+        int slash = text.lastIndexOf('/');
+        String filename = slash >= 0 ? text.substring(slash + 1) : text;
+        return filename.isBlank() ? "diagnostic-artifact" : filename;
+    }
+
+    private MediaType mediaType(String filename, String kind) {
+        String lower = text(filename).toLowerCase();
+        if ("html".equals(text(kind)) || lower.endsWith(".html") || lower.endsWith(".htm")) {
+            return MediaType.TEXT_HTML;
+        }
+        if (lower.endsWith(".png")) {
+            return MediaType.IMAGE_PNG;
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return MediaType.IMAGE_JPEG;
+        }
+        if (lower.endsWith(".webp")) {
+            return MediaType.parseMediaType("image/webp");
+        }
+        return MediaType.APPLICATION_OCTET_STREAM;
+    }
+
     private long number(Object value) {
         if (value instanceof Number number) {
             return number.longValue();
@@ -238,5 +364,8 @@ public class OperatorDiagnosticsService {
         } catch (Exception exception) {
             return 0;
         }
+    }
+
+    private record MinioObjectRef(String bucket, String objectName) {
     }
 }

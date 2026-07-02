@@ -19,4 +19,6 @@ public interface IDiagnosticArtifactRepositoryService {
     long countOperatorDiagnostics(String opId);
 
     List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId, int offset, int limit);
+
+    DiagnosticArtifactRecord getOperatorDiagnostic(long id);
 }

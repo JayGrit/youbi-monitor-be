@@ -2,11 +2,13 @@ package com.youbi.monitor.controller;
 
 import com.youbi.monitor.service.OperatorDiagnosticsService;
 import org.springframework.util.MultiValueMap;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import java.util.Map;
 
@@ -42,5 +44,11 @@ public class OperatorDiagnosticsController {
     @GetMapping("/tasks/{opId}/diagnostics")
     public Map<String, Object> diagnostics(@PathVariable String opId, @RequestParam MultiValueMap<String, String> query) {
         return operatorDiagnosticsService.getDiagnostics(opId, query);
+    }
+
+    // 通过后端凭证读取私有 MinIO 诊断附件，避免前端直连私有 bucket。
+    @GetMapping("/diagnostics/{id}/{kind}")
+    public ResponseEntity<StreamingResponseBody> diagnosticArtifact(@PathVariable long id, @PathVariable String kind) {
+        return operatorDiagnosticsService.getDiagnosticArtifact(id, kind);
     }
 }

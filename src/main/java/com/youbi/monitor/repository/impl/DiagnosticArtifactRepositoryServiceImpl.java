@@ -169,6 +169,17 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 """, this::mapDiagnostic, text(opId), Math.max(1, limit), Math.max(0, offset));
     }
 
+    @Override
+    public DiagnosticArtifactRecord getOperatorDiagnostic(long id) {
+        List<DiagnosticArtifactRecord> rows = repository.query("""
+                SELECT *
+                FROM operator_diagnostic
+                WHERE id = ?
+                LIMIT 1
+                """, this::mapDiagnostic, id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
     private QueryParts executionWhere(Map<String, String> filters) {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
