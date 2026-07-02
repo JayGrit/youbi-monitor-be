@@ -4,8 +4,9 @@ ARG RUNTIME_IMAGE=eclipse-temurin:17-jre
 FROM ${MAVEN_IMAGE} AS builder
 WORKDIR /app
 COPY pom.xml .
+RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests dependency:go-offline
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2 mvn package -DskipTests -q
+RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests package
 
 FROM ${RUNTIME_IMAGE}
 WORKDIR /app

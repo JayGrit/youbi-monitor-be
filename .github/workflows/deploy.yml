@@ -93,6 +93,31 @@ jobs:
             -e "YDBI_MONITOR_UPLOAD_WORK_DIR=/work/monitor-be/uploads"
           )
 
+          docker rm -f monitor-be-candidate || true
+          docker run -d \
+            --name monitor-be-candidate \
+            --network host \
+            --restart no \
+            -v /hoshuuch/YouBi/workfolder:/work \
+            -e "SERVER_PORT=18200" \
+            "${DOCKER_ENV_ARGS[@]}" \
+            "${RELEASE_IMAGE}"
+
+          CANDIDATE_HEALTHY=false
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18200/actuator/health >/dev/null 2>&1; then
+              CANDIDATE_HEALTHY=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "${CANDIDATE_HEALTHY}" != "true" ]; then
+            docker logs monitor-be-candidate --tail 100 || true
+            docker rm -f monitor-be-candidate || true
+            exit 1
+          fi
+          docker rm -f monitor-be-candidate
+
           docker rm -f monitor-be || true
           docker run -d \
             --name monitor-be \
@@ -111,7 +136,18 @@ jobs:
             sleep 2
           done
           if [ "${MONITOR_HEALTHY}" != "true" ]; then
-            docker logs monitor-be --tail 100
+            docker logs monitor-be --tail 100 || true
+            docker rm -f monitor-be || true
+            if [ -n "${OLD_MONITOR_BE_IMAGE}" ]; then
+              echo "Rolling monitor-be back to ${OLD_MONITOR_BE_IMAGE}"
+              docker run -d \
+                --name monitor-be \
+                --network host \
+                --restart unless-stopped \
+                -v /hoshuuch/YouBi/workfolder:/work \
+                "${DOCKER_ENV_ARGS[@]}" \
+                "${OLD_MONITOR_BE_IMAGE}" || true
+            fi
             exit 1
           fi
 
@@ -137,13 +173,6 @@ jobs:
               || echo "Warning: docker buildx prune failed for ${builder_name}; deploy already completed."
           }
 
-          prune_buildx_builder monitor-be-builder 2gb
-          prune_buildx_builder default 5gb
-          for BUILDER_NAME in $(docker buildx ls | awk 'NR > 1 && $1 !~ /^\\_/ {gsub(/\*/, "", $1); print $1}' | sort -u); do
-            case "${BUILDER_NAME}" in
-              default|monitor-be-builder) continue ;;
-              *) prune_buildx_builder "${BUILDER_NAME}" 2gb ;;
-            esac
-          done
+          prune_buildx_builder monitor-be-builder 3gb
           docker system df || true
           EOF

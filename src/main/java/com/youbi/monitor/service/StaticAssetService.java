@@ -4,6 +4,7 @@ import com.youbi.monitor.dto.StaticAssetCreateRequest;
 import com.youbi.monitor.repository.SqlRepository;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -31,7 +32,7 @@ public class StaticAssetService {
     private final String minioBucket;
 
     public StaticAssetService(
-            SqlRepository repository,
+            @Qualifier("sqlRepository") SqlRepository repository,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
