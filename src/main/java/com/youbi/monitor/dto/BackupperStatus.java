@@ -14,9 +14,13 @@ public record BackupperStatus(
         BigDecimal usedPercent,
         String statusText,
         Long minioBytes,
+        Long minioYdbiBytes,
+        Long minioDiagnosticsBytes,
         Long dockerImageBytes,
         Long dockerDanglingImageBytes,
         Long dockerBuildCacheBytes,
+        Long workfolderBytes,
+        Long mysqlBytes,
         LocalDateTime createdAt
 ) {
 }
