@@ -57,10 +57,22 @@ public class AccountOverviewService {
         ensureQuietTimeColumns();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
-        repository.query(accountSelectSql("") + """
+        repository.query(accountBaseSelectSql("") + """
                 ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.account_key
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
+        );
+        return result;
+    }
+
+    public Map<String, List<Map<String, Object>>> overviewStats() {
+        ensureOperatorLoginstateTables();
+        Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
+        PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
+        repository.query(accountStatsSelectSql("") + """
+                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.account_key
+                """,
+                rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccountStats(rs))
         );
         return result;
     }
@@ -163,7 +175,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedAccountKey
@@ -201,7 +213,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedAccountKey
@@ -237,7 +249,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedAccountKey
@@ -248,7 +260,7 @@ public class AccountOverviewService {
         return rows.get(0);
     }
 
-    private String accountSelectSql(String extraWhere) {
+    private String accountBaseSelectSql(String extraWhere) {
         String downloaderMaxStagedCountSql = columnExists("uploader_account", "downloader_max_staged_count")
                 ? "COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count"
                 : "5 downloader_max_staged_count";
@@ -268,6 +280,39 @@ public class AccountOverviewService {
                        %s,
                        %s,
                        %s,
+                       COALESCE(ua.is_enabled, 1) AS is_enabled,
+                       COALESCE(ua.is_available, ol.available) AS is_available,
+                       NULL AS mid,
+                       NULL AS uname,
+                       NULL AS user_id,
+                       NULL AS nickname,
+                       ol.storage_state_json AS storage_json,
+                       ol.updated_at AS cookie_updated_at,
+                       phone_profile.display_name,
+                       phone_profile.avatar_url
+                FROM operator_loginstate ol
+                LEFT JOIN uploader_account ua
+                       ON ua.platform = ol.platform
+                      AND ua.account_key = ol.account_key
+                      AND ua.is_deprecated = 0
+                LEFT JOIN (
+                    SELECT platform, account_id,
+                           MAX(display_name) AS display_name,
+                           MAX(avatar_url) AS avatar_url
+                    FROM uploader_phone_account
+                    GROUP BY platform, account_id
+                ) phone_profile
+                       ON phone_profile.platform = ol.platform
+                      AND phone_profile.account_id = ol.id
+                WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
+                %s
+                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, extraWhere == null ? "" : extraWhere);
+    }
+
+    private String accountStatsSelectSql(String extraWhere) {
+        return """
+                SELECT ol.platform,
+                       ol.account_key,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
@@ -341,34 +386,11 @@ public class AccountOverviewService {
                          WHERE upload_submission.platform = ol.platform
                            AND upload_submission.account_key = ol.account_key
                            AND upload_submission.status = 'failed'
-                       ) AS failed_upload_count,
-                       COALESCE(ua.is_enabled, 1) AS is_enabled,
-                       COALESCE(ua.is_available, ol.available) AS is_available,
-                       NULL AS mid,
-                       NULL AS uname,
-                       NULL AS user_id,
-                       NULL AS nickname,
-                       ol.storage_state_json AS storage_json,
-                       ol.updated_at AS cookie_updated_at,
-                       phone_profile.display_name,
-                       phone_profile.avatar_url
+                       ) AS failed_upload_count
                 FROM operator_loginstate ol
-                LEFT JOIN uploader_account ua
-                       ON ua.platform = ol.platform
-                      AND ua.account_key = ol.account_key
-                      AND ua.is_deprecated = 0
-                LEFT JOIN (
-                    SELECT platform, account_id,
-                           MAX(display_name) AS display_name,
-                           MAX(avatar_url) AS avatar_url
-                    FROM uploader_phone_account
-                    GROUP BY platform, account_id
-                ) phone_profile
-                       ON phone_profile.platform = ol.platform
-                      AND phone_profile.account_id = ol.id
                 WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
-                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, extraWhere == null ? "" : extraWhere);
+                """.formatted(extraWhere == null ? "" : extraWhere);
     }
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
@@ -397,6 +419,21 @@ public class AccountOverviewService {
         row.put("uploadQuietStartTime", toLocalTime(rs.getTime("upload_quiet_start_time")));
         row.put("uploadQuietEndTime", toLocalTime(rs.getTime("upload_quiet_end_time")));
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
+        row.put("statsLoading", true);
+        row.put("enabled", rs.getBoolean("is_enabled"));
+        row.put("available", nullableBoolean(rs, "is_available"));
+        row.put("valid", null);
+        row.put("message", cookieExists ? "已保存" : "未登录");
+        row.put("raw", Map.of());
+        row.put("displayName", rs.getString("display_name"));
+        row.put("avatarUrl", rs.getString("avatar_url"));
+        return row;
+    }
+
+    private Map<String, Object> mapAccountStats(ResultSet rs) throws java.sql.SQLException {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("platform", rs.getString("platform"));
+        row.put("accountKey", rs.getString("account_key"));
         row.put("downloaderPendingCount", rs.getInt("downloader_pending_count"));
         row.put("stagedRunningCount", rs.getInt("staged_running_count"));
         row.put("stagedFailedCount", rs.getInt("staged_failed_count"));
@@ -405,13 +442,7 @@ public class AccountOverviewService {
         row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
         row.put("uploadRunningCount", rs.getInt("upload_running_count"));
         row.put("failedUploadCount", rs.getInt("failed_upload_count"));
-        row.put("enabled", rs.getBoolean("is_enabled"));
-        row.put("available", nullableBoolean(rs, "is_available"));
-        row.put("valid", null);
-        row.put("message", cookieExists ? "已保存" : "未登录");
-        row.put("raw", Map.of());
-        row.put("displayName", rs.getString("display_name"));
-        row.put("avatarUrl", rs.getString("avatar_url"));
+        row.put("statsLoading", false);
         return row;
     }
 
@@ -614,7 +645,7 @@ public class AccountOverviewService {
 
     private Map<String, Object> findAccount(String platform, String accountKey) {
         List<Map<String, Object>> rows = repository.query(
-                accountSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 platform,
                 accountKey

@@ -38,6 +38,12 @@ public class AccountOverviewController {
         return accountOverviewService.overview();
     }
 
+    // 查询各平台账号的任务统计信息。
+    @GetMapping("/api/accounts/overview/stats")
+    public Map<String, List<Map<String, Object>>> overviewStats() {
+        return accountOverviewService.overviewStats();
+    }
+
     // 查询当前支持的账号平台类型。
     @GetMapping("/api/accounts/types")
     public Map<String, List<String>> types() {
