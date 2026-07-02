@@ -6,8 +6,8 @@ spring:
     name: monitor-be
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 21MB
+      max-file-size: 200MB
+      max-request-size: 201MB
   datasource:
     url: jdbc:mysql://120.53.92.66:3306/youbi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: hoshuuch
