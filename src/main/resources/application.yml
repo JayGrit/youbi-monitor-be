@@ -27,6 +27,8 @@ youbi:
     read-timeout: ${YDBI_OPERATOR_READ_TIMEOUT:PT15S}
   distributor:
     base-url: ${YDBI_DISTRIBUTOR_BASE_URL:http://127.0.0.1:8210}
+  backupper:
+    base-url: ${YDBI_BACKUPPER_BASE_URL:http://127.0.0.1:8219}
   minio:
     endpoint: ${YDBI_MINIO_ENDPOINT:http://120.53.92.66:9000}
     access-key: ${YDBI_MINIO_ACCESS_KEY:minioadmin}
