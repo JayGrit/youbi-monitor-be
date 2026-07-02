@@ -285,6 +285,7 @@ public class MonitorService {
         if (!stageRow.isEmpty()) {
             tables.add(new TaskFlowDetail.TaskFlowTable(stageTable, List.of(stageRow), false));
         }
+        addLimitedTable(tables, "distributor_task_stages", taskId, "task_id", "stage_name, sub_stage");
         switch (stageKey) {
             case "downloader" -> addLimitedTable(tables, "downloader_detail", taskId, "task_id", "kind, id");
             case "whisper" -> {
@@ -297,12 +298,23 @@ public class MonitorService {
                 addLimitedTable(tables, "translator_segment", taskId, "task_id", "item_index");
                 addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
             }
-            case "speaker" -> addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
+            case "speaker" -> {
+                addLimitedTable(tables, "speaker_segment", taskId, "task_id", "item_index, id");
+                addLimitedTable(tables, "product_narration", taskId, "task_id", "id");
+                addLimitedTable(tables, "product_narration_sentence", taskId, "task_id", "line_index, id");
+            }
+            case "combiner" -> {
+                addLimitedTable(tables, "combiner_jobs", taskId, "task_id", "sub_stage, id");
+                addLimitedTable(tables, "combiner_job", taskId, "task_id", "sub_stage, id");
+                addLimitedTable(tables, "product_asmr", taskId, "task_id", "id");
+                addLimitedTable(tables, "product_blessing", taskId, "task_id", "id");
+            }
             case "publisher" -> {
                 addLimitedTable(tables, "publisher_jobs", taskId, "task_id", "job_order, id");
                 addLimitedTable(tables, "publisher_result", taskId, "task_id", "task_id");
                 addLimitedTable(tables, "product_narration", taskId, "task_id", "id");
                 addLimitedTable(tables, "product_narration_sentence", taskId, "task_id", "line_index, id");
+                addLimitedTable(tables, "product_blessing", taskId, "task_id", "id");
             }
             case "asseter" -> {
                 addLimitedTable(tables, "asseter_jobs", taskId, "task_id", "id");
