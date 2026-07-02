@@ -568,7 +568,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                   AND columns_info.TABLE_NAME <> 'operator_task'
                   AND tables_info.TABLE_TYPE = 'BASE TABLE'
                 ORDER BY CASE
-                    WHEN columns_info.TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'asr_segment') THEN 0
+                    WHEN columns_info.TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'whisper_asr_segment') THEN 0
                     WHEN columns_info.TABLE_NAME LIKE 'yd\\_%' THEN 1
                     ELSE 2
                   END,
@@ -589,7 +589,7 @@ public class TaskLifecycleRepositoryServiceImpl extends MonitorRepositorySqlSupp
                   AND COLUMN_NAME = 'task_id'
                   AND (TABLE_NAME LIKE 'yd\\_%' OR TABLE_NAME = 'downloader_submission')
                 ORDER BY CASE
-                    WHEN TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'asr_segment') THEN 0
+                    WHEN TABLE_NAME IN ('translator_api_task', 'speaker_segment', 'whisper_asr_segment') THEN 0
                     WHEN TABLE_NAME = 'downloader_submission' THEN 2
                     ELSE 1
                   END,

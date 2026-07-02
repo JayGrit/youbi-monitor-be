@@ -32,7 +32,7 @@ class MonitorTaskQueryRepositoryServiceImplTest {
 
         assertThat(capturedSql.get())
                 .contains("FROM task t", "LEFT JOIN video_info", "LEFT JOIN submitter_video")
-                .doesNotContain("asr_segment", "translator_segment", "translator_api_task", "speaker_segment")
+                .doesNotContain("whisper_asr_segment", "translator_segment", "translator_api_task", "speaker_segment")
                 .doesNotContain("LEFT JOIN downloader", "LEFT JOIN demucs", "LEFT JOIN whisper", "LEFT JOIN uploader");
     }
 
@@ -60,7 +60,7 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         String sql = capturedSql.get();
         String normalizedSql = sql.replaceAll("\\s+", " ");
         assertThat(sql).doesNotContain("__");
-        assertThat(normalizedSql).contains("FROM asr_segment WHERE task_id = ?");
+        assertThat(normalizedSql).contains("FROM whisper_asr_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("FROM translator_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("FROM `translator_chunk` ch");
         assertThat(normalizedSql).doesNotContain("FROM `translator-chunk` ch");

@@ -288,7 +288,7 @@ public class MonitorService {
         switch (stageKey) {
             case "downloader" -> addLimitedTable(tables, "downloader_detail", taskId, "task_id", "kind, id");
             case "whisper" -> {
-                addLimitedTable(tables, "asr_segment", taskId, "task_id", "item_index, id");
+                addLimitedTable(tables, "whisper_asr_segment", taskId, "task_id", "item_index, id");
                 addLimitedTable(tables, "whisper_word_timestamp", taskId, "task_id", "segment_index, word_index, id");
             }
             case "translator" -> {
@@ -306,7 +306,7 @@ public class MonitorService {
             }
             case "asseter" -> {
                 addLimitedTable(tables, "asseter_jobs", taskId, "task_id", "id");
-                addLimitedTable(tables, "assets", taskId, "task_id", "id");
+                addLimitedTable(tables, "asseter_static", taskId, "task_id", "id");
             }
             case "uploader" -> {
                 addLimitedTable(tables, "uploader", taskId, "task_id", "task_id");

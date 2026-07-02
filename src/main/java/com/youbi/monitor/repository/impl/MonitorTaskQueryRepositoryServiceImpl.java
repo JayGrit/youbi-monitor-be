@@ -180,7 +180,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
-              FROM asr_segment
+              FROM whisper_asr_segment
               __ASR_TASK_FILTER__
               GROUP BY task_id
             ) fa ON fa.task_id = t.id
@@ -455,7 +455,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     public TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now) {
         SqlFilter filter = new SqlFilter("WHERE t.id = ?", List.of(taskId));
         List<Object> args = new ArrayList<>();
-        args.add(taskId); // asr_segment
+        args.add(taskId); // whisper_asr_segment
         args.add(taskId); // translator_segment
         if (translatorChunkTable() != null) {
             args.add(taskId);

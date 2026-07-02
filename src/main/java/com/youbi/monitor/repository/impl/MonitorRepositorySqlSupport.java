@@ -42,7 +42,7 @@ abstract class MonitorRepositorySqlSupport {
             "translator_api_task",
             "translator_jobs",
             "whisper_word_timestamp",
-            "asr_segment"
+            "whisper_asr_segment"
     );
     protected static final Map<String, String> UPLOADER_TASK_TABLES = Map.of(
             "bilibili", "uploader_task",
