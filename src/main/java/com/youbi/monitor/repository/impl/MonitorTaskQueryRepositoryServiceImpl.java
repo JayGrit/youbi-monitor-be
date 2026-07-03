@@ -440,7 +440,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         String sql = monitorSql(MONITOR_SUMMARY_SQL, filter, sort)
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
-        return repository.query(sql, new TaskRowMapper(now), args.toArray());
+        List<TaskMonitorItem> rows = repository.query(sql, new TaskRowMapper(now), args.toArray());
+        return withRouteGraphs(rows, now);
     }
 
     @Override
