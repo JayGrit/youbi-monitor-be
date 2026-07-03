@@ -39,7 +39,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
                 "hasNativeSubtitleKnown", rs.getObject("has_native_subtitle") != null,
                 "hasNativeSubtitle", rs.getObject("has_native_subtitle") != null && rs.getBoolean("has_native_subtitle")
         ), taskId).stream().findFirst().orElse(Map.of());
-        String taskType = String.valueOf(profile.getOrDefault("taskType", ""));
+        String taskType = routeTaskType(String.valueOf(profile.getOrDefault("taskType", "")));
         if (taskType.isBlank() || !tableExists("distributor_type_stages")) {
             return legacyRouteGraph(stageNodes);
         }
@@ -82,6 +82,14 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
                 .filter(node -> routeNodeEnabled(taskType, hasBackgroundAudio, narrationInputMode, hasNativeSubtitleKnown, hasNativeSubtitle, node))
                 .map(RouteConfigNode::id)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+    }
+
+    private static String routeTaskType(String taskType) {
+        String normalized = text(taskType);
+        return switch (normalized) {
+            case "xb" -> "repost";
+            default -> normalized;
+        };
     }
 
     private List<RouteEdge> routeEdges(String taskType, List<RouteConfigNode> configured, Set<String> activeIds) {
