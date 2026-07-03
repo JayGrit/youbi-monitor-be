@@ -102,6 +102,8 @@ public class TaskRouteService {
 
     private static String label(String defaultLabel, String stage, String subStage) {
         if ("downloader".equals(stage) && "metadata".equals(subStage)) return "元数据下载";
+        if ("downloader".equals(stage) && "video".equals(subStage)) return "视频下载";
+        if ("downloader".equals(stage) && "audio".equals(subStage)) return "音频下载";
         if ("whisper".equals(stage) && "source_transcription".equals(subStage)) return "源语音识别";
         if ("publisher".equals(stage)) {
             return switch (subStage) {
