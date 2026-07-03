@@ -366,13 +366,13 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             }
         }
         Integer completedCount = jobSummary != null
-                ? jobSummary.completedCount()
+                ? Integer.valueOf(jobSummary.completedCount())
                 : (useBase && base != null ? base.completedCount() : null);
         Integer failedCount = jobSummary != null
-                ? jobSummary.failedCount()
+                ? Integer.valueOf(jobSummary.failedCount())
                 : (useBase && base != null ? base.failedCount() : null);
         Integer totalCount = jobSummary != null
-                ? jobSummary.totalCount()
+                ? Integer.valueOf(jobSummary.totalCount())
                 : (useBase && base != null ? base.totalCount() : null);
         return new TaskProgressRouteNode(
                 config.id(), config.stage(), config.subStage(), routeLabel(config.stage(), config.subStage()), config.order(), status,
@@ -426,8 +426,10 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             case "asseter:image_composition" -> "图片素材";
             case "asseter:audio_visualization" -> "音频素材";
             case "combiner:audio_merge" -> "音频合并";
+            case "combiner:audio_align" -> "音频对齐";
             case "combiner:video_render" -> "视频渲染";
             case "combiner:asmr" -> "ASMR 合成";
+            case "combiner:blessing_video" -> "祝福视频";
             default -> switch (stage) {
                 case "downloader" -> "下载";
                 case "publisher" -> "发布准备";
