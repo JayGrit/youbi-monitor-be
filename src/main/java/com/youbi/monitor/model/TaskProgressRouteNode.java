@@ -19,6 +19,7 @@ public record TaskProgressRouteNode(
         Double progressPercent,
         String errorMessage,
         String childErrorMessage,
+        JobSummary jobSummary,
         List<UploadPlatformStatus> platformStatuses,
         List<StageError> errors,
         int errorCount,

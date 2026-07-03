@@ -440,8 +440,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         String sql = monitorSql(MONITOR_SUMMARY_SQL, filter, sort)
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
                 .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
-        List<TaskMonitorItem> rows = repository.query(sql, new TaskRowMapper(now), args.toArray());
-        return withRouteGraphs(rows, now);
+        return repository.query(sql, new TaskRowMapper(now), args.toArray());
     }
 
     @Override
@@ -477,7 +476,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         }
         TaskMonitorItem row = rows.get(0);
         List<StageNode> nodes = withStructuredErrors(taskId, row.nodes());
-        TaskProgressRouteGraphBuilder.RouteGraph graph = routeGraphBuilder.build(taskId, nodes, now);
+        TaskProgressRouteGraphBuilder.RouteGraph graph = routeGraphBuilder.build(taskId, nodes, now, true);
         return new TaskProgressDetail(taskId, row.distributorStages(), nodes, graph.nodes(), graph.edges());
     }
 

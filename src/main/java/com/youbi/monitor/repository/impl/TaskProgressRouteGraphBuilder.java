@@ -3,6 +3,7 @@ package com.youbi.monitor.repository.impl;
 import com.youbi.monitor.model.RouteEdge;
 import com.youbi.monitor.model.StageNode;
 import com.youbi.monitor.model.TaskProgressRouteNode;
+import com.youbi.monitor.model.JobSummary;
 import com.youbi.monitor.repository.MonitorRepository;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,10 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
     }
 
     RouteGraph build(String taskId, List<StageNode> stageNodes, LocalDateTime now) {
+        return build(taskId, stageNodes, now, false);
+    }
+
+    RouteGraph build(String taskId, List<StageNode> stageNodes, LocalDateTime now, boolean includeJobSummaries) {
         Map<String, Object> profile = repository.query("""
                 SELECT task_type, has_background_audio, narration_input_mode, has_native_subtitle
                 FROM video_info
@@ -57,9 +62,13 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         stageNodes.forEach(node -> baseNodes.put(node.key(), node));
         Map<String, PhysicalStageState> physicalStates = loadPhysicalSubStageStates(taskId, now);
         RouteLogState routeLogState = loadRouteLogState(taskId);
+        Map<String, JobSummary> jobSummaries = includeJobSummaries
+                ? loadJobSummaries(taskId, configured, activeIds, now)
+                : Map.of();
         List<TaskProgressRouteNode> routeNodes = configured.stream()
                 .filter(node -> activeIds.contains(node.id()))
-                .map(node -> toRouteNode(node, baseNodes.get(node.stage()), physicalStates.get(node.id()), routeLogState, now))
+                .map(node -> toRouteNode(node, baseNodes.get(node.stage()), physicalStates.get(node.id()),
+                        jobSummaries.get(node.id()), routeLogState, now))
                 .toList();
         return new RouteGraph(routeNodes, edges);
     }
@@ -208,7 +217,117 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         return new RouteLogState(completed, released, completedAt);
     }
 
+    private Map<String, JobSummary> loadJobSummaries(String taskId, List<RouteConfigNode> configured, Set<String> activeIds,
+                                                     LocalDateTime now) {
+        Map<String, JobSummary> summaries = new HashMap<>();
+        loadSubStageJobSummaries(taskId, now, summaries, "publisher", "publisher_jobs", activeIds);
+        loadSubStageJobSummaries(taskId, now, summaries, "asseter", "asseter_jobs", activeIds);
+        loadSubStageJobSummaries(taskId, now, summaries, "combiner", "combiner_jobs", activeIds);
+        loadMainJobSummary(taskId, now, summaries, "translator", "translator_jobs", routeId("translator", "main"), activeIds);
+        loadMainJobSummary(taskId, now, summaries, "uploader", "uploader_task", routeId("uploader", "main"), activeIds);
+        loadMainJobSummary(taskId, now, summaries, "uploader", "uploader_task_status", routeId("uploader", "main"), activeIds);
+        loadMainJobSummary(taskId, now, summaries, "speaker", "speaker_segment",
+                speakerRouteId(configured, activeIds), activeIds);
+        return summaries;
+    }
+
+    private void loadSubStageJobSummaries(String taskId, LocalDateTime now, Map<String, JobSummary> summaries,
+                                          String serviceName, String table, Set<String> activeIds) {
+        if (!hasColumns(table, "task_id", "sub_stage", "status", "started_at", "completed_at")) {
+            return;
+        }
+        repository.query("""
+                SELECT sub_stage, COUNT(*) total_count,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) completed_count,
+                       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed_count,
+                       SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) running_count,
+                       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) pending_count,
+                       SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) ready_count,
+                       MIN(started_at) started_at,
+                       MAX(completed_at) completed_at
+                FROM %s
+                WHERE task_id = ?
+                GROUP BY sub_stage
+                """.formatted(quotedIdentifier(table)), (rs, rowNum) -> {
+            String routeId = routeId(serviceName, rs.getString("sub_stage"));
+            if (activeIds.contains(routeId)) {
+                summaries.put(routeId, jobSummaryFromRow(serviceName, table, now, rs));
+            }
+            return routeId;
+        }, taskId);
+    }
+
+    private void loadMainJobSummary(String taskId, LocalDateTime now, Map<String, JobSummary> summaries,
+                                    String serviceName, String table, String routeId, Set<String> activeIds) {
+        if (routeId == null || !activeIds.contains(routeId)
+                || !hasColumns(table, "task_id", "status", "started_at", "completed_at")) {
+            return;
+        }
+        List<JobSummary> rows = repository.query("""
+                SELECT COUNT(*) total_count,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) completed_count,
+                       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed_count,
+                       SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) running_count,
+                       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) pending_count,
+                       SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) ready_count,
+                       MIN(started_at) started_at,
+                       MAX(completed_at) completed_at
+                FROM %s
+                WHERE task_id = ?
+                """.formatted(quotedIdentifier(table)), (rs, rowNum) -> jobSummaryFromRow(serviceName, table, now, rs), taskId);
+        rows.stream()
+                .filter(summary -> summary.totalCount() > 0)
+                .findFirst()
+                .ifPresent(summary -> summaries.put(routeId, summary));
+    }
+
+    private static JobSummary jobSummaryFromRow(String serviceName, String sourceTable, LocalDateTime now,
+                                                java.sql.ResultSet rs) throws java.sql.SQLException {
+        LocalDateTime startedAt = timestamp(rs, "started_at");
+        LocalDateTime completedAt = timestamp(rs, "completed_at");
+        return new JobSummary(
+                serviceName,
+                sourceTable,
+                rs.getInt("total_count"),
+                rs.getInt("completed_count"),
+                rs.getInt("failed_count"),
+                rs.getInt("running_count"),
+                rs.getInt("pending_count"),
+                rs.getInt("ready_count"),
+                startedAt,
+                completedAt,
+                elapsedSeconds(startedAt, completedAt, now)
+        );
+    }
+
+    private boolean hasColumns(String table, String... columns) {
+        if (!tableExists(table)) {
+            return false;
+        }
+        for (String column : columns) {
+            if (!columnExists(table, column)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String speakerRouteId(List<RouteConfigNode> configured, Set<String> activeIds) {
+        for (String candidate : List.of(routeId("speaker", "narration"), routeId("speaker", "dubbing_multi_segment"), routeId("speaker", "main"))) {
+            if (activeIds.contains(candidate)) {
+                return candidate;
+            }
+        }
+        return configured.stream()
+                .map(RouteConfigNode::id)
+                .filter(activeIds::contains)
+                .filter(id -> id.startsWith("speaker:"))
+                .findFirst()
+                .orElse(null);
+    }
+
     private TaskProgressRouteNode toRouteNode(RouteConfigNode config, StageNode base, PhysicalStageState physical,
+                                              JobSummary jobSummary,
                                               RouteLogState logs, LocalDateTime now) {
         boolean completed = logs.completed().contains(config.id());
         String status;
@@ -235,15 +354,36 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         } else {
             status = logs.released().contains(config.id()) ? "ready" : "pending";
         }
+        if (jobSummary != null) {
+            if (startedAt == null) {
+                startedAt = jobSummary.startedAt();
+            }
+            if (completedAt == null) {
+                completedAt = jobSummary.completedAt();
+            }
+            if (elapsed == 0) {
+                elapsed = jobSummary.elapsedSeconds();
+            }
+        }
+        Integer completedCount = jobSummary != null
+                ? jobSummary.completedCount()
+                : (useBase && base != null ? base.completedCount() : null);
+        Integer failedCount = jobSummary != null
+                ? jobSummary.failedCount()
+                : (useBase && base != null ? base.failedCount() : null);
+        Integer totalCount = jobSummary != null
+                ? jobSummary.totalCount()
+                : (useBase && base != null ? base.totalCount() : null);
         return new TaskProgressRouteNode(
                 config.id(), config.stage(), config.subStage(), routeLabel(config.stage(), config.subStage()), config.order(), status,
                 startedAt, completedAt, elapsed,
-                useBase && base != null ? base.completedCount() : null,
-                useBase && base != null ? base.failedCount() : null,
-                useBase && base != null ? base.totalCount() : null,
+                completedCount,
+                failedCount,
+                totalCount,
                 useBase && base != null ? base.progressPercent() : null,
                 error,
                 useBase && base != null ? base.childErrorMessage() : null,
+                jobSummary,
                 useBase && base != null ? base.platformStatuses() : List.of(),
                 useBase && base != null ? base.errors() : List.of(),
                 useBase && base != null ? base.errorCount() : 0,
@@ -259,7 +399,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             String id = routeId(node.key(), "main");
             routeNodes.add(new TaskProgressRouteNode(id, node.key(), "main", node.label(), index + 1, node.status(), node.startedAt(),
                     node.completedAt(), node.elapsedSeconds(), node.completedCount(), node.failedCount(), node.totalCount(),
-                    node.progressPercent(), node.errorMessage(), node.childErrorMessage(), node.platformStatuses(), node.errors(),
+                    node.progressPercent(), node.errorMessage(), node.childErrorMessage(), null, node.platformStatuses(), node.errors(),
                     node.errorCount(), node.errorsTruncated()));
             if (index > 0) {
                 edges.add(new RouteEdge(routeNodes.get(index - 1).id(), id));
