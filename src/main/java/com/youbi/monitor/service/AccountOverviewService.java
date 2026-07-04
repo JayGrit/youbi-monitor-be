@@ -6,7 +6,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -52,9 +51,6 @@ public class AccountOverviewService {
     }
 
     public Map<String, List<Map<String, Object>>> overview() {
-        ensureOperatorLoginstateTables();
-        ensureDeprecatedColumn();
-        ensureQuietTimeColumns();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountBaseSelectSql("") + """
@@ -266,32 +262,24 @@ public class AccountOverviewService {
     }
 
     private String accountBaseSelectSql(String extraWhere) {
-        String downloaderMaxStagedCountSql = columnExists("uploader_account", "downloader_max_staged_count")
-                ? "COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count"
-                : "5 downloader_max_staged_count";
-        String quietStartSql = columnExists("uploader_account", "upload_quiet_start_time")
-                ? "COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time"
-                : "TIME('01:00:00') upload_quiet_start_time";
-        String quietEndSql = columnExists("uploader_account", "upload_quiet_end_time")
-                ? "COALESCE(ua.upload_quiet_end_time, TIME('07:00:00')) AS upload_quiet_end_time"
-                : "TIME('07:00:00') upload_quiet_end_time";
-        return ("""
+        return """
                 SELECT ol.platform,
                        ol.account_key,
                        ua.last_upload_at,
                        ua.next_upload_allowed_at,
                        COALESCE(ua.upload_cooldown_min_seconds, 3600) AS upload_cooldown_min_seconds,
                        COALESCE(ua.upload_cooldown_max_seconds, 7200) AS upload_cooldown_max_seconds,
-                       %s,
-                       %s,
-                       %s,
+                       COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time,
+                       COALESCE(ua.upload_quiet_end_time, TIME('07:00:00')) AS upload_quiet_end_time,
+                       COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count,
                        COALESCE(ua.is_enabled, 1) AS is_enabled,
                        COALESCE(ua.is_available, ol.available) AS is_available,
                        NULL AS mid,
                        NULL AS uname,
                        NULL AS user_id,
                        NULL AS nickname,
-                       ol.storage_state_json AS storage_json,
+                       (ol.storage_state_json IS NOT NULL AND TRIM(ol.storage_state_json) <> '') AS cookie_exists,
+                       COALESCE(OCTET_LENGTH(ol.storage_state_json), 0) AS cookie_size_bytes,
                        ol.updated_at AS cookie_updated_at,
                        phone_profile.display_name,
                        phone_profile.avatar_url
@@ -311,7 +299,7 @@ public class AccountOverviewService {
                       AND phone_profile.account_id = ol.id
                 WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
-                """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql, extraWhere == null ? "" : extraWhere);
+                """.formatted(extraWhere == null ? "" : extraWhere);
     }
 
     private String accountStatsSelectSql(String extraWhere) {
@@ -400,13 +388,12 @@ public class AccountOverviewService {
 
     private Map<String, Object> mapAccount(ResultSet rs) throws java.sql.SQLException {
         String platform = rs.getString("platform");
-        String storageJson = rs.getString("storage_json");
-        boolean cookieExists = storageJson != null && !storageJson.isBlank();
+        boolean cookieExists = rs.getBoolean("cookie_exists");
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("storage", "database");
         row.put("accountKey", rs.getString("account_key"));
         row.put("cookieExists", cookieExists);
-        row.put("cookieSizeBytes", cookieExists ? storageJson.getBytes(StandardCharsets.UTF_8).length : 0);
+        row.put("cookieSizeBytes", rs.getLong("cookie_size_bytes"));
         row.put("cookieUpdatedAt", toLocalDateTime(rs.getTimestamp("cookie_updated_at")));
         if ("bilibili".equals(platform)) {
             row.put("mid", nullableLong(rs, "mid"));
