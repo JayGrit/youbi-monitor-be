@@ -320,14 +320,6 @@ public class NarrationManualService {
                 VALUES (?, 'running', NULL)
                 ON DUPLICATE KEY UPDATE status = 'running', error_message = NULL
                 """, taskId);
-        repository.update("""
-                UPDATE task
-                SET status = 'running',
-                    current_stage = 'publisher',
-                    completed_at = NULL,
-                    error_message = NULL
-                WHERE id = ?
-                """, taskId);
     }
 
     private String currentSubStage(String taskId) {
@@ -485,14 +477,7 @@ public class NarrationManualService {
     }
 
     private void restoreRunningTask(String taskId) {
-        repository.update("""
-                UPDATE task
-                SET status = 'running',
-                    current_stage = 'publisher',
-                    completed_at = NULL,
-                    error_message = NULL
-                WHERE id = ?
-                """, taskId);
+        return;
     }
 
     private NarrationRow narrationUnchecked(String taskId) {
