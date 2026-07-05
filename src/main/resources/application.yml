@@ -13,6 +13,14 @@ spring:
     username: hoshuuch
     password: 490229
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 3000
+      validation-timeout: 1000
+      idle-timeout: 600000
+      max-lifetime: 1500000
+      keepalive-time: 300000
 
 management:
   endpoints:
