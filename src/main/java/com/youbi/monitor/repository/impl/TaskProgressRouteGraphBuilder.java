@@ -28,6 +28,11 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
     }
 
     RouteGraph build(String taskId, List<StageNode> stageNodes, LocalDateTime now, boolean includeJobSummaries) {
+        RouteGraph snapshot = snapshotRouteGraph(taskId, stageNodes, now, includeJobSummaries);
+        if (snapshot != null) {
+            return snapshot;
+        }
+
         Map<String, Object> profile = repository.query("""
                 SELECT task_type, has_background_audio, narration_input_mode, has_native_subtitle
                 FROM video_info
@@ -67,6 +72,51 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
                 : Map.of();
         List<TaskProgressRouteNode> routeNodes = configured.stream()
                 .filter(node -> activeIds.contains(node.id()))
+                .map(node -> toRouteNode(node, baseNodes.get(node.stage()), physicalStates.get(node.id()),
+                        jobSummaries.get(node.id()), routeLogState, now))
+                .toList();
+        return new RouteGraph(routeNodes, edges);
+    }
+
+    private RouteGraph snapshotRouteGraph(String taskId, List<StageNode> stageNodes, LocalDateTime now,
+                                          boolean includeJobSummaries) {
+        if (!tableExists("distributor_task_route_nodes") || !tableExists("distributor_task_route_edges")) {
+            return null;
+        }
+
+        List<RouteConfigNode> snapshotNodes = repository.query("""
+                SELECT stage_name, sub_stage, stage_order
+                FROM distributor_task_route_nodes
+                WHERE task_id = ?
+                ORDER BY stage_order, stage_name, sub_stage
+                """, (rs, rowNum) -> new RouteConfigNode(
+                rs.getString("stage_name"), rs.getString("sub_stage"), rs.getInt("stage_order")
+        ), taskId);
+        if (snapshotNodes.isEmpty()) {
+            return null;
+        }
+
+        Set<String> activeIds = snapshotNodes.stream()
+                .map(RouteConfigNode::id)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        List<RouteEdge> edges = repository.query("""
+                SELECT stage_name, sub_stage, depends_on_stage_name, depends_on_sub_stage
+                FROM distributor_task_route_edges
+                WHERE task_id = ?
+                ORDER BY stage_name, sub_stage, depends_on_stage_name, depends_on_sub_stage
+                """, (rs, rowNum) -> new RouteEdge(
+                routeId(rs.getString("depends_on_stage_name"), rs.getString("depends_on_sub_stage")),
+                routeId(rs.getString("stage_name"), rs.getString("sub_stage"))
+        ), taskId);
+
+        Map<String, StageNode> baseNodes = new HashMap<>();
+        stageNodes.forEach(node -> baseNodes.put(node.key(), node));
+        Map<String, PhysicalStageState> physicalStates = loadPhysicalSubStageStates(taskId, now);
+        RouteLogState routeLogState = loadRouteLogState(taskId);
+        Map<String, JobSummary> jobSummaries = includeJobSummaries
+                ? loadJobSummaries(taskId, snapshotNodes, activeIds, now)
+                : Map.of();
+        List<TaskProgressRouteNode> routeNodes = snapshotNodes.stream()
                 .map(node -> toRouteNode(node, baseNodes.get(node.stage()), physicalStates.get(node.id()),
                         jobSummaries.get(node.id()), routeLogState, now))
                 .toList();
