@@ -116,7 +116,7 @@ public class NarrationManualService {
 
         String contentType = normalizedImageContentType(file.getContentType());
         String extension = extension(contentType);
-        String objectKey = "publisher/narration/" + safeSegment(taskId) + "/manual/"
+        String objectKey = safeSegment(taskId) + "/publisher/manual/"
                 + kind.apiName + "-" + System.currentTimeMillis() + extension;
         try (InputStream input = new ByteArrayInputStream(bytes)) {
             minioClient.putObject(PutObjectArgs.builder()
