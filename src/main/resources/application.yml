@@ -40,6 +40,7 @@ youbi:
     access-key: ${YDBI_MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${YDBI_MINIO_SECRET_KEY:minioadmin}
     bucket: ${YDBI_MINIO_BUCKET:ydbi}
+    assets-bucket: ${YDBI_MINIO_ASSETS_BUCKET:youbi-assets}
     work-dir: ${YDBI_MONITOR_UPLOAD_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/uploads}
   alidrive:
     account-key: ${YDBI_ALIDRIVE_ACCOUNT_KEY:default}

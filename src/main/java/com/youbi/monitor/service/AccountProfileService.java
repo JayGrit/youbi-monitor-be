@@ -35,18 +35,18 @@ public class AccountProfileService {
     private final IAccountProfileRepositoryService repositoryService;
     private final MinioClient minioClient;
     private final String minioEndpoint;
-    private final String minioBucket;
+    private final String assetsBucket;
 
     public AccountProfileService(
             IAccountProfileRepositoryService repositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
-            @Value("${youbi.minio.bucket}") String minioBucket
+            @Value("${youbi.minio.assets-bucket:youbi-assets}") String assetsBucket
     ) {
         this.repositoryService = repositoryService;
         this.minioEndpoint = trimTrailingSlash(TextSupport.text(minioEndpoint));
-        this.minioBucket = TextSupport.text(minioBucket).isBlank() ? "ydbi" : TextSupport.text(minioBucket);
+        this.assetsBucket = TextSupport.text(assetsBucket).isBlank() ? "youbi-assets" : TextSupport.text(assetsBucket);
         this.minioClient = MinioClient.builder()
                 .endpoint(minioEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
@@ -84,7 +84,7 @@ public class AccountProfileService {
                 System.currentTimeMillis() + "-" + TextSupport.safeSegment(file.getOriginalFilename()));
         try (InputStream input = file.getInputStream()) {
             minioClient.putObject(PutObjectArgs.builder()
-                    .bucket(minioBucket)
+                    .bucket(assetsBucket)
                     .object(objectKey)
                     .stream(input, file.getSize(), -1)
                     .contentType(contentType)
@@ -115,7 +115,7 @@ public class AccountProfileService {
     }
 
     private String minioUrl(String objectKey) {
-        return minioEndpoint + "/" + minioBucket + "/" + objectKey;
+        return minioEndpoint + "/" + assetsBucket + "/" + objectKey;
     }
 
     private static String trimTrailingSlash(String value) {
