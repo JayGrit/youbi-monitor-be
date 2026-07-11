@@ -21,6 +21,7 @@ public record BackupperStatus(
         Long dockerBuildCacheBytes,
         Long workfolderBytes,
         Long mysqlBytes,
+        Long mysqlBinlogBytes,
         LocalDateTime createdAt
 ) {
 }

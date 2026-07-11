@@ -83,7 +83,7 @@ public class AccountOverviewService {
                 SELECT id, host, device, mount_point, total_gb, used_gb, available_gb,
                        used_percent, total_label, minio_bytes, minio_ydbi_bytes,
                        minio_diagnostics_bytes, docker_image_bytes, docker_dangling_image_bytes,
-                       docker_build_cache_bytes, workfolder_bytes, mysql_bytes, created_at
+                       docker_build_cache_bytes, workfolder_bytes, mysql_bytes, mysql_binlog_bytes, created_at
                 FROM backupper_status
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
@@ -106,6 +106,7 @@ public class AccountOverviewService {
                         nullableLong(rs, "docker_build_cache_bytes"),
                         nullableLong(rs, "workfolder_bytes"),
                         nullableLong(rs, "mysql_bytes"),
+                        nullableLong(rs, "mysql_binlog_bytes"),
                         toLocalDateTime(rs.getTimestamp("created_at"))
                 )
         );
@@ -492,6 +493,7 @@ public class AccountOverviewService {
         ensureBackupperStatusColumn("docker_build_cache_bytes");
         ensureBackupperStatusColumn("workfolder_bytes");
         ensureBackupperStatusColumn("mysql_bytes");
+        ensureBackupperStatusColumn("mysql_binlog_bytes");
     }
 
     private void ensureBackupperStatusColumn(String column) {
