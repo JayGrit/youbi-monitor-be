@@ -4,10 +4,6 @@ import com.youbi.monitor.repository.MonitorRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMap;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -17,7 +13,6 @@ import java.util.Map;
 public class SpeakerSegmentMonitorService {
     private static final int DEFAULT_LIMIT = 80;
     private static final int MAX_LIMIT = 200;
-    private static final DateTimeFormatter SQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final MonitorRepository repository;
 
@@ -97,18 +92,17 @@ public class SpeakerSegmentMonitorService {
                 %s
                 ORDER BY
                     CASE
-                        WHEN s.status = 'running' THEN 1
-                        WHEN s.status IN ('ready', 'pending') THEN 2
-                        WHEN s.status = 'failed' THEN 3
-                        WHEN s.status = 'success' THEN 4
+                        WHEN s.status IN ('success', 'failed') THEN 1
+                        WHEN s.status = 'running' THEN 2
+                        WHEN s.status IN ('ready', 'pending') THEN 3
                         ELSE 5
                     END ASC,
+                    CASE WHEN s.status IN ('success', 'failed') THEN s.completed_at END DESC,
+                    CASE WHEN s.status IN ('success', 'failed') THEN s.id END DESC,
                     CASE WHEN s.status = 'running' THEN s.started_at END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.created_at END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.task_id END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.item_index END ASC,
-                    CASE WHEN s.status = 'failed' THEN s.completed_at END DESC,
-                    CASE WHEN s.status = 'success' THEN s.completed_at END DESC,
                     s.id ASC
                 LIMIT ? OFFSET ?
                 """.formatted(parts.where()), args.toArray());
@@ -136,15 +130,15 @@ public class SpeakerSegmentMonitorService {
         List<Map<String, Object>> devices = rows.stream().map(this::normalizeDeviceSummary).toList();
         long running = sum(devices, "running");
         long unfinished = devices.stream()
-                .mapToLong(row -> number(row.get("pending")) + number(row.get("ready")) + number(row.get("running")) + number(row.get("failed")))
+                .mapToLong(row -> number(row.get("pending")) + number(row.get("ready")) + number(row.get("running")))
                 .sum();
-        long recentCompleted = sum(devices, "success");
+        long completed = sum(devices, "success") + sum(devices, "failed");
         long failed = sum(devices, "failed");
         return Map.of(
                 "devices", devices,
                 "runningCount", running,
                 "unfinishedCount", unfinished,
-                "recentCompletedCount", recentCompleted,
+                "completedCount", completed,
                 "failedCount", failed,
                 "total", sum(devices, "total")
         );
@@ -156,7 +150,7 @@ public class SpeakerSegmentMonitorService {
         if (includeStatus) {
             addStatusFilter(conditions, args, query);
         } else {
-            addDefaultScopeFilter(conditions, args);
+            addDefaultScopeFilter(conditions, args, query);
         }
         addDeviceFilter(conditions, args, first(query, "device"));
         addLike(conditions, args, "s.task_id", first(query, "taskId"));
@@ -167,68 +161,59 @@ public class SpeakerSegmentMonitorService {
     private void addStatusFilter(List<String> conditions, List<Object> args, MultiValueMap<String, String> query) {
         String status = text(first(query, "status"));
         if (status.isBlank() || "default".equals(status)) {
-            addDefaultScopeFilter(conditions, args);
+            addDefaultScopeFilter(conditions, args, query);
             return;
         }
         if ("unfinished".equals(status)) {
-            conditions.add("s.status IN ('pending', 'ready', 'running', 'failed')");
+            conditions.add("s.status IN ('pending', 'ready', 'running')");
             return;
         }
         conditions.add("s.status = ?");
         args.add(status);
-        if ("success".equals(status)) {
-            addCompletedRange(conditions, args, query);
-        }
     }
 
-    private void addDefaultScopeFilter(List<String> conditions, List<Object> args) {
-        conditions.add("(s.status IN ('pending', 'ready', 'running', 'failed') OR (s.status = 'success' AND s.completed_at >= ?))");
-        args.add(SQL_DATETIME.format(LocalDateTime.now().minusHours(3)));
+    private void addDefaultScopeFilter(List<String> conditions, List<Object> args, MultiValueMap<String, String> query) {
+        QueryParts completedFilters = recentCompletedFilters(query);
+        conditions.add("""
+                (s.status = 'running' OR s.id IN (
+                    SELECT recent.id
+                    FROM (
+                        SELECT s2.id
+                        FROM speaker_segment s2
+                        LEFT JOIN video_info v2 ON v2.task_id = s2.task_id
+                        %s
+                        ORDER BY s2.completed_at DESC, s2.id DESC
+                        LIMIT 20
+                    ) recent
+                ))
+                """.formatted(completedFilters.where()));
+        args.addAll(completedFilters.args());
     }
 
-    private void addCompletedRange(List<String> conditions, List<Object> args, MultiValueMap<String, String> query) {
-        LocalDateTime from = parseDateTime(first(query, "completedFrom"));
-        LocalDateTime to = parseDateTime(first(query, "completedTo"));
-        if (from == null && to == null) {
-            LocalDateTime[] range = timeRange(first(query, "timeRange"));
-            from = range[0];
-            to = range[1];
-        }
-        if (from != null) {
-            conditions.add("s.completed_at >= ?");
-            args.add(SQL_DATETIME.format(from));
-        }
-        if (to != null) {
-            conditions.add("s.completed_at < ?");
-            args.add(SQL_DATETIME.format(to));
-        }
-    }
-
-    private LocalDateTime[] timeRange(String value) {
-        String text = text(value);
-        LocalDate today = LocalDate.now();
-        if ("today".equals(text)) {
-            return new LocalDateTime[] { today.atStartOfDay(), today.plusDays(1).atStartOfDay() };
-        }
-        if ("yesterday".equals(text)) {
-            return new LocalDateTime[] { today.minusDays(1).atStartOfDay(), today.atStartOfDay() };
-        }
-        if ("beforeYesterday".equals(text)) {
-            return new LocalDateTime[] { today.minusDays(2).atStartOfDay(), today.minusDays(1).atStartOfDay() };
-        }
-        return new LocalDateTime[] { LocalDateTime.now().minusHours(3), null };
+    private QueryParts recentCompletedFilters(MultiValueMap<String, String> query) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> args = new ArrayList<>();
+        conditions.add("s2.status IN ('success', 'failed')");
+        addDeviceFilter(conditions, args, "s2.operator", first(query, "device"));
+        addLike(conditions, args, "s2.task_id", first(query, "taskId"));
+        addLike(conditions, args, "COALESCE(v2.task_type, v2.type, '')", first(query, "taskType"));
+        return new QueryParts(" WHERE " + String.join(" AND ", conditions), args);
     }
 
     private void addDeviceFilter(List<String> conditions, List<Object> args, String value) {
+        addDeviceFilter(conditions, args, "s.operator", value);
+    }
+
+    private void addDeviceFilter(List<String> conditions, List<Object> args, String expression, String value) {
         String device = text(value);
         if (device.isBlank()) {
             return;
         }
         if ("__unassigned".equals(device) || "未分配".equals(device)) {
-            conditions.add("(s.operator IS NULL OR TRIM(s.operator) = '')");
+            conditions.add("(" + expression + " IS NULL OR TRIM(" + expression + ") = '')");
             return;
         }
-        conditions.add("s.operator = ?");
+        conditions.add(expression + " = ?");
         args.add(device);
     }
 
@@ -282,22 +267,6 @@ public class SpeakerSegmentMonitorService {
 
     private String first(MultiValueMap<String, String> query, String key) {
         return query == null ? null : query.getFirst(key);
-    }
-
-    private LocalDateTime parseDateTime(String value) {
-        String text = text(value);
-        if (text.isBlank()) {
-            return null;
-        }
-        try {
-            return LocalDateTime.parse(text.replace(' ', 'T'));
-        } catch (DateTimeParseException exception) {
-            try {
-                return LocalDateTime.parse(text, SQL_DATETIME);
-            } catch (DateTimeParseException ignored) {
-                return null;
-            }
-        }
     }
 
     private int positiveInt(String value, int fallback) {
