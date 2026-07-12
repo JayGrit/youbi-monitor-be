@@ -62,6 +62,7 @@ public class SpeakerSegmentMonitorService {
                     s.id,
                     s.task_id AS taskId,
                     COALESCE(NULLIF(v.task_type, ''), NULLIF(v.type, ''), stage.stage_name) AS taskType,
+                    COALESCE(t.priority, 1) AS priority,
                     s.item_index AS itemIndex,
                     s.status,
                     s.operator,
@@ -86,6 +87,7 @@ public class SpeakerSegmentMonitorService {
                     s.tts_wav_url AS ttsWavUrl,
                     s.reference_wav_url AS referenceWavUrl
                 FROM speaker_segment s
+                LEFT JOIN task t ON t.id = s.task_id
                 LEFT JOIN video_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
@@ -100,6 +102,7 @@ public class SpeakerSegmentMonitorService {
                     CASE WHEN s.status IN ('success', 'failed') THEN s.completed_at END ASC,
                     CASE WHEN s.status IN ('success', 'failed') THEN s.id END ASC,
                     CASE WHEN s.status = 'running' THEN s.started_at END ASC,
+                    CASE WHEN s.status IN ('running', 'ready', 'pending') THEN COALESCE(t.priority, 1) END DESC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.created_at END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.task_id END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.item_index END ASC,
@@ -231,6 +234,7 @@ public class SpeakerSegmentMonitorService {
         put(result, row, "id");
         putText(result, row, "taskId");
         putText(result, row, "taskType");
+        putNumber(result, row, "priority");
         putNumber(result, row, "itemIndex");
         putText(result, row, "status");
         String operator = text(row.get("operator"));
