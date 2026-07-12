@@ -97,8 +97,8 @@ public class SpeakerSegmentMonitorService {
                         WHEN s.status IN ('ready', 'pending') THEN 3
                         ELSE 5
                     END ASC,
-                    CASE WHEN s.status IN ('success', 'failed') THEN s.completed_at END DESC,
-                    CASE WHEN s.status IN ('success', 'failed') THEN s.id END DESC,
+                    CASE WHEN s.status IN ('success', 'failed') THEN s.completed_at END ASC,
+                    CASE WHEN s.status IN ('success', 'failed') THEN s.id END ASC,
                     CASE WHEN s.status = 'running' THEN s.started_at END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.created_at END ASC,
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.task_id END ASC,
@@ -175,7 +175,7 @@ public class SpeakerSegmentMonitorService {
     private void addDefaultScopeFilter(List<String> conditions, List<Object> args, MultiValueMap<String, String> query) {
         QueryParts completedFilters = recentCompletedFilters(query);
         conditions.add("""
-                (s.status = 'running' OR s.id IN (
+                (s.status IN ('pending', 'ready', 'running') OR s.id IN (
                     SELECT recent.id
                     FROM (
                         SELECT s2.id
