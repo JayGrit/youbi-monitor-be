@@ -45,6 +45,7 @@ public class SpeakerSegmentMonitorService {
         Long count = repository.queryForObject("""
                 SELECT COUNT(*)
                 FROM speaker_segment s
+                LEFT JOIN task t ON t.id = s.task_id
                 LEFT JOIN video_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
@@ -123,6 +124,7 @@ public class SpeakerSegmentMonitorService {
                     COUNT(*) AS total,
                     MAX(CASE WHEN s.status = 'success' THEN s.completed_at ELSE NULL END) AS latestCompletedAt
                 FROM speaker_segment s
+                LEFT JOIN task t ON t.id = s.task_id
                 LEFT JOIN video_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
@@ -158,6 +160,7 @@ public class SpeakerSegmentMonitorService {
         addDeviceFilter(conditions, args, first(query, "device"));
         addLike(conditions, args, "s.task_id", first(query, "taskId"));
         addLike(conditions, args, "COALESCE(v.task_type, v.type, '')", first(query, "taskType"));
+        conditions.add("(t.status IS NULL OR t.status <> 'success')");
         return new QueryParts(conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions), args);
     }
 
