@@ -1,6 +1,5 @@
 package com.youbi.monitor.repository.impl;
 
-import com.youbi.monitor.dto.DeviceHeartbeat;
 import com.youbi.monitor.dto.ServiceHeartbeat;
 import com.youbi.monitor.model.StageNode;
 import com.youbi.monitor.model.StageError;
@@ -15,29 +14,16 @@ import org.springframework.stereotype.Service;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlSupport implements IMonitorTaskQueryRepositoryService {
-    private final Map<String, List<String>> tableColumnsCache = new ConcurrentHashMap<>();
     private final TaskProgressRouteGraphBuilder routeGraphBuilder;
-    private static final long HEARTBEAT_ONLINE_SECONDS = 60;
-    private static final List<String> HEARTBEAT_DEVICES = List.of(
-            "Macbook Air M4",
-            "Macmini M2",
-            "LPXB",
-            "MY_HP",
-            "LPXB_HP",
-            "TXY"
-    );
+    private final TaskFlowRowQueryService taskFlowRowQueryService;
+    private final ServiceHeartbeatQueryService serviceHeartbeatQueryService;
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
@@ -372,27 +358,29 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             LEFT JOIN video_info vi ON vi.task_id = t.id
             __TASK_MONITOR_WHERE__
             """;
-    private static final String HEARTBEAT_TABLE = "service_heartbeat";
-    private static final String HEARTBEAT_TABLE_EXISTS_SQL = """
-            SELECT COUNT(*)
-            FROM INFORMATION_SCHEMA.TABLES
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-            """;
-    private static final String HEARTBEAT_COLUMNS_SQL = """
-            SELECT COLUMN_NAME
-            FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-            """;
-
-
     public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository) {
-        this(repository, new TaskProgressRouteGraphBuilder(repository));
+        this(repository, new TaskProgressRouteGraphBuilder(repository),
+                new TaskFlowRowQueryService(repository),
+                new ServiceHeartbeatQueryService(repository, new TaskFlowRowQueryService(repository)));
+    }
+
+    public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository, TaskProgressRouteGraphBuilder routeGraphBuilder) {
+        this(repository, routeGraphBuilder,
+                new TaskFlowRowQueryService(repository),
+                new ServiceHeartbeatQueryService(repository, new TaskFlowRowQueryService(repository)));
     }
 
     @Autowired
-    public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository, TaskProgressRouteGraphBuilder routeGraphBuilder) {
+    public MonitorTaskQueryRepositoryServiceImpl(
+            MonitorRepository repository,
+            TaskProgressRouteGraphBuilder routeGraphBuilder,
+            TaskFlowRowQueryService taskFlowRowQueryService,
+            ServiceHeartbeatQueryService serviceHeartbeatQueryService
+    ) {
         super(repository);
         this.routeGraphBuilder = routeGraphBuilder;
+        this.taskFlowRowQueryService = taskFlowRowQueryService;
+        this.serviceHeartbeatQueryService = serviceHeartbeatQueryService;
     }
 
     @Override
@@ -790,147 +778,17 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
     @Override
     public Map<String, Object> findTaskFlowRow(String table, String idColumn, String id) {
-        return singleRow(table, idColumn, id);
+        return taskFlowRowQueryService.findTaskFlowRow(table, idColumn, id);
     }
 
     @Override
     public List<Map<String, Object>> listTaskFlowRows(String table, String idColumn, String id, String orderBy, int limit) {
-        return rows(table, idColumn, id, orderBy, limit);
-    }
-
-    private Map<String, Object> singleRow(String table, String idColumn, String id) {
-        if (table == null || !tableExists(table)) {
-            return Map.of();
-        }
-        List<Map<String, Object>> rows = rows(table, idColumn, id, idColumn, 1);
-        return rows.isEmpty() ? Map.of() : rows.get(0);
-    }
-
-    private List<Map<String, Object>> rows(String table, String idColumn, String id, String orderBy, int limit) {
-        return repository.query(
-                "SELECT * FROM " + quotedIdentifier(table)
-                        + " WHERE " + quotedIdentifier(idColumn) + " = ?"
-                        + orderClause(table, orderBy)
-                        + " LIMIT ?",
-                (rs, rowNum) -> rowMap(rs),
-                id,
-                limit
-        );
-    }
-
-    private String orderClause(String table, String orderBy) {
-        if (orderBy == null || orderBy.isBlank()) {
-            return "";
-        }
-        Set<String> columns = new HashSet<>(columns(table));
-        List<String> parts = new ArrayList<>();
-        for (String raw : orderBy.split(",")) {
-            String column = raw.trim();
-            if (columns.contains(column)) {
-                parts.add(quotedIdentifier(column));
-            }
-        }
-        return parts.isEmpty() ? "" : " ORDER BY " + String.join(", ", parts);
-    }
-
-    private List<String> columns(String table) {
-        if (!tableExists(table)) {
-            return List.of();
-        }
-        return tableColumnsCache.computeIfAbsent(table, key -> repository.queryForList("""
-                SELECT COLUMN_NAME
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-                ORDER BY ORDINAL_POSITION
-                """, String.class, key));
-    }
-
-    private Map<String, Object> rowMap(ResultSet rs) throws SQLException {
-        Map<String, Object> row = new LinkedHashMap<>();
-        int count = rs.getMetaData().getColumnCount();
-        for (int i = 1; i <= count; i++) {
-            String name = rs.getMetaData().getColumnLabel(i);
-            Object value = rs.getObject(i);
-            if (value instanceof Timestamp timestamp) {
-                value = timestamp.toLocalDateTime();
-            }
-            row.put(name, value);
-        }
-        return row;
+        return taskFlowRowQueryService.listTaskFlowRows(table, idColumn, id, orderBy, limit);
     }
 
     @Override
     public List<ServiceHeartbeat> listServiceHeartbeats(LocalDateTime now) {
-        Map<String, ServiceHeartbeat> byService = new LinkedHashMap<>();
-        for (StageDefinition stage : STAGES) {
-            byService.put(stage.key(), emptyHeartbeat(stage));
-        }
-
-        if (!heartbeatTableExists()) {
-            return new ArrayList<>(byService.values());
-        }
-
-        repository.query(heartbeatSql(), rs -> {
-            String serviceName = rs.getString("service_name");
-            if (!byService.containsKey(serviceName)) {
-                return;
-            }
-            String label = labelForService(serviceName);
-            byService.put(serviceName, new ServiceHeartbeat(serviceName, label, deviceHeartbeats(rs, now)));
-        });
-        return new ArrayList<>(byService.values());
-    }
-
-    private boolean heartbeatTableExists() {
-        Integer count = repository.queryForObject(HEARTBEAT_TABLE_EXISTS_SQL, Integer.class, HEARTBEAT_TABLE);
-        return count != null && count > 0;
-    }
-
-    private String heartbeatSql() {
-        List<String> columns = columns(HEARTBEAT_TABLE);
-        StringBuilder sql = new StringBuilder("SELECT service_name");
-        for (String device : HEARTBEAT_DEVICES) {
-            sql.append(",\n  ");
-            if (columns.contains(device)) {
-                sql.append(quotedIdentifier(device));
-            } else {
-                sql.append("NULL AS ").append(quotedIdentifier(device));
-            }
-        }
-        sql.append("\nFROM ").append(HEARTBEAT_TABLE);
-        return sql.toString();
-    }
-
-    private static ServiceHeartbeat emptyHeartbeat(StageDefinition stage) {
-        return new ServiceHeartbeat(stage.key(), stage.label(), emptyDeviceHeartbeats());
-    }
-
-    private static List<DeviceHeartbeat> emptyDeviceHeartbeats() {
-        List<DeviceHeartbeat> devices = new ArrayList<>();
-        for (String device : HEARTBEAT_DEVICES) {
-            devices.add(new DeviceHeartbeat(device, null, false, 0));
-        }
-        return devices;
-    }
-
-    private static List<DeviceHeartbeat> deviceHeartbeats(ResultSet rs, LocalDateTime now) throws SQLException {
-        List<DeviceHeartbeat> devices = new ArrayList<>();
-        for (String device : HEARTBEAT_DEVICES) {
-            LocalDateTime lastSeenAt = timestamp(rs, device);
-            long secondsSinceLastSeen = elapsedSeconds(lastSeenAt, null, now);
-            boolean online = lastSeenAt != null && secondsSinceLastSeen <= HEARTBEAT_ONLINE_SECONDS;
-            devices.add(new DeviceHeartbeat(device, lastSeenAt, online, secondsSinceLastSeen));
-        }
-        return devices;
-    }
-
-    private static String labelForService(String serviceName) {
-        for (StageDefinition stage : STAGES) {
-            if (stage.key().equals(serviceName)) {
-                return stage.label();
-            }
-        }
-        return serviceName;
+        return serviceHeartbeatQueryService.listServiceHeartbeats(now);
     }
 
     private static class TaskRowMapper implements RowMapper<TaskMonitorItem> {

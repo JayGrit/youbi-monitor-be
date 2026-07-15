@@ -5,7 +5,6 @@ import com.youbi.monitor.repository.MonitorRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.Time;
 import java.sql.Timestamp;
@@ -33,14 +32,22 @@ public class AccountOverviewService {
     );
 
     private final MonitorRepository repository;
+    private final AccountSchemaService schemaService;
+    private final BackupperStatusService backupperStatusService;
 
-    public AccountOverviewService(MonitorRepository repository) {
+    public AccountOverviewService(
+            MonitorRepository repository,
+            AccountSchemaService schemaService,
+            BackupperStatusService backupperStatusService
+    ) {
         this.repository = repository;
+        this.schemaService = schemaService;
+        this.backupperStatusService = backupperStatusService;
     }
 
     public List<String> types() {
-        ensureOperatorLoginstateTables();
-        ensureDeprecatedColumn();
+        schemaService.ensureOperatorLoginstateTables();
+        schemaService.ensureDeprecatedColumn();
         return repository.queryForList("""
                 SELECT DISTINCT account_key
                 FROM operator_loginstate
@@ -62,7 +69,7 @@ public class AccountOverviewService {
     }
 
     public Map<String, List<Map<String, Object>>> overviewStats() {
-        ensureOperatorLoginstateTables();
+        schemaService.ensureOperatorLoginstateTables();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountStatsSelectSql("") + """
@@ -74,43 +81,7 @@ public class AccountOverviewService {
     }
 
     public BackupperStatus latestBackupperStatus() {
-        if (!tableExists("backupper_status")) {
-            return null;
-        }
-        ensureBackupperStatusStorageColumns();
-        List<BackupperStatus> rows = repository.query(
-                """
-                SELECT id, host, device, mount_point, total_gb, used_gb, available_gb,
-                       used_percent, total_label, minio_bytes, minio_ydbi_bytes,
-                       minio_diagnostics_bytes, docker_image_bytes, docker_dangling_image_bytes,
-                       docker_build_cache_bytes, workfolder_bytes, mysql_bytes, mysql_binlog_bytes, created_at
-                FROM backupper_status
-                ORDER BY created_at DESC, id DESC
-                LIMIT 1
-                """,
-                (rs, rowNum) -> new BackupperStatus(
-                        rs.getLong("id"),
-                        rs.getString("host"),
-                        rs.getString("device"),
-                        rs.getString("mount_point"),
-                        rs.getBigDecimal("total_gb"),
-                        rs.getBigDecimal("used_gb"),
-                        rs.getBigDecimal("available_gb"),
-                        rs.getBigDecimal("used_percent"),
-                        formatBackupperStatusText(rs.getBigDecimal("used_gb"), rs.getString("total_label")),
-                        nullableLong(rs, "minio_bytes"),
-                        nullableLong(rs, "minio_ydbi_bytes"),
-                        nullableLong(rs, "minio_diagnostics_bytes"),
-                        nullableLong(rs, "docker_image_bytes"),
-                        nullableLong(rs, "docker_dangling_image_bytes"),
-                        nullableLong(rs, "docker_build_cache_bytes"),
-                        nullableLong(rs, "workfolder_bytes"),
-                        nullableLong(rs, "mysql_bytes"),
-                        nullableLong(rs, "mysql_binlog_bytes"),
-                        toLocalDateTime(rs.getTimestamp("created_at"))
-                )
-        );
-        return rows.isEmpty() ? null : rows.get(0);
+        return backupperStatusService.latestBackupperStatus();
     }
 
     public Map<String, Object> account(String platform, String accountKey) {
@@ -197,7 +168,7 @@ public class AccountOverviewService {
         if (startTime == null || endTime == null) {
             throw new IllegalArgumentException("Quiet time is required");
         }
-        ensureQuietTimeColumns();
+        schemaService.ensureQuietTimeColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
@@ -236,7 +207,7 @@ public class AccountOverviewService {
         if (normalizedMax < 0 || normalizedMax > 100) {
             throw new IllegalArgumentException("Invalid downloader max staged count: " + normalizedMax);
         }
-        ensureDownloaderStagingColumns();
+        schemaService.ensureDownloaderStagingColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
@@ -455,160 +426,6 @@ public class AccountOverviewService {
     private static Long nullableLong(ResultSet rs, String column) throws java.sql.SQLException {
         long value = rs.getLong(column);
         return rs.wasNull() ? null : value;
-    }
-
-    private boolean columnExists(String table, String column) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                table,
-                column
-        );
-        return count != null && count > 0;
-    }
-
-    private boolean tableExists(String table) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.TABLES
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
-                """,
-                Integer.class,
-                table
-        );
-        return count != null && count > 0;
-    }
-
-    private void ensureBackupperStatusStorageColumns() {
-        ensureBackupperStatusColumn("minio_bytes");
-        ensureBackupperStatusColumn("minio_ydbi_bytes");
-        ensureBackupperStatusColumn("minio_diagnostics_bytes");
-        ensureBackupperStatusColumn("docker_image_bytes");
-        ensureBackupperStatusColumn("docker_dangling_image_bytes");
-        ensureBackupperStatusColumn("docker_build_cache_bytes");
-        ensureBackupperStatusColumn("workfolder_bytes");
-        ensureBackupperStatusColumn("mysql_bytes");
-        ensureBackupperStatusColumn("mysql_binlog_bytes");
-    }
-
-    private void ensureBackupperStatusColumn(String column) {
-        if (!columnExists("backupper_status", column)) {
-            repository.update(
-                    "ALTER TABLE backupper_status ADD COLUMN " + column + " BIGINT UNSIGNED NULL"
-            );
-        }
-    }
-
-    private void ensureDownloaderStagingColumns() {
-        if (!tableExists("uploader_account")) {
-            return;
-        }
-        if (!columnExists("uploader_account", "downloader_max_staged_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
-                    """
-            );
-        }
-    }
-
-    private void ensureQuietTimeColumns() {
-        if (!tableExists("uploader_account")) {
-            return;
-        }
-        if (!columnExists("uploader_account", "upload_quiet_start_time")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN upload_quiet_start_time TIME NOT NULL DEFAULT '01:00:00'
-                    """
-            );
-        }
-        if (!columnExists("uploader_account", "upload_quiet_end_time")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN upload_quiet_end_time TIME NOT NULL DEFAULT '07:00:00'
-                    """
-            );
-        }
-    }
-
-    private void ensureDeprecatedColumn() {
-        if (!tableExists("uploader_account") || columnExists("uploader_account", "is_deprecated")) {
-            return;
-        }
-        repository.update("""
-                ALTER TABLE uploader_account
-                ADD COLUMN is_deprecated TINYINT(1) NOT NULL DEFAULT 0
-                """);
-    }
-
-    private void ensureOperatorLoginstateTables() {
-        if (!tableExists("operator_profile")) {
-            repository.update("""
-                    CREATE TABLE operator_profile (
-                      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                      profile_key VARCHAR(64) NOT NULL,
-                      profile_path VARCHAR(1024) NOT NULL,
-                      enabled TINYINT(1) NOT NULL DEFAULT 1,
-                      note VARCHAR(255) NULL,
-                      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                      PRIMARY KEY (id),
-                      UNIQUE KEY uniq_operator_profile_key (profile_key)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                    """);
-        }
-        if (!tableExists("operator_loginstate")) {
-            repository.update("""
-                    CREATE TABLE operator_loginstate (
-                      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                      platform VARCHAR(64) NOT NULL,
-                      account_key VARCHAR(128) NOT NULL,
-                      account_category VARCHAR(32) NOT NULL DEFAULT 'video_platform',
-                      login_state_type VARCHAR(32) NOT NULL,
-                      storage_state_json MEDIUMTEXT NULL,
-                      profile_id BIGINT UNSIGNED NULL,
-                      video_generation_quota INT NOT NULL DEFAULT 0,
-                      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                      PRIMARY KEY (id),
-                      UNIQUE KEY uniq_operator_loginstate_platform_key (platform, account_key),
-                      KEY idx_operator_loginstate_category_platform (account_category, platform),
-                      KEY idx_operator_loginstate_profile_id (profile_id)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-                    """);
-        }
-        if (tableExists("uploader_phone_account")) {
-            if (!columnExists("uploader_phone_account", "display_name")) {
-                repository.update("ALTER TABLE uploader_phone_account ADD COLUMN display_name VARCHAR(128) NULL AFTER disabled");
-            }
-            if (!columnExists("uploader_phone_account", "avatar_url")) {
-                repository.update("ALTER TABLE uploader_phone_account ADD COLUMN avatar_url VARCHAR(1024) NULL AFTER display_name");
-            }
-        }
-    }
-
-    private static String formatBackupperStatusText(BigDecimal usedGb, String totalLabel) {
-        if (usedGb == null) {
-            return "";
-        }
-        String total = totalLabel == null ? "" : totalLabel.trim();
-        if (total.isBlank()) {
-            return oneDecimal(usedGb) + "G";
-        }
-        return oneDecimal(usedGb) + "G/" + total;
-    }
-
-    private static String oneDecimal(BigDecimal value) {
-        return value.setScale(1, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 
     private static Boolean nullableBoolean(ResultSet rs, String column) throws java.sql.SQLException {
