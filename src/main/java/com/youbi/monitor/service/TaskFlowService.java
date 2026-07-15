@@ -229,6 +229,7 @@ public class TaskFlowService {
             }
             case "publisher" -> {
                 addLimitedTable(tables, "publisher_jobs", taskId, "task_id", "job_order, id");
+                addLimitedTable(tables, "operator_task", taskId, "task_id", "created_at DESC, id DESC");
                 addLimitedTable(tables, "publisher_result", taskId, "task_id", "task_id");
                 addLimitedTable(tables, "product_narration", taskId, "task_id", "id");
                 addLimitedTable(tables, "product_narration_sentence", taskId, "task_id", "line_index, id");
