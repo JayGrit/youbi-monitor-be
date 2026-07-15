@@ -255,8 +255,8 @@ abstract class MonitorRepositorySqlSupport {
                 COALESCE(
                   NULLIF(video_info.final_video_url, ''),
                   NULLIF(CONCAT('adrive://', COALESCE(
-                    NULLIF(video_info.final_video_alidrive_remote_path, ''),
-                    NULLIF(video_info.final_video_alidrive_file_id, '')
+                    NULLIF(final_video.alidrive_remote_path, ''),
+                    NULLIF(final_video.alidrive_file_id, '')
                   )), 'adrive://'),
                   ''
                 )

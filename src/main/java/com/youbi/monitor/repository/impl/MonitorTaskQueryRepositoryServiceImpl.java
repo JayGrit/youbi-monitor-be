@@ -46,9 +46,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               sv.webpage_url source_webpage_url,
               vi.source_thumbnail_url,
               sv.duration source_duration_seconds,
-              vi.minio_storage_bytes,
-              vi.minio_storage_object_count,
-              vi.minio_storage_updated_at,
+              bm.minio_storage_bytes,
+              bm.minio_storage_object_count,
+              bm.minio_storage_updated_at,
               vi.type task_type,
               vi.task_type distributor_task_type,
               vi.has_background_audio,
@@ -176,6 +176,14 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               GROUP BY task_id
             ) us ON us.task_id = t.id
             LEFT JOIN video_info vi ON vi.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id,
+                     COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_bytes ELSE 0 END), 0) minio_storage_bytes,
+                     COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_object_count ELSE 0 END), 0) minio_storage_object_count,
+                     MAX(updated_at) minio_storage_updated_at
+              FROM backupper_minio
+              GROUP BY task_id
+            ) bm ON bm.task_id = t.id
             LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
@@ -214,9 +222,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               sv.webpage_url source_webpage_url,
               vi.source_thumbnail_url,
               sv.duration source_duration_seconds,
-              vi.minio_storage_bytes,
-              vi.minio_storage_object_count,
-              vi.minio_storage_updated_at,
+              bm.minio_storage_bytes,
+              bm.minio_storage_object_count,
+              bm.minio_storage_updated_at,
               vi.type task_type,
               vi.task_type distributor_task_type,
               vi.has_background_audio,
@@ -344,6 +352,14 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               GROUP BY task_id
             ) us ON us.task_id = t.id
             LEFT JOIN video_info vi ON vi.task_id = t.id
+            LEFT JOIN (
+              SELECT task_id,
+                     COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_bytes ELSE 0 END), 0) minio_storage_bytes,
+                     COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_object_count ELSE 0 END), 0) minio_storage_object_count,
+                     MAX(updated_at) minio_storage_updated_at
+              FROM backupper_minio
+              GROUP BY task_id
+            ) bm ON bm.task_id = t.id
             LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             __TASK_MONITOR_WHERE__
@@ -419,9 +435,38 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         ensureVideoInfoColumn("final_cover_url", "TEXT NULL");
         ensureVideoInfoColumn("source_cover_url", "TEXT NULL");
         ensureVideoInfoColumn("source_subtitle_txt_url", "TEXT NULL");
-        ensureVideoInfoColumn("minio_storage_bytes", "BIGINT UNSIGNED NULL");
-        ensureVideoInfoColumn("minio_storage_object_count", "INT UNSIGNED NULL");
-        ensureVideoInfoColumn("minio_storage_updated_at", "DATETIME NULL");
+        ensureBackupperMinioTable();
+    }
+
+    private void ensureBackupperMinioTable() {
+        repository.update("""
+                CREATE TABLE IF NOT EXISTS backupper_minio (
+                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    task_id VARCHAR(64) NOT NULL,
+                    task_type VARCHAR(32) NULL,
+                    stage VARCHAR(32) NOT NULL,
+                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
+                    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    started_at DATETIME NULL,
+                    finished_at DATETIME NULL,
+                    last_error TEXT NULL,
+                    location VARCHAR(64) NULL,
+                    alidrive_file_id VARCHAR(128) NULL,
+                    alidrive_remote_path TEXT NULL,
+                    archive_json MEDIUMTEXT NULL,
+                    cleaned_at DATETIME NULL,
+                    source_object_count INT UNSIGNED NULL,
+                    source_bytes BIGINT UNSIGNED NULL,
+                    deleted_object_count INT UNSIGNED NULL,
+                    deleted_json MEDIUMTEXT NULL,
+                    failed_json MEDIUMTEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_backupper_minio_task_stage (task_id, stage),
+                    KEY idx_backupper_minio_stage_status (stage, status),
+                    KEY idx_backupper_minio_task (task_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """);
     }
 
     private void ensurePublisherColumn(String column, String definition) {
@@ -712,7 +757,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static String monitorOrderBy(String sort) {
         String normalized = text(sort);
         if ("minio_storage_desc".equalsIgnoreCase(normalized)) {
-            return "ORDER BY COALESCE(vi.minio_storage_bytes, 0) DESC, t.created_at DESC";
+            return "ORDER BY COALESCE(bm.minio_storage_bytes, 0) DESC, t.created_at DESC";
         }
         return "ORDER BY t.created_at DESC";
     }
