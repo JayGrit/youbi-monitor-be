@@ -482,6 +482,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             case "downloader:video" -> "视频下载";
             case "downloader:audio" -> "音频下载";
             case "whisper:source_transcription" -> "源语音识别";
+            case "whisper:ppt_alignment" -> "字幕对齐";
             case "asseter:image_composition" -> "图片素材";
             case "asseter:audio_visualization" -> "音频素材";
             case "combiner:audio_merge" -> "音频合并";
