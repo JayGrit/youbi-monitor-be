@@ -90,7 +90,6 @@ public class AliDriveService {
                 .build();
         this.accountKey = firstText(accountKey, "default");
         this.workDir = Path.of(workDir).toAbsolutePath().normalize();
-        ensureSchema();
         this.refreshToken = initialRefreshToken(refreshToken);
     }
 
@@ -552,10 +551,6 @@ public class AliDriveService {
 
     private String loadRefreshTokenFromDb() {
         return repositoryService.loadRefreshToken(accountKey);
-    }
-
-    private void ensureSchema() {
-        repositoryService.ensureAccountSchema();
     }
 
     private static String normalizeRemotePath(String path) {

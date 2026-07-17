@@ -32,7 +32,6 @@ public class MonitorService {
         this.whisperProcessingRepositoryService = whisperProcessingRepositoryService;
         this.speakerSegmentRepositoryService = speakerSegmentRepositoryService;
         this.taskFlowService = taskFlowService;
-        this.taskQueryRepositoryService.ensureMonitorSchema();
     }
 
     public MonitorResponse listTasks(int page, int limit, String status, String type, String stage, String taskId, String sort) {

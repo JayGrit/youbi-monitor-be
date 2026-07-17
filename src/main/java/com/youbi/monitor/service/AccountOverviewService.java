@@ -32,22 +32,17 @@ public class AccountOverviewService {
     );
 
     private final MonitorRepository repository;
-    private final AccountSchemaService schemaService;
     private final BackupperStatusService backupperStatusService;
 
     public AccountOverviewService(
             MonitorRepository repository,
-            AccountSchemaService schemaService,
             BackupperStatusService backupperStatusService
     ) {
         this.repository = repository;
-        this.schemaService = schemaService;
         this.backupperStatusService = backupperStatusService;
     }
 
     public List<String> types() {
-        schemaService.ensureOperatorLoginstateTables();
-        schemaService.ensureDeprecatedColumn();
         return repository.queryForList("""
                 SELECT DISTINCT account_key
                 FROM operator_loginstate
@@ -69,7 +64,6 @@ public class AccountOverviewService {
     }
 
     public Map<String, List<Map<String, Object>>> overviewStats() {
-        schemaService.ensureOperatorLoginstateTables();
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountStatsSelectSql("") + """
@@ -168,7 +162,6 @@ public class AccountOverviewService {
         if (startTime == null || endTime == null) {
             throw new IllegalArgumentException("Quiet time is required");
         }
-        schemaService.ensureQuietTimeColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
@@ -207,7 +200,6 @@ public class AccountOverviewService {
         if (normalizedMax < 0 || normalizedMax > 100) {
             throw new IllegalArgumentException("Invalid downloader max staged count: " + normalizedMax);
         }
-        schemaService.ensureDownloaderStagingColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account

@@ -56,7 +56,6 @@ public class AccountProfileService {
     public AccountProfileUpdateResult updateProfile(String platform, String accountKey, AccountProfileUpdateRequest request) throws IOException {
         String table = table(platform);
         String normalized = normalizeAccountKey(accountKey);
-        repositoryService.ensureProfileColumns(table);
         String displayName = TextSupport.text(request == null ? "" : request.displayName());
         int updated = repositoryService.updateDisplayName(table, normalized, displayName.isBlank() ? null : TextSupport.truncate(displayName, 128));
         if (updated < 1) {
@@ -68,7 +67,6 @@ public class AccountProfileService {
     public AccountProfileUpdateResult uploadAvatar(String platform, String accountKey, MultipartFile file) throws Exception {
         String table = table(platform);
         String normalized = normalizeAccountKey(accountKey);
-        repositoryService.ensureProfileColumns(table);
         if (file == null || file.isEmpty()) {
             throw new IOException("Avatar file is empty");
         }

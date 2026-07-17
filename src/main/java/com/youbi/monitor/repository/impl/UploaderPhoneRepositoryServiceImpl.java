@@ -37,7 +37,6 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
 
     public UploaderPhoneRepositoryServiceImpl(UploaderPhoneRepository repository) {
         this.repository = repository;
-        ensureSchema();
     }
 
     public UploaderPhoneMatrixResponse matrix() {

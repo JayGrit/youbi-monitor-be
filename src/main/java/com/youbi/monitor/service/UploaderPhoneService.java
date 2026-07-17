@@ -14,7 +14,6 @@ public class UploaderPhoneService {
 
     public UploaderPhoneService(IUploaderPhoneRepositoryService repositoryService) {
         this.repositoryService = repositoryService;
-        this.repositoryService.ensureSchema();
     }
 
     public UploaderPhoneMatrixResponse matrix() {

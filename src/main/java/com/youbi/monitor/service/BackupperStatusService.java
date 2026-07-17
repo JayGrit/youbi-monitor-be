@@ -24,7 +24,6 @@ public class BackupperStatusService {
         if (!schemaService.tableExists("backupper_status")) {
             return null;
         }
-        ensureBackupperStatusStorageColumns();
         List<BackupperStatus> rows = repository.query(
                 """
                 SELECT id, host, device, mount_point, total_gb, used_gb, available_gb,
