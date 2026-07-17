@@ -50,12 +50,12 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         }
 
         List<RouteConfigNode> configured = repository.query("""
-                SELECT stage_name, sub_stage, stage_order
+                SELECT stage_name, sub_stage, stage_order, COALESCE(NULLIF(remark, ''), '') AS label
                 FROM distributor_type_stages
                 WHERE task_type = ?
                 ORDER BY stage_order, stage_name, sub_stage
                 """, (rs, rowNum) -> new RouteConfigNode(
-                rs.getString("stage_name"), rs.getString("sub_stage"), rs.getInt("stage_order")
+                rs.getString("stage_name"), rs.getString("sub_stage"), rs.getInt("stage_order"), rs.getString("label")
         ), taskType);
         if (configured.isEmpty()) {
             return legacyRouteGraph(stageNodes);
@@ -85,12 +85,17 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         }
 
         List<RouteConfigNode> snapshotNodes = repository.query("""
-                SELECT stage_name, sub_stage, stage_order
-                FROM distributor_task_route_nodes
-                WHERE task_id = ?
-                ORDER BY stage_order, stage_name, sub_stage
+                SELECT node.stage_name, node.sub_stage, node.stage_order,
+                       COALESCE(NULLIF(type_stage.remark, ''), '') AS label
+                FROM distributor_task_route_nodes node
+                LEFT JOIN distributor_type_stages type_stage
+                  ON type_stage.task_type = node.task_type
+                 AND type_stage.stage_name = node.stage_name
+                 AND type_stage.sub_stage = node.sub_stage
+                WHERE node.task_id = ?
+                ORDER BY node.stage_order, node.stage_name, node.sub_stage
                 """, (rs, rowNum) -> new RouteConfigNode(
-                rs.getString("stage_name"), rs.getString("sub_stage"), rs.getInt("stage_order")
+                rs.getString("stage_name"), rs.getString("sub_stage"), rs.getInt("stage_order"), rs.getString("label")
         ), taskId);
         if (snapshotNodes.isEmpty()) {
             return null;
@@ -433,7 +438,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
                 ? Integer.valueOf(jobSummary.totalCount())
                 : (useBase && base != null ? base.totalCount() : null);
         return new TaskProgressRouteNode(
-                config.id(), config.stage(), config.subStage(), routeLabel(config.stage(), config.subStage()), config.order(), status,
+                config.id(), config.stage(), config.subStage(), routeLabel(config), config.order(), status,
                 startedAt, completedAt, elapsed,
                 completedCount,
                 failedCount,
@@ -468,6 +473,14 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
 
     private static String routeId(String stage, String subStage) {
         return stage + ":" + (subStage == null || subStage.isBlank() ? "main" : subStage);
+    }
+
+    private static String routeLabel(RouteConfigNode config) {
+        String configuredLabel = text(config.label());
+        if (!configuredLabel.isBlank()) {
+            return configuredLabel;
+        }
+        return routeLabel(config.stage(), config.subStage());
     }
 
     private static String routeLabel(String stage, String subStage) {
@@ -506,7 +519,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         };
     }
 
-    private record RouteConfigNode(String stage, String subStage, int order) {
+    private record RouteConfigNode(String stage, String subStage, int order, String label) {
         private String id() {
             return routeId(stage, subStage);
         }
