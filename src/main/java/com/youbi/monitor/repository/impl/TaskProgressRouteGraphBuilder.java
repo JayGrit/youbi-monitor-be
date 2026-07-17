@@ -477,6 +477,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             case "publisher:image_generation" -> "图片生成";
             case "publisher:script_generation" -> "文案生成";
             case "publisher:publish_metadata" -> "发布准备";
+            case "publisher:dialogue_optimization" -> "对话优化";
             case "downloader:metadata" -> "元数据下载";
             case "downloader:video" -> "视频下载";
             case "downloader:audio" -> "音频下载";
@@ -488,6 +489,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             case "combiner:video_render" -> "视频渲染";
             case "combiner:asmr" -> "ASMR 合成";
             case "combiner:blessing_video" -> "祝福视频";
+            case "speaker:ppt_dialogue" -> "PPT 对话配音";
             default -> switch (stage) {
                 case "downloader" -> "下载";
                 case "publisher" -> "发布准备";
