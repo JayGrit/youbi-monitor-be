@@ -75,7 +75,7 @@ public class AliDriveService {
     public AliDriveService(
             ObjectMapper objectMapper,
             IAliDriveRepositoryService repositoryService,
-            @Value("${youbi.alidrive.topic}") String topic,
+            @Value("${youbi.alidrive.topic:${youbi.alidrive.account-key:default}}") String topic,
             @Value("${youbi.alidrive.refresh-token}") String refreshToken,
             @Value("${youbi.alidrive.work-dir}") String workDir
     ) {
