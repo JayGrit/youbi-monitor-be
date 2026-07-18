@@ -24,7 +24,12 @@ class TaskRouteServiceTest {
         assertRoute("repost", true, rows("downloader:main", "publisher:main", "uploader:main"));
         assertRoute("subtitle", true, rows("downloader:main", "publisher:main", "demucs:main", "whisper:main", "translator:main", "combiner:main", "uploader:main"));
         assertRoute("dubbing", true, rows("downloader:main", "publisher:main", "demucs:main", "whisper:main", "translator:main", "speaker:main", "combiner:main", "uploader:main"));
-        List<RouteNode> narration = assertRoute("narration", true, rows("publisher:main", "speaker:main", "combiner:audio_merge", "whisper:main", "asseter:main", "combiner:video_render", "uploader:main"));
+        List<RouteNode> narration = assertRoute("narration", true, rows(
+                "downloader:metadata", "downloader:audio", "demucs:main", "whisper:source_transcription",
+                "publisher:script_generation", "publisher:publish_metadata", "publisher:segment_plan",
+                "publisher:image_generation", "asseter:image_composition", "speaker:narration",
+                "combiner:audio_merge", "whisper:main", "asseter:audio_visualization",
+                "combiner:video_render", "uploader:main"));
         assertThat(narration).extracting(RouteNode::id).contains("combiner:audio_merge", "combiner:video_render");
         assertThat(narration).extracting(RouteNode::label).contains("音频合并", "视频渲染");
         List<RouteNode> asmr = assertRoute("asmr", true, rows("downloader:main", "publisher:main", "combiner:asmr"));
@@ -73,6 +78,9 @@ class TaskRouteServiceTest {
             when(rs.getString("task_type")).thenReturn(taskType);
             when(rs.getObject("has_background_audio")).thenReturn(background);
             when(rs.getBoolean("has_background_audio")).thenReturn(background);
+            when(rs.getString("narration_input_mode")).thenReturn("submission");
+            when(rs.getObject("has_native_subtitle")).thenReturn(Boolean.FALSE);
+            when(rs.getBoolean("has_native_subtitle")).thenReturn(false);
             result.add(mapper.mapRow(rs, 0));
         } else if (sql.contains("FROM distributor_type_stages")) {
             int index = 0;

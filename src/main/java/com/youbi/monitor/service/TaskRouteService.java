@@ -19,10 +19,11 @@ public class TaskRouteService {
             "subtitle", steps("downloader", "publisher", "demucs", "whisper", "translator", "combiner", "uploader"),
             "dubbing", steps("downloader", "publisher", "demucs", "whisper", "translator", "speaker", "combiner", "uploader"),
             "narration", List.of(
-                    new Step("downloader", "metadata"), new Step("whisper", "source_transcription"),
+                    new Step("downloader", "metadata"), new Step("downloader", "audio"),
+                    new Step("demucs", "main"), new Step("whisper", "source_transcription"),
                     new Step("publisher", "script_generation"), new Step("publisher", "publish_metadata"),
                     new Step("publisher", "segment_plan"), new Step("publisher", "image_generation"),
-                    new Step("asseter", "image_composition"), new Step("speaker", "main"),
+                    new Step("asseter", "image_composition"), new Step("speaker", "narration"),
                     new Step("combiner", "audio_merge"), new Step("whisper", "main"),
                     new Step("asseter", "audio_visualization"), new Step("combiner", "video_render"),
                     new Step("uploader", "main")
@@ -131,17 +132,33 @@ public class TaskRouteService {
     }
 
     private static boolean stageEnabled(TaskProfile profile, Step step) {
-        if (!profile.hasBackgroundAudio() && "demucs".equals(step.stage())) return false;
-        if (!"narration".equals(profile.taskType())) return true;
+        if (!"narration".equals(profile.taskType())) {
+            return profile.hasBackgroundAudio() || !"demucs".equals(step.stage());
+        }
+        if ("demucs".equals(step.stage())) {
+            return "submission".equals(normalizeSubStage(profile.narrationInputMode()))
+                    && Boolean.FALSE.equals(profile.hasNativeSubtitle())
+                    && profile.hasBackgroundAudio();
+        }
         if ("prepared_text".equals(normalizeSubStage(profile.narrationInputMode()))) {
             return !(("downloader".equals(step.stage()) && "metadata".equals(step.subStage()))
+                    || ("downloader".equals(step.stage()) && "audio".equals(step.subStage()))
                     || ("whisper".equals(step.stage()) && "source_transcription".equals(step.subStage()))
                     || ("publisher".equals(step.stage()) && "script_generation".equals(step.subStage())));
         }
-        return !("submission".equals(normalizeSubStage(profile.narrationInputMode()))
-                && Boolean.TRUE.equals(profile.hasNativeSubtitle())
-                && "whisper".equals(step.stage())
-                && "source_transcription".equals(step.subStage()));
+        if (!"submission".equals(normalizeSubStage(profile.narrationInputMode()))) {
+            return true;
+        }
+        if ("downloader".equals(step.stage()) && "audio".equals(step.subStage())) {
+            return Boolean.FALSE.equals(profile.hasNativeSubtitle());
+        }
+        if ("whisper".equals(step.stage()) && "source_transcription".equals(step.subStage())) {
+            return Boolean.FALSE.equals(profile.hasNativeSubtitle());
+        }
+        if ("publisher".equals(step.stage()) && "script_generation".equals(step.subStage())) {
+            return profile.hasNativeSubtitle() != null;
+        }
+        return true;
     }
 
     private static String normalizeSubStage(String value) {

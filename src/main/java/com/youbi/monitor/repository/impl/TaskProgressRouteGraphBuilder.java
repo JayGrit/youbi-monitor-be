@@ -197,22 +197,37 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
     private static boolean routeNodeEnabled(String taskType, boolean hasBackgroundAudio, String narrationInputMode,
                                             boolean hasNativeSubtitleKnown, boolean hasNativeSubtitle,
                                             RouteConfigNode node) {
-        if (!hasBackgroundAudio && "demucs".equals(node.stage())) {
-            return false;
-        }
         if (!"narration".equals(taskType)) {
+            if (!hasBackgroundAudio && "demucs".equals(node.stage())) {
+                return false;
+            }
             return true;
+        }
+        if ("demucs".equals(node.stage())) {
+            return "submission".equals(narrationInputMode)
+                    && hasNativeSubtitleKnown
+                    && !hasNativeSubtitle
+                    && hasBackgroundAudio;
         }
         if ("prepared_text".equals(narrationInputMode)) {
             return !(("downloader".equals(node.stage()) && "metadata".equals(node.subStage()))
+                    || ("downloader".equals(node.stage()) && "audio".equals(node.subStage()))
                     || ("whisper".equals(node.stage()) && "source_transcription".equals(node.subStage()))
                     || ("publisher".equals(node.stage()) && "script_generation".equals(node.subStage())));
         }
-        return !("submission".equals(narrationInputMode)
-                && hasNativeSubtitleKnown
-                && hasNativeSubtitle
-                && "whisper".equals(node.stage())
-                && "source_transcription".equals(node.subStage()));
+        if (!"submission".equals(narrationInputMode)) {
+            return true;
+        }
+        if ("downloader".equals(node.stage()) && "audio".equals(node.subStage())) {
+            return hasNativeSubtitleKnown && !hasNativeSubtitle;
+        }
+        if ("whisper".equals(node.stage()) && "source_transcription".equals(node.subStage())) {
+            return hasNativeSubtitleKnown && !hasNativeSubtitle;
+        }
+        if ("publisher".equals(node.stage()) && "script_generation".equals(node.subStage())) {
+            return hasNativeSubtitleKnown;
+        }
+        return true;
     }
 
     private Map<String, PhysicalStageState> loadPhysicalSubStageStates(String taskId, LocalDateTime now) {
