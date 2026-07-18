@@ -43,6 +43,6 @@ youbi:
     assets-bucket: ${YDBI_MINIO_ASSETS_BUCKET:youbi-assets}
     work-dir: ${YDBI_MONITOR_UPLOAD_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/uploads}
   alidrive:
-    account-key: ${YDBI_ALIDRIVE_ACCOUNT_KEY:default}
+    topic: ${YDBI_ALIDRIVE_TOPIC:default}
     refresh-token: ${YDBI_ALIDRIVE_REFRESH_TOKEN:}
     work-dir: ${YDBI_ALIDRIVE_WORK_DIR:${java.io.tmpdir}/ydbi/monitor-be/alidrive}
