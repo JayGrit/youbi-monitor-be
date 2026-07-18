@@ -1,27 +1,22 @@
 package com.youbi.monitor.dto;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 public record BackupperStatus(
-        Long id,
         String host,
-        String device,
-        String mountPoint,
-        BigDecimal totalGb,
-        BigDecimal usedGb,
-        BigDecimal availableGb,
-        BigDecimal usedPercent,
-        String statusText,
-        Long minioBytes,
-        Long minioYdbiBytes,
-        Long minioDiagnosticsBytes,
-        Long dockerImageBytes,
-        Long dockerDanglingImageBytes,
-        Long dockerBuildCacheBytes,
-        Long workfolderBytes,
-        Long mysqlBytes,
-        Long mysqlBinlogBytes,
+        Map<String, Component> components,
+        Map<String, Object> summary,
         LocalDateTime createdAt
 ) {
+    public record Component(
+            Long id,
+            String host,
+            String component,
+            String status,
+            Map<String, Object> payload,
+            String errorMessage,
+            LocalDateTime createdAt
+    ) {
+    }
 }
