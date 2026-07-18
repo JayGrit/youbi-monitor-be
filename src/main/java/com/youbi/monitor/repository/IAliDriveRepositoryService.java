@@ -2,7 +2,7 @@ package com.youbi.monitor.repository;
 
 public interface IAliDriveRepositoryService {
     void persistAccountToken(
-            String accountKey,
+            String topic,
             String refreshToken,
             String userId,
             String userName,
@@ -10,7 +10,7 @@ public interface IAliDriveRepositoryService {
             String defaultDriveId
     );
 
-    String loadRefreshToken(String accountKey);
+    String loadRefreshToken(String topic);
 
     void ensureAccountSchema();
 }

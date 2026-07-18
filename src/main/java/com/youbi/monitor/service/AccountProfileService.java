@@ -53,20 +53,20 @@ public class AccountProfileService {
                 .build();
     }
 
-    public AccountProfileUpdateResult updateProfile(String platform, String accountKey, AccountProfileUpdateRequest request) throws IOException {
+    public AccountProfileUpdateResult updateProfile(String platform, String topic, AccountProfileUpdateRequest request) throws IOException {
         String table = table(platform);
-        String normalized = normalizeAccountKey(accountKey);
+        String normalized = normalizeTopic(topic);
         String displayName = TextSupport.text(request == null ? "" : request.displayName());
         int updated = repositoryService.updateDisplayName(table, normalized, displayName.isBlank() ? null : TextSupport.truncate(displayName, 128));
         if (updated < 1) {
-            throw new IOException("Account key not found: " + normalized);
+            throw new IOException("Topic not found: " + normalized);
         }
         return repositoryService.findProfile(table, normalized);
     }
 
-    public AccountProfileUpdateResult uploadAvatar(String platform, String accountKey, MultipartFile file) throws Exception {
+    public AccountProfileUpdateResult uploadAvatar(String platform, String topic, MultipartFile file) throws Exception {
         String table = table(platform);
-        String normalized = normalizeAccountKey(accountKey);
+        String normalized = normalizeTopic(topic);
         if (file == null || file.isEmpty()) {
             throw new IOException("Avatar file is empty");
         }
@@ -91,7 +91,7 @@ public class AccountProfileService {
         String avatarUrl = minioUrl(objectKey);
         int updated = repositoryService.updateAvatarUrl(table, normalized, avatarUrl);
         if (updated < 1) {
-            throw new IOException("Account key not found: " + normalized);
+            throw new IOException("Topic not found: " + normalized);
         }
         return repositoryService.findProfile(table, normalized);
     }
@@ -104,10 +104,10 @@ public class AccountProfileService {
         return table;
     }
 
-    private String normalizeAccountKey(String accountKey) throws IOException {
-        String normalized = TextSupport.text(accountKey);
+    private String normalizeTopic(String topic) throws IOException {
+        String normalized = TextSupport.text(topic);
         if (normalized.isBlank()) {
-            throw new IOException("Missing account key");
+            throw new IOException("Missing topic");
         }
         return normalized;
     }

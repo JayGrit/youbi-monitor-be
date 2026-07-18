@@ -169,7 +169,7 @@ public class OperatorDiagnosticsService {
         result.put("taskId", text(row.get("taskId")));
         result.put("platform", platform);
         result.put("action", action);
-        result.put("accountKey", text(row.get("accountKey")));
+        result.put("topic", text(row.get("topic")));
         result.put("status", text(row.get("status")));
         result.put("diagnosticCount", number(row.get("diagnosticCount")));
         result.put("createdAt", row.get("createdAt"));
@@ -192,7 +192,7 @@ public class OperatorDiagnosticsService {
         result.put("action", text(row.get("action")));
         result.put("taskType", text(row.get("taskType")));
         result.put("taskTypeDisplayName", text(row.get("taskTypeDisplayName")));
-        result.put("accountKey", text(row.get("accountKey")));
+        result.put("topic", text(row.get("topic")));
         result.put("status", text(row.get("status")));
         result.put("priority", number(row.get("priority")));
         result.put("createdAt", row.get("createdAt"));
@@ -240,7 +240,7 @@ public class OperatorDiagnosticsService {
 
     private Map<String, String> filters(MultiValueMap<String, String> query) {
         Map<String, String> filters = new LinkedHashMap<>();
-        for (String key : List.of("status", "platform", "action", "taskId", "opId", "accountKey")) {
+        for (String key : List.of("status", "platform", "action", "taskId", "opId", "topic")) {
             String value = first(query, key);
             if (value != null && !value.isBlank()) {
                 filters.put(key, value.trim());

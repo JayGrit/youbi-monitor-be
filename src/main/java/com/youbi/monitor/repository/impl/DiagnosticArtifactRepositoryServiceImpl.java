@@ -56,7 +56,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 SELECT
                     d.op_id AS opId,
                     MAX(NULLIF(t.task_id, '')) AS taskId,
-                    MAX(NULLIF(t.account_key, '')) AS accountKey,
+                    MAX(NULLIF(t.topic, '')) AS topic,
                     COUNT(*) AS diagnosticCount,
                     COALESCE(MIN(t.created_at), MIN(d.created_at)) AS createdAt,
                     COALESCE(MIN(t.started_at), MIN(d.created_at)) AS startedAt,
@@ -124,7 +124,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     t.action,
                     t.task_type AS taskType,
                     COALESCE(NULLIF(type.note, ''), type.display_name) AS taskTypeDisplayName,
-                    t.account_key AS accountKey,
+                    t.topic AS topic,
                     t.status,
                     t.priority,
                     t.created_at AS createdAt,
@@ -185,7 +185,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         List<Object> args = new ArrayList<>();
         addLike(conditions, args, "d.op_id", filters.get("opId"));
         addLike(conditions, args, "t.task_id", filters.get("taskId"));
-        addLike(conditions, args, "t.account_key", filters.get("accountKey"));
+        addLike(conditions, args, "t.topic", filters.get("topic"));
         addPlatformFilter(conditions, args, filters.get("platform"));
         addLike(conditions, args, "COALESCE(t.action, d.screenshot_url, d.html_url, '')", filters.get("action"));
         addDateLowerBound(conditions, args, "COALESCE(t.created_at, d.created_at)", filters.get("createdFrom"));
@@ -212,7 +212,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         List<Object> args = new ArrayList<>();
         addLike(conditions, args, "t.op_id", filters.get("opId"));
         addLike(conditions, args, "t.task_id", filters.get("taskId"));
-        addLike(conditions, args, "t.account_key", filters.get("accountKey"));
+        addLike(conditions, args, "t.topic", filters.get("topic"));
         addLike(conditions, args, "COALESCE(t.task_type, t.action, '')", filters.get("action"));
         String platform = text(filters.get("platform"));
         if (!platform.isBlank()) {

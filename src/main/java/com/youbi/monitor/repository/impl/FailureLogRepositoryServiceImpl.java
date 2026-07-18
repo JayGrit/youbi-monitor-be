@@ -57,10 +57,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 rs.getString("id"),
                 rs.getString("task_id"),
                 rs.getString("title"),
-                rs.getString("type"),
+                rs.getString("topic"),
                 rs.getString("stage"),
                 rs.getString("platform"),
-                rs.getString("account_key"),
                 rs.getString("error_message"),
                 timestamp(rs, "failed_at")
         ));
@@ -72,10 +71,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   CONCAT('%s:', stage.task_id) id,
                   stage.task_id,
                   COALESCE(NULLIF(video_info.upload_title, ''), NULLIF(source_video.title, ''), stage.task_id) title,
-                  COALESCE(NULLIF(video_info.type, ''), '未分类') type,
+                  COALESCE(NULLIF(video_info.topic, ''), '未分类') topic,
                   '%s' stage,
                   '' platform,
-                  '' account_key,
                   COALESCE(NULLIF(stage.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(stage.completed_at, stage.started_at, task.completed_at, task.started_at, task.created_at) failed_at
                 FROM %s stage
@@ -92,10 +90,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   CONCAT('uploader:', submission.platform, ':', submission.id) id,
                   submission.task_id,
                   COALESCE(NULLIF(video_info.upload_title, ''), NULLIF(source_video.title, ''), submission.task_id) title,
-                  COALESCE(NULLIF(video_info.type, ''), '未分类') type,
+                  COALESCE(NULLIF(video_info.topic, ''), '未分类') topic,
                   'uploader' stage,
                   submission.platform platform,
-                  COALESCE(submission.account_key, '') account_key,
                   COALESCE(NULLIF(submission.error_message, ''), NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(submission.completed_at, submission.updated_at, submission.started_at, submission.created_at) failed_at
                 FROM %s submission
@@ -125,10 +122,9 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   CONCAT('uploader:', uploader.task_id) id,
                   uploader.task_id,
                   COALESCE(NULLIF(video_info.upload_title, ''), NULLIF(source_video.title, ''), uploader.task_id) title,
-                  COALESCE(NULLIF(video_info.type, ''), '未分类') type,
+                  COALESCE(NULLIF(video_info.topic, ''), '未分类') topic,
                   'uploader' stage,
                   '' platform,
-                  '' account_key,
                   COALESCE(NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(uploader.completed_at, uploader.started_at, task.completed_at, task.started_at, task.created_at) failed_at
                 FROM distributor_task_stages uploader

@@ -5,7 +5,7 @@ import java.util.Map;
 
 public record DouyinAccountStatus(
         String storage,
-        String accountKey,
+        String topic,
         boolean cookieExists,
         long cookieSizeBytes,
         LocalDateTime cookieUpdatedAt,
@@ -27,7 +27,7 @@ public record DouyinAccountStatus(
 ) {
     public DouyinAccountStatus(
             String storage,
-            String accountKey,
+            String topic,
             boolean cookieExists,
             long cookieSizeBytes,
             LocalDateTime cookieUpdatedAt,
@@ -45,7 +45,7 @@ public record DouyinAccountStatus(
             String message,
             Map<String, Object> raw
     ) {
-        this(storage, accountKey, cookieExists, cookieSizeBytes, cookieUpdatedAt, userId, nickname,
+        this(storage, topic, cookieExists, cookieSizeBytes, cookieUpdatedAt, userId, nickname,
                 lastUploadAt, nextUploadAllowedAt, uploadCooldownMinSeconds,
                 uploadCooldownMaxSeconds, todayUploadCount, cooldownWaitingCount, uploadRunningCount,
                 enabled, valid, message, raw, null, null);

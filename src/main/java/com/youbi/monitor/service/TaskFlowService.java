@@ -241,7 +241,7 @@ public class TaskFlowService {
             }
             case "uploader" -> {
                 addLimitedTable(tables, "uploader", taskId, "task_id", "task_id");
-                addLimitedTable(tables, "uploader_task", taskId, "task_id", "platform, account_key, id");
+                addLimitedTable(tables, "uploader_task", taskId, "task_id", "platform, topic, id");
             }
             default -> {
             }

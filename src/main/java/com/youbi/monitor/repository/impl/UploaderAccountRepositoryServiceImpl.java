@@ -30,7 +30,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
     }
 
     @Override
-    public Optional<UploaderAccountState> state(String platform, String accountKey) {
+    public Optional<UploaderAccountState> state(String platform, String topic) {
         if (!tableExists(TABLE)) {
             return Optional.empty();
         }
@@ -45,21 +45,21 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 : "TIME('07:00:00') upload_quiet_end_time";
         List<UploaderAccountState> rows = repository.query(
                 ("""
-                SELECT platform, account_key, last_upload_at, next_upload_allowed_at,
+                SELECT platform, topic, last_upload_at, next_upload_allowed_at,
                        upload_cooldown_min_seconds, upload_cooldown_max_seconds,
                        %s, %s,
                        %s,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
-                         WHERE submission.type = uploader_account.account_key
+                         WHERE submission.topic = uploader_account.topic
                            AND submission.status = 'ready'
                        ) downloader_pending_count,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
                          JOIN task task ON task.id = submission.task_id
-                         WHERE submission.type = uploader_account.account_key
+                         WHERE submission.topic = uploader_account.topic
                            AND submission.status = 'success'
                            AND NULLIF(submission.task_id, '') IS NOT NULL
                            AND task.status <> 'failed'
@@ -67,14 +67,14 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                              SELECT 1
                              FROM uploader_task upload_submission
                              WHERE upload_submission.task_id = submission.task_id
-                               AND upload_submission.account_key = submission.type
+                               AND upload_submission.topic = submission.topic
                            )
                        ) staged_running_count,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
                          JOIN task task ON task.id = submission.task_id
-                         WHERE submission.type = uploader_account.account_key
+                         WHERE submission.topic = uploader_account.topic
                            AND submission.status = 'success'
                            AND NULLIF(submission.task_id, '') IS NOT NULL
                            AND task.status = 'failed'
@@ -82,14 +82,14 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                              SELECT 1
                              FROM uploader_task upload_submission
                              WHERE upload_submission.task_id = submission.task_id
-                               AND upload_submission.account_key = submission.type
+                               AND upload_submission.topic = submission.topic
                            )
                        ) staged_failed_count,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = uploader_account.platform
-                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.topic = uploader_account.topic
                            AND upload_submission.status = 'success'
                            AND DATE(upload_submission.completed_at) = CURDATE()
                        ) today_upload_count,
@@ -97,14 +97,14 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = uploader_account.platform
-                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.topic = uploader_account.topic
                            AND upload_submission.status = 'ready'
                        ) cooldown_waiting_count,
                        (
                          SELECT upload_submission.task_id
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = uploader_account.platform
-                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.topic = uploader_account.topic
                            AND upload_submission.status = 'running'
                          ORDER BY upload_submission.started_at DESC, upload_submission.id DESC
                          LIMIT 1
@@ -113,24 +113,24 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = uploader_account.platform
-                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.topic = uploader_account.topic
                            AND upload_submission.status = 'running'
                        ) upload_running_count,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = uploader_account.platform
-                           AND upload_submission.account_key = uploader_account.account_key
+                           AND upload_submission.topic = uploader_account.topic
                            AND upload_submission.status = 'failed'
                        ) failed_upload_count,
                        is_enabled, is_available, source_table, source_updated_at
                 FROM uploader_account
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 LIMIT 1
                 """).formatted(quietStartSql, quietEndSql, downloaderMaxStagedCountSql),
                 (rs, rowNum) -> new UploaderAccountState(
                         rs.getString("platform"),
-                        rs.getString("account_key"),
+                        rs.getString("topic"),
                         toLocalDateTime(rs.getTimestamp("last_upload_at")),
                         toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")),
                         nullableInt(rs, "upload_cooldown_min_seconds"),
@@ -152,26 +152,26 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                         toLocalDateTime(rs.getTimestamp("source_updated_at"))
                 ),
                 normalizePlatform(platform),
-                normalizeAccountKey(accountKey)
+                normalizeTopic(topic)
         );
         return rows.stream().findFirst();
     }
 
     @Override
-    public boolean renameAccountKey(String platform, String oldAccountKey, String newAccountKey) {
+    public boolean renameTopic(String platform, String oldTopic, String newTopic) {
         ensureDeprecatedColumn();
         String normalizedPlatform = normalizePlatform(platform);
-        String normalizedOldAccountKey = normalizeAccountKey(oldAccountKey);
-        String normalizedNewAccountKey = normalizeAccountKey(newAccountKey);
+        String normalizedOldTopic = normalizeTopic(oldTopic);
+        String normalizedNewTopic = normalizeTopic(newTopic);
         Integer existing = repository.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM uploader_account
-                WHERE platform = ? AND account_key = ?
+                WHERE platform = ? AND topic = ?
                 """,
                 Integer.class,
                 normalizedPlatform,
-                normalizedNewAccountKey
+                normalizedNewTopic
         );
         if (existing != null && existing > 0) {
             return false;
@@ -180,7 +180,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 """
                 INSERT INTO uploader_account (
                     platform,
-                    account_key,
+                    topic,
                     source_table,
                     source_updated_at,
                     last_upload_at,
@@ -213,11 +213,11 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                        NOW(),
                        NOW()
                 FROM uploader_account
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
-                normalizedNewAccountKey,
+                normalizedNewTopic,
                 normalizedPlatform,
-                normalizedOldAccountKey
+                normalizedOldTopic
         );
         if (inserted != 1) {
             return false;
@@ -226,64 +226,64 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 """
                 UPDATE uploader_account
                 SET is_deprecated = 1, updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 normalizedPlatform,
-                normalizedOldAccountKey
+                normalizedOldTopic
         );
         return deprecated == 1;
     }
 
     @Override
-    public boolean updateEnabled(String platform, String accountKey, boolean enabled) {
+    public boolean updateEnabled(String platform, String topic, boolean enabled) {
         int updated = repository.update(
                 """
                 UPDATE uploader_account
                 SET is_enabled = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 enabled,
                 normalizePlatform(platform),
-                normalizeAccountKey(accountKey)
+                normalizeTopic(topic)
         );
         return updated == 1;
     }
 
     @Override
-    public boolean updateAvailable(String platform, String accountKey, boolean available) {
+    public boolean updateAvailable(String platform, String topic, boolean available) {
         int updated = repository.update(
                 """
                 UPDATE uploader_account
                 SET is_available = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 available,
                 normalizePlatform(platform),
-                normalizeAccountKey(accountKey)
+                normalizeTopic(topic)
         );
         return updated == 1;
     }
 
     @Override
-    public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
+    public boolean updateCooldown(String platform, String topic, int minSeconds, int maxSeconds) {
         int updated = repository.update(
                 """
                 UPDATE uploader_account
                 SET upload_cooldown_min_seconds = ?,
                     upload_cooldown_max_seconds = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 minSeconds,
                 maxSeconds,
                 normalizePlatform(platform),
-                normalizeAccountKey(accountKey)
+                normalizeTopic(topic)
         );
         return updated == 1;
     }
 
     @Override
-    public boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime) {
+    public boolean updateQuietTime(String platform, String topic, LocalTime startTime, LocalTime endTime) {
         ensureQuietTimeColumns();
         int updated = repository.update(
                 """
@@ -291,29 +291,29 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
                 SET upload_quiet_start_time = ?,
                     upload_quiet_end_time = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 Time.valueOf(startTime),
                 Time.valueOf(endTime),
                 normalizePlatform(platform),
-                normalizeAccountKey(accountKey)
+                normalizeTopic(topic)
         );
         return updated == 1;
     }
 
     @Override
-    public boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount) {
+    public boolean updateDownloaderMaxStagedCount(String platform, String topic, int maxStagedCount) {
         ensureDownloaderStagingColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
                 SET downloader_max_staged_count = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 maxStagedCount,
                 normalizePlatform(platform),
-                normalizeAccountKey(accountKey)
+                normalizeTopic(topic)
         );
         return updated == 1;
     }
@@ -395,7 +395,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         return value == null ? "" : value.trim().toLowerCase();
     }
 
-    private static String normalizeAccountKey(String value) {
+    private static String normalizeTopic(String value) {
         return value == null ? "" : value.trim();
     }
 

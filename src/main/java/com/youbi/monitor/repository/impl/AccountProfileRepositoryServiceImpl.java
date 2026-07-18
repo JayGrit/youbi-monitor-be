@@ -14,7 +14,7 @@ public class AccountProfileRepositoryServiceImpl implements IAccountProfileRepos
     }
 
     @Override
-    public int updateDisplayName(String platform, String accountKey, String displayName) {
+    public int updateDisplayName(String platform, String topic, String displayName) {
         return repository.update(
                 """
                 UPDATE uploader_phone_account phone_account
@@ -22,16 +22,16 @@ public class AccountProfileRepositoryServiceImpl implements IAccountProfileRepos
                   ON loginstate.platform = phone_account.platform
                  AND loginstate.id = phone_account.account_id
                 SET phone_account.display_name = ?, phone_account.updated_at = NOW()
-                WHERE loginstate.platform = ? AND loginstate.account_key = ?
+                WHERE loginstate.platform = ? AND loginstate.topic = ?
                 """,
                 displayName,
                 platform,
-                accountKey
+                topic
         );
     }
 
     @Override
-    public int updateAvatarUrl(String platform, String accountKey, String avatarUrl) {
+    public int updateAvatarUrl(String platform, String topic, String avatarUrl) {
         return repository.update(
                 """
                 UPDATE uploader_phone_account phone_account
@@ -39,16 +39,16 @@ public class AccountProfileRepositoryServiceImpl implements IAccountProfileRepos
                   ON loginstate.platform = phone_account.platform
                  AND loginstate.id = phone_account.account_id
                 SET phone_account.avatar_url = ?, phone_account.updated_at = NOW()
-                WHERE loginstate.platform = ? AND loginstate.account_key = ?
+                WHERE loginstate.platform = ? AND loginstate.topic = ?
                 """,
                 avatarUrl,
                 platform,
-                accountKey
+                topic
         );
     }
 
     @Override
-    public AccountProfileUpdateResult findProfile(String platform, String accountKey) {
+    public AccountProfileUpdateResult findProfile(String platform, String topic) {
         return repository.queryForObject(
                 """
                 SELECT phone_account.display_name, phone_account.avatar_url
@@ -56,12 +56,12 @@ public class AccountProfileRepositoryServiceImpl implements IAccountProfileRepos
                 JOIN operator_loginstate loginstate
                   ON loginstate.platform = phone_account.platform
                  AND loginstate.id = phone_account.account_id
-                WHERE loginstate.platform = ? AND loginstate.account_key = ?
+                WHERE loginstate.platform = ? AND loginstate.topic = ?
                 LIMIT 1
                 """,
                 (rs, rowNum) -> new AccountProfileUpdateResult(rs.getString("display_name"), rs.getString("avatar_url")),
                 platform,
-                accountKey
+                topic
         );
     }
 

@@ -56,7 +56,7 @@ public class AliDriveService {
     private final ObjectMapper objectMapper;
     private final IAliDriveRepositoryService repositoryService;
     private final HttpClient httpClient;
-    private final String accountKey;
+    private final String topic;
     private final Path workDir;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -75,7 +75,7 @@ public class AliDriveService {
     public AliDriveService(
             ObjectMapper objectMapper,
             IAliDriveRepositoryService repositoryService,
-            @Value("${youbi.alidrive.account-key}") String accountKey,
+            @Value("${youbi.alidrive.topic}") String topic,
             @Value("${youbi.alidrive.refresh-token}") String refreshToken,
             @Value("${youbi.alidrive.work-dir}") String workDir
     ) {
@@ -88,7 +88,7 @@ public class AliDriveService {
                 .connectTimeout(Duration.ofSeconds(30))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
-        this.accountKey = firstText(accountKey, "default");
+        this.topic = firstText(topic, "default");
         this.workDir = Path.of(workDir).toAbsolutePath().normalize();
         this.refreshToken = initialRefreshToken(refreshToken);
     }
@@ -546,11 +546,11 @@ public class AliDriveService {
         if (text(refreshToken).isBlank()) {
             return;
         }
-        repositoryService.persistAccountToken(accountKey, refreshToken, userId, userName, nickName, defaultDriveId);
+        repositoryService.persistAccountToken(topic, refreshToken, userId, userName, nickName, defaultDriveId);
     }
 
     private String loadRefreshTokenFromDb() {
-        return repositoryService.loadRefreshToken(accountKey);
+        return repositoryService.loadRefreshToken(topic);
     }
 
     private static String normalizeRemotePath(String path) {

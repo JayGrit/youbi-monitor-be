@@ -8,7 +8,7 @@ public record DiagnosticArtifactRecord(
         String runId,
         String platform,
         String source,
-        String accountKey,
+        String topic,
         String publisherJobName,
         String aspectRatio,
         int stepIndex,

@@ -62,7 +62,7 @@ public class SpeakerSegmentMonitorService {
                 SELECT
                     s.id,
                     s.task_id AS taskId,
-                    COALESCE(NULLIF(v.task_type, ''), NULLIF(v.type, ''), stage.stage_name) AS taskType,
+                    COALESCE(NULLIF(v.task_type, ''), NULLIF(v.topic, ''), stage.stage_name) AS taskType,
                     COALESCE(t.priority, 1) AS priority,
                     s.item_index AS itemIndex,
                     s.status,
@@ -159,7 +159,7 @@ public class SpeakerSegmentMonitorService {
         }
         addDeviceFilter(conditions, args, first(query, "device"));
         addLike(conditions, args, "s.task_id", first(query, "taskId"));
-        addLike(conditions, args, "COALESCE(v.task_type, v.type, '')", first(query, "taskType"));
+        addLike(conditions, args, "COALESCE(v.task_type, v.topic, '')", first(query, "taskType"));
         conditions.add("(t.status IS NULL OR t.status <> 'success')");
         return new QueryParts(conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions), args);
     }
@@ -202,7 +202,7 @@ public class SpeakerSegmentMonitorService {
         conditions.add("s2.status IN ('success', 'failed')");
         addDeviceFilter(conditions, args, "s2.operator", first(query, "device"));
         addLike(conditions, args, "s2.task_id", first(query, "taskId"));
-        addLike(conditions, args, "COALESCE(v2.task_type, v2.type, '')", first(query, "taskType"));
+        addLike(conditions, args, "COALESCE(v2.task_type, v2.topic, '')", first(query, "taskType"));
         return new QueryParts(" WHERE " + String.join(" AND ", conditions), args);
     }
 

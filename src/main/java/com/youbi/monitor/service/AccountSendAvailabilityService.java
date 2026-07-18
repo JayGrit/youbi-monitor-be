@@ -12,9 +12,9 @@ public class AccountSendAvailabilityService {
         this.uploaderAccountService = uploaderAccountService;
     }
 
-    public AccountSendAvailability availability(String platform, String accountKey, String platformAccountTable) {
-        UploaderAccountState state = uploaderAccountService.state(platform, accountKey)
-                .orElseGet(() -> UploaderAccountState.defaults(platform, accountKey));
+    public AccountSendAvailability availability(String platform, String topic, String platformAccountTable) {
+        UploaderAccountState state = uploaderAccountService.state(platform, topic)
+                .orElseGet(() -> UploaderAccountState.defaults(platform, topic));
         return new AccountSendAvailability(
                 state.lastUploadAt(),
                 state.nextUploadAllowedAt(),

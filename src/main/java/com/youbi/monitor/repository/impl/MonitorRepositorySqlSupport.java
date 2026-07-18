@@ -69,7 +69,7 @@ abstract class MonitorRepositorySqlSupport {
             "task_id",
             "source_url",
             "submitter_video_id",
-            "type",
+            "topic",
             "task_type",
             "has_background_audio",
             "source_language",
@@ -275,25 +275,25 @@ abstract class MonitorRepositorySqlSupport {
         return 0;
     }
 
-    private String stagedAccountKeyForTask(String taskId) {
+    private String stagedTopicForTask(String taskId) {
         if (!tableExists(UNIFIED_UPLOADER_ACCOUNT_TABLE)
                 || !tableExists("downloader_submission")
                 || !tableExists("task")) {
             return "";
         }
         String uploadExistsSql = uploadSubmissionExistsSql("submission");
-        List<String> accountKeys = repository.queryForList("""
-                SELECT submission.type
+        List<String> topics = repository.queryForList("""
+                SELECT submission.topic
                 FROM downloader_submission submission
                 JOIN task task ON task.id = submission.task_id
                 WHERE submission.task_id = ?
                   AND submission.status = 'success'
-                  AND NULLIF(submission.type, '') IS NOT NULL
+                  AND NULLIF(submission.topic, '') IS NOT NULL
                   AND NOT (%s)
                 LIMIT 1
                 FOR UPDATE
                 """.formatted(uploadExistsSql), String.class, taskId);
-        return accountKeys.isEmpty() ? "" : text(accountKeys.get(0));
+        return topics.isEmpty() ? "" : text(topics.get(0));
     }
 
     private String uploadSubmissionExistsSql(String submissionAlias) {
@@ -307,7 +307,7 @@ abstract class MonitorRepositorySqlSupport {
                         SELECT 1
                         FROM %s upload_submission
                         WHERE upload_submission.task_id = %s.task_id
-                          AND upload_submission.account_key = %s.type
+                          AND upload_submission.topic = %s.topic
                     )
                     """.formatted(quotedIdentifier(table), submissionAlias, submissionAlias));
         }
@@ -318,16 +318,16 @@ abstract class MonitorRepositorySqlSupport {
         return;
     }
 
-    private void ensureUploaderAccountRow(String platform, String accountKey) {
+    private void ensureUploaderAccountRow(String platform, String topic) {
         repository.update("""
                 INSERT INTO %s (
-                    platform, account_key, source_table, is_enabled, is_available, updated_at
+                    platform, topic, source_table, is_enabled, is_available, updated_at
                 )
                 VALUES (?, ?, ?, 1, 1, NOW())
                 ON DUPLICATE KEY UPDATE updated_at = updated_at
                 """.formatted(quotedIdentifier(UNIFIED_UPLOADER_ACCOUNT_TABLE)),
                 platform,
-                accountKey,
+                topic,
                 UPLOADER_ACCOUNT_TABLES.get(platform)
         );
     }
@@ -365,6 +365,6 @@ abstract class MonitorRepositorySqlSupport {
     ) {
     }
 
-    private record UploadAccountStatusDeltaKey(String accountKey, String oldStatus, String newStatus) {
+    private record UploadAccountStatusDeltaKey(String topic, String oldStatus, String newStatus) {
     }
 }

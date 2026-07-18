@@ -11,9 +11,9 @@ import java.util.Map;
 public interface IMonitorTaskQueryRepositoryService {
     void ensureMonitorSchema();
 
-    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort);
+    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String stage, String taskId, String sort);
 
-    long countTaskMonitorItems(String status, String type, String stage, String taskId);
+    long countTaskMonitorItems(String status, String topic, String stage, String taskId);
 
     TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now);
 

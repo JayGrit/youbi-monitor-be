@@ -19,7 +19,7 @@ public class AliDriveRepositoryServiceImpl implements IAliDriveRepositoryService
 
     @Override
     public void persistAccountToken(
-            String accountKey,
+            String topic,
             String refreshToken,
             String userId,
             String userName,
@@ -28,7 +28,7 @@ public class AliDriveRepositoryServiceImpl implements IAliDriveRepositoryService
     ) {
         repository.update("""
                 INSERT INTO uploader_account_alidrive (
-                    account_key, refresh_token, user_id, user_name, nick_name, default_drive_id
+                    topic, refresh_token, user_id, user_name, nick_name, default_drive_id
                 ) VALUES (?, ?, ?, ?, ?, ?)
                 ON DUPLICATE KEY UPDATE
                     refresh_token = VALUES(refresh_token),
@@ -37,15 +37,15 @@ public class AliDriveRepositoryServiceImpl implements IAliDriveRepositoryService
                     nick_name = VALUES(nick_name),
                     default_drive_id = VALUES(default_drive_id),
                     updated_at = CURRENT_TIMESTAMP
-                """, accountKey, refreshToken, userId, userName, nickName, defaultDriveId);
+                """, topic, refreshToken, userId, userName, nickName, defaultDriveId);
     }
 
     @Override
-    public String loadRefreshToken(String accountKey) {
+    public String loadRefreshToken(String topic) {
         List<String> tokens = repository.query(
-                "SELECT refresh_token FROM uploader_account_alidrive WHERE account_key = ? LIMIT 1",
+                "SELECT refresh_token FROM uploader_account_alidrive WHERE topic = ? LIMIT 1",
                 (rs, rowNum) -> rs.getString("refresh_token"),
-                accountKey
+                topic
         );
         return tokens.isEmpty() ? "" : text(tokens.get(0));
     }

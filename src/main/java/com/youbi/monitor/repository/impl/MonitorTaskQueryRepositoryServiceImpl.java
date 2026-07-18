@@ -35,7 +35,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               bm.minio_storage_bytes,
               bm.minio_storage_object_count,
               bm.minio_storage_updated_at,
-              vi.type task_type,
+              vi.topic topic,
               vi.task_type distributor_task_type,
               vi.has_background_audio,
               __DISTRIBUTOR_STAGES_SELECT__
@@ -107,19 +107,19 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               us.youtube_upload_status,
               us.x_upload_status,
               (
-                SELECT submission.account_key
+                SELECT submission.topic
                 FROM uploader_task submission
                 WHERE submission.task_id = t.id
                   AND submission.platform = 'bilibili'
                 ORDER BY FIELD(submission.status, 'success', 'running', 'ready', 'failed'), submission.id DESC
                 LIMIT 1
-              ) bilibili_upload_account_key,
+              ) bilibili_upload_topic,
               (
-                SELECT COALESCE(phone_profile.display_name, loginstate.account_key, submission.account_key)
+                SELECT COALESCE(phone_profile.display_name, loginstate.topic, submission.topic)
                 FROM uploader_task submission
                 LEFT JOIN operator_loginstate loginstate
                   ON loginstate.platform = submission.platform
-                 AND loginstate.account_key = submission.account_key
+                 AND loginstate.topic = submission.topic
                 LEFT JOIN (
                   SELECT platform, account_id, MAX(display_name) AS display_name
                   FROM uploader_phone_account
@@ -211,7 +211,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               bm.minio_storage_bytes,
               bm.minio_storage_object_count,
               bm.minio_storage_updated_at,
-              vi.type task_type,
+              vi.topic topic,
               vi.task_type distributor_task_type,
               vi.has_background_audio,
               __DISTRIBUTOR_STAGES_SELECT__
@@ -283,19 +283,19 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               us.youtube_upload_status,
               us.x_upload_status,
               (
-                SELECT submission.account_key
+                SELECT submission.topic
                 FROM uploader_task submission
                 WHERE submission.task_id = t.id
                   AND submission.platform = 'bilibili'
                 ORDER BY FIELD(submission.status, 'success', 'running', 'ready', 'failed'), submission.id DESC
                 LIMIT 1
-              ) bilibili_upload_account_key,
+              ) bilibili_upload_topic,
               (
-                SELECT COALESCE(phone_profile.display_name, loginstate.account_key, submission.account_key)
+                SELECT COALESCE(phone_profile.display_name, loginstate.topic, submission.topic)
                 FROM uploader_task submission
                 LEFT JOIN operator_loginstate loginstate
                   ON loginstate.platform = submission.platform
-                 AND loginstate.account_key = submission.account_key
+                 AND loginstate.topic = submission.topic
                 LEFT JOIN (
                   SELECT platform, account_id, MAX(display_name) AS display_name
                   FROM uploader_phone_account
@@ -465,8 +465,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String type, String stage, String taskId, String sort) {
-        SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String stage, String taskId, String sort) {
+        SqlFilter filter = taskMonitorFilter(status, topic, stage, taskId);
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
@@ -478,8 +478,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     }
 
     @Override
-    public long countTaskMonitorItems(String status, String type, String stage, String taskId) {
-        SqlFilter filter = taskMonitorFilter(status, type, stage, taskId);
+    public long countTaskMonitorItems(String status, String topic, String stage, String taskId) {
+        SqlFilter filter = taskMonitorFilter(status, topic, stage, taskId);
         Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter, ""), Long.class, filter.args().toArray());
         return count == null ? 0 : count;
     }
@@ -521,8 +521,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             enriched.add(new TaskMonitorItem(
                     row.taskId(), row.title(), row.sourceUrl(), row.sourceWebpageUrl(), row.sourceThumbnailUrl(),
                     row.sourceDurationSeconds(), row.minioStorageBytes(), row.minioStorageObjectCount(),
-                    row.minioStorageUpdatedAt(), row.taskType(), row.status(), row.currentStage(), row.createdAt(),
-                    row.startedAt(), row.completedAt(), row.elapsedSeconds(), row.bilibiliUploadAccountKey(),
+                    row.minioStorageUpdatedAt(), row.topic(), row.status(), row.currentStage(), row.createdAt(),
+                    row.startedAt(), row.completedAt(), row.elapsedSeconds(), row.bilibiliUploadTopic(),
                     row.bilibiliUploadAccountName(), row.errorMessage(), row.distributorStages(), row.nodes(),
                     graph.nodes(), graph.edges()
             ));
@@ -750,11 +750,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return "ORDER BY t.created_at DESC";
     }
 
-    private static SqlFilter taskMonitorFilter(String status, String type, String stage, String taskId) {
+    private static SqlFilter taskMonitorFilter(String status, String topic, String stage, String taskId) {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addFilter(conditions, args, "t.status", status);
-        addFilter(conditions, args, "vi.type", type);
+        addFilter(conditions, args, "vi.topic", topic);
         addFilter(conditions, args, "t.current_stage", stage);
         String normalizedTaskId = text(taskId);
         if (!normalizedTaskId.isBlank()) {
@@ -836,14 +836,14 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     nullableLong(rs, "minio_storage_bytes"),
                     integerOrNull(rs, "minio_storage_object_count"),
                     timestamp(rs, "minio_storage_updated_at"),
-                    rs.getString("task_type"),
+                    rs.getString("topic"),
                     rs.getString("status"),
                     rs.getString("current_stage"),
                     timestamp(rs, "created_at"),
                     taskStartedAt,
                     taskCompletedAt,
                     elapsedSeconds(taskStartedAt, taskCompletedAt, now),
-                    rs.getString("bilibili_upload_account_key"),
+                    rs.getString("bilibili_upload_topic"),
                     rs.getString("bilibili_upload_account_name"),
                     rs.getString("error_message"),
                     distributorStages(rs),

@@ -15,31 +15,31 @@ public class UploaderAccountService {
         this.repositoryService = repositoryService;
     }
 
-    public Optional<UploaderAccountState> state(String platform, String accountKey) {
-        return repositoryService.state(platform, accountKey);
+    public Optional<UploaderAccountState> state(String platform, String topic) {
+        return repositoryService.state(platform, topic);
     }
 
-    public boolean renameAccountKey(String platform, String oldAccountKey, String newAccountKey) {
-        return repositoryService.renameAccountKey(platform, oldAccountKey, newAccountKey);
+    public boolean renameTopic(String platform, String oldTopic, String newTopic) {
+        return repositoryService.renameTopic(platform, oldTopic, newTopic);
     }
 
-    public boolean updateEnabled(String platform, String accountKey, boolean enabled) {
-        return repositoryService.updateEnabled(platform, accountKey, enabled);
+    public boolean updateEnabled(String platform, String topic, boolean enabled) {
+        return repositoryService.updateEnabled(platform, topic, enabled);
     }
 
-    public boolean updateAvailable(String platform, String accountKey, boolean available) {
-        return repositoryService.updateAvailable(platform, accountKey, available);
+    public boolean updateAvailable(String platform, String topic, boolean available) {
+        return repositoryService.updateAvailable(platform, topic, available);
     }
 
-    public boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds) {
-        return repositoryService.updateCooldown(platform, accountKey, minSeconds, maxSeconds);
+    public boolean updateCooldown(String platform, String topic, int minSeconds, int maxSeconds) {
+        return repositoryService.updateCooldown(platform, topic, minSeconds, maxSeconds);
     }
 
-    public boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime) {
-        return repositoryService.updateQuietTime(platform, accountKey, startTime, endTime);
+    public boolean updateQuietTime(String platform, String topic, LocalTime startTime, LocalTime endTime) {
+        return repositoryService.updateQuietTime(platform, topic, startTime, endTime);
     }
 
-    public boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount) {
-        return repositoryService.updateDownloaderMaxStagedCount(platform, accountKey, maxStagedCount);
+    public boolean updateDownloaderMaxStagedCount(String platform, String topic, int maxStagedCount) {
+        return repositoryService.updateDownloaderMaxStagedCount(platform, topic, maxStagedCount);
     }
 }

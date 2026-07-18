@@ -12,15 +12,15 @@ public interface IJinritoutiaoAccountRepositoryService {
 
     List<JinritoutiaoAccountStatus> listAccounts();
 
-    boolean existsAccountKey(String accountKey);
+    boolean existsTopic(String topic);
 
-    boolean renameAccountKey(String oldAccountKey, String newAccountKey);
+    boolean renameTopic(String oldTopic, String newTopic);
 
-    void saveStorageState(String accountKey, String userId, String nickname, String storageState);
+    void saveStorageState(String topic, String userId, String nickname, String storageState);
 
-    Optional<String> findStorageState(String accountKey);
+    Optional<String> findStorageState(String topic);
 
-    Optional<LocalDateTime> findUpdatedAt(String accountKey);
+    Optional<LocalDateTime> findUpdatedAt(String topic);
 
-    SocialAccountProfile findProfile(String accountKey);
+    SocialAccountProfile findProfile(String topic);
 }

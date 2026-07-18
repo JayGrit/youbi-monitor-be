@@ -6,17 +6,17 @@ import java.time.LocalTime;
 import java.util.Optional;
 
 public interface IUploaderAccountRepositoryService {
-    Optional<UploaderAccountState> state(String platform, String accountKey);
+    Optional<UploaderAccountState> state(String platform, String topic);
 
-    boolean renameAccountKey(String platform, String oldAccountKey, String newAccountKey);
+    boolean renameTopic(String platform, String oldTopic, String newTopic);
 
-    boolean updateEnabled(String platform, String accountKey, boolean enabled);
+    boolean updateEnabled(String platform, String topic, boolean enabled);
 
-    boolean updateAvailable(String platform, String accountKey, boolean available);
+    boolean updateAvailable(String platform, String topic, boolean available);
 
-    boolean updateCooldown(String platform, String accountKey, int minSeconds, int maxSeconds);
+    boolean updateCooldown(String platform, String topic, int minSeconds, int maxSeconds);
 
-    boolean updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime);
+    boolean updateQuietTime(String platform, String topic, LocalTime startTime, LocalTime endTime);
 
-    boolean updateDownloaderMaxStagedCount(String platform, String accountKey, int maxStagedCount);
+    boolean updateDownloaderMaxStagedCount(String platform, String topic, int maxStagedCount);
 }

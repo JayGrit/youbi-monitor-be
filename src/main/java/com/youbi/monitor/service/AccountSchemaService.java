@@ -105,7 +105,7 @@ public class AccountSchemaService {
                     CREATE TABLE operator_loginstate (
                       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
                       platform VARCHAR(64) NOT NULL,
-                      account_key VARCHAR(128) NOT NULL,
+                      topic VARCHAR(128) NOT NULL,
                       account_category VARCHAR(32) NOT NULL DEFAULT 'video_platform',
                       login_state_type VARCHAR(32) NOT NULL,
                       storage_state_json MEDIUMTEXT NULL,
@@ -114,7 +114,7 @@ public class AccountSchemaService {
                       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                       PRIMARY KEY (id),
-                      UNIQUE KEY uniq_operator_loginstate_platform_key (platform, account_key),
+                      UNIQUE KEY uniq_operator_loginstate_platform_key (platform, topic),
                       KEY idx_operator_loginstate_category_platform (account_category, platform),
                       KEY idx_operator_loginstate_profile_id (profile_id)
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

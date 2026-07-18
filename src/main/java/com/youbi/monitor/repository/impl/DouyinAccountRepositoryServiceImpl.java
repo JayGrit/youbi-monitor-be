@@ -30,13 +30,13 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
     public List<DouyinAccountStatus> listAccounts() {
         return repository.query(
                 """
-                SELECT ua.account_key, ua.last_upload_at, ua.next_upload_allowed_at,
+                SELECT ua.topic, ua.last_upload_at, ua.next_upload_allowed_at,
                        ua.upload_cooldown_min_seconds, ua.upload_cooldown_max_seconds,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ua.platform
-                           AND upload_submission.account_key = ua.account_key
+                           AND upload_submission.topic = ua.topic
                            AND upload_submission.status = 'success'
                            AND DATE(upload_submission.completed_at) = CURDATE()
                        ) today_upload_count,
@@ -44,30 +44,30 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ua.platform
-                           AND upload_submission.account_key = ua.account_key
+                           AND upload_submission.topic = ua.topic
                            AND upload_submission.status = 'ready'
                        ) cooldown_waiting_count,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ua.platform
-                           AND upload_submission.account_key = ua.account_key
+                           AND upload_submission.topic = ua.topic
                            AND upload_submission.status = 'running'
                        ) upload_running_count,
                        ua.is_enabled,
                        pa.user_id, pa.nickname, pa.storage_state_json, pa.updated_at, pa.display_name, pa.avatar_url
                 FROM uploader_account ua
-                LEFT JOIN uploader_account_douyin pa ON pa.account_key = ua.account_key
+                LEFT JOIN uploader_account_douyin pa ON pa.topic = ua.topic
                 WHERE ua.platform = 'douyin' AND ua.is_deprecated = 0
-                ORDER BY ua.account_key
+                ORDER BY ua.topic
                 """,
                 (rs, rowNum) -> {
-                    String accountKey = rs.getString("account_key");
+                    String topic = rs.getString("topic");
                     String json = rs.getString("storage_state_json");
                     LocalDateTime updatedAt = rs.getTimestamp("updated_at") == null ? null : rs.getTimestamp("updated_at").toLocalDateTime();
                     return new DouyinAccountStatus(
                             "database",
-                            accountKey,
+                            topic,
                             json != null && !json.isBlank(),
                             json == null ? 0 : json.getBytes(StandardCharsets.UTF_8).length,
                             updatedAt,
@@ -92,26 +92,26 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
     }
 
     @Override
-    public boolean existsAccountKey(String accountKey) {
-        Integer exists = repository.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE account_key = ?", Integer.class, accountKey);
+    public boolean existsTopic(String topic) {
+        Integer exists = repository.queryForObject("SELECT COUNT(*) FROM " + TABLE + " WHERE topic = ?", Integer.class, topic);
         return exists != null && exists > 0;
     }
 
     @Override
-    public boolean renameAccountKey(String oldAccountKey, String newAccountKey) {
-        int updated = repository.update("UPDATE " + TABLE + " SET account_key = ?, updated_at = NOW() WHERE account_key = ?", newAccountKey, oldAccountKey);
+    public boolean renameTopic(String oldTopic, String newTopic) {
+        int updated = repository.update("UPDATE " + TABLE + " SET topic = ?, updated_at = NOW() WHERE topic = ?", newTopic, oldTopic);
         return updated == 1;
     }
 
     @Override
-    public void saveStorageState(String accountKey, String userId, String nickname, String storageState) {
+    public void saveStorageState(String topic, String userId, String nickname, String storageState) {
         repository.update(
                 """
-                INSERT INTO uploader_account_douyin (account_key, user_id, nickname, storage_state_json, updated_at)
+                INSERT INTO uploader_account_douyin (topic, user_id, nickname, storage_state_json, updated_at)
                 VALUES (?, ?, ?, ?, NOW())
                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), nickname = VALUES(nickname), storage_state_json = VALUES(storage_state_json), updated_at = NOW()
                 """,
-                accountKey,
+                topic,
                 userId,
                 nickname,
                 storageState
@@ -119,11 +119,11 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
     }
 
     @Override
-    public Optional<String> findStorageState(String accountKey) {
+    public Optional<String> findStorageState(String topic) {
         List<String> values = repository.query(
-                "SELECT storage_state_json FROM " + TABLE + " WHERE account_key = ?",
+                "SELECT storage_state_json FROM " + TABLE + " WHERE topic = ?",
                 (rs, rowNum) -> rs.getString("storage_state_json"),
-                accountKey
+                topic
         );
         if (values.isEmpty() || values.get(0) == null || values.get(0).isBlank()) {
             return Optional.empty();
@@ -132,30 +132,30 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
     }
 
     @Override
-    public Optional<LocalDateTime> findUpdatedAt(String accountKey) {
+    public Optional<LocalDateTime> findUpdatedAt(String topic) {
         List<LocalDateTime> values = repository.query(
-                "SELECT updated_at FROM " + TABLE + " WHERE account_key = ?",
+                "SELECT updated_at FROM " + TABLE + " WHERE topic = ?",
                 (rs, rowNum) -> rs.getTimestamp("updated_at").toLocalDateTime(),
-                accountKey
+                topic
         );
         return values.stream().findFirst();
     }
 
     @Override
-    public SocialAccountProfile findProfile(String accountKey) {
+    public SocialAccountProfile findProfile(String topic) {
         List<SocialAccountProfile> values = repository.query(
-                "SELECT user_id, nickname FROM " + TABLE + " WHERE account_key = ?",
+                "SELECT user_id, nickname FROM " + TABLE + " WHERE topic = ?",
                 (rs, rowNum) -> new SocialAccountProfile(rs.getString("user_id"), rs.getString("nickname")),
-                accountKey
+                topic
         );
         return values.stream().findFirst().orElse(new SocialAccountProfile(null, null));
     }
 
     @Override
-    public Optional<String> findLatestAccountKeyByUserId(String userId) {
+    public Optional<String> findLatestTopicByUserId(String userId) {
         List<String> existing = repository.query(
-                "SELECT account_key FROM " + TABLE + " WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
-                (rs, rowNum) -> rs.getString("account_key"),
+                "SELECT topic FROM " + TABLE + " WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (rs, rowNum) -> rs.getString("topic"),
                 userId
         );
         return existing.stream().findFirst();

@@ -170,15 +170,15 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         return repository.query(
                 """
                 SELECT account.id,
-                       account.account_key,
-                       account.account_key AS resolved_display_name,
+                       account.topic,
+                       account.topic AS resolved_display_name,
                        phone_profile.display_name AS remark,
                        phone_profile.avatar_url,
                        state.is_available
                 FROM operator_loginstate account
                 LEFT JOIN uploader_account state
                   ON state.platform = account.platform
-                 AND state.account_key = account.account_key
+                 AND state.topic = account.topic
                 LEFT JOIN (
                     SELECT platform, account_id,
                            MAX(display_name) AS display_name,
@@ -189,11 +189,11 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
                   ON phone_profile.platform = account.platform
                  AND phone_profile.account_id = account.id
                 WHERE account.platform = ?
-                ORDER BY account.account_key
+                ORDER BY account.topic
                 """,
                 (rs, rowNum) -> new UploaderPhoneAccountOption(
                         rs.getLong("id"),
-                        rs.getString("account_key"),
+                        rs.getString("topic"),
                         rs.getString("resolved_display_name"),
                         rs.getString("remark"),
                         rs.getString("avatar_url"),

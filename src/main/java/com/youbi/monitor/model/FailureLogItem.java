@@ -6,10 +6,9 @@ public record FailureLogItem(
         String id,
         String taskId,
         String title,
-        String type,
+        String topic,
         String stage,
         String platform,
-        String accountKey,
         String errorMessage,
         LocalDateTime failedAt
 ) {

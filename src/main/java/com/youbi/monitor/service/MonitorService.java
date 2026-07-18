@@ -34,11 +34,11 @@ public class MonitorService {
         this.taskFlowService = taskFlowService;
     }
 
-    public MonitorResponse listTasks(int page, int limit, String status, String type, String stage, String taskId, String sort) {
+    public MonitorResponse listTasks(int page, int limit, String status, String topic, String stage, String taskId, String sort) {
         LocalDateTime now = LocalDateTime.now();
         int offset = Math.max(0, page - 1) * limit;
-        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, type, stage, taskId, sort);
-        long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, type, stage, taskId);
+        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, topic, stage, taskId, sort);
+        long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, topic, stage, taskId);
         return new MonitorResponse(tasks, now, page, limit, totalCount);
     }
 
@@ -109,14 +109,14 @@ public class MonitorService {
             String platform,
             String taskId,
             String title,
-            String accountKey,
+            String topic,
             String errorMessage,
             LocalDateTime completedAt,
             LocalDateTime updatedAt,
             String taskStatus,
             String uploaderStatus,
             String uploadPlatforms,
-            String routedAccountKey,
+            String routedTopic,
             boolean accountExists,
             String retryBlockedReason
     ) {
@@ -129,7 +129,7 @@ public class MonitorService {
             long submissionId,
             String taskId,
             String title,
-            String type,
+            String topic,
             String errorMessage,
             LocalDateTime completedAt,
             String sourceUrl

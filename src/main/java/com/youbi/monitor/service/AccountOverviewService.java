@@ -44,11 +44,11 @@ public class AccountOverviewService {
 
     public List<String> types() {
         return repository.queryForList("""
-                SELECT DISTINCT account_key
+                SELECT DISTINCT topic
                 FROM operator_loginstate
-                WHERE account_key IS NOT NULL
-                  AND TRIM(account_key) <> ''
-                ORDER BY account_key
+                WHERE topic IS NOT NULL
+                  AND TRIM(topic) <> ''
+                ORDER BY topic
                 """, String.class);
     }
 
@@ -56,7 +56,7 @@ public class AccountOverviewService {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountBaseSelectSql("") + """
-                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.account_key
+                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.topic
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
         );
@@ -67,7 +67,7 @@ public class AccountOverviewService {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountStatsSelectSql("") + """
-                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.account_key
+                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.topic
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccountStats(rs))
         );
@@ -78,34 +78,34 @@ public class AccountOverviewService {
         return backupperStatusService.latestBackupperStatus();
     }
 
-    public Map<String, Object> account(String platform, String accountKey) {
+    public Map<String, Object> account(String platform, String topic) {
         String normalizedPlatform = requirePlatform(platform);
-        String normalizedAccountKey = requireAccountKey(accountKey);
-        return findAccount(normalizedPlatform, normalizedAccountKey);
+        String normalizedTopic = requireTopic(topic);
+        return findAccount(normalizedPlatform, normalizedTopic);
     }
 
     @Transactional
-    public Map<String, Object> renameAccountKey(String platform, String accountKey, String newAccountKey) {
+    public Map<String, Object> renameTopic(String platform, String topic, String newTopic) {
         String normalizedPlatform = requireManagedPlatform(platform);
-        String oldKey = requireAccountKey(accountKey);
-        String nextKey = requireAccountKey(newAccountKey);
+        String oldKey = requireTopic(topic);
+        String nextKey = requireTopic(newTopic);
         if (oldKey.equals(nextKey)) {
             return findAccount(normalizedPlatform, oldKey);
         }
-        if (repository.update("UPDATE operator_loginstate SET account_key = ?, updated_at = NOW() WHERE platform = ? AND account_key = ?", nextKey, normalizedPlatform, oldKey) != 1) {
+        if (repository.update("UPDATE operator_loginstate SET topic = ?, updated_at = NOW() WHERE platform = ? AND topic = ?", nextKey, normalizedPlatform, oldKey) != 1) {
             throw new IllegalArgumentException("Account not found");
         }
-        repository.update("UPDATE uploader_account SET account_key = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0", nextKey, normalizedPlatform, oldKey);
+        repository.update("UPDATE uploader_account SET topic = ?, updated_at = NOW() WHERE platform = ? AND topic = ? AND is_deprecated = 0", nextKey, normalizedPlatform, oldKey);
         return findAccount(normalizedPlatform, nextKey);
     }
 
-    public Map<String, Object> updateEnabled(String platform, String accountKey, boolean enabled) {
-        return updateGenericState(platform, accountKey, "is_enabled", enabled);
+    public Map<String, Object> updateEnabled(String platform, String topic, boolean enabled) {
+        return updateGenericState(platform, topic, "is_enabled", enabled);
     }
 
-    public Map<String, Object> updateCooldown(String platform, String accountKey, Integer minSeconds, Integer maxSeconds) {
+    public Map<String, Object> updateCooldown(String platform, String topic, Integer minSeconds, Integer maxSeconds) {
         String normalizedPlatform = requireManagedPlatform(platform);
-        String normalizedAccountKey = requireAccountKey(accountKey);
+        String normalizedTopic = requireTopic(topic);
         int min = minSeconds == null ? 3600 : minSeconds;
         int max = maxSeconds == null ? 7200 : maxSeconds;
         if (min < 0 || max < min) {
@@ -114,38 +114,38 @@ public class AccountOverviewService {
         int updated = repository.update("""
                 UPDATE uploader_account
                 SET upload_cooldown_min_seconds = ?, upload_cooldown_max_seconds = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
-                """, min, max, normalizedPlatform, normalizedAccountKey);
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
+                """, min, max, normalizedPlatform, normalizedTopic);
         if (updated != 1) {
             throw new IllegalArgumentException("Account not found");
         }
-        return findAccount(normalizedPlatform, normalizedAccountKey);
+        return findAccount(normalizedPlatform, normalizedTopic);
     }
 
-    public Map<String, Object> updateNextUploadAllowedAt(String platform, String accountKey, LocalDateTime nextUploadAllowedAt) {
+    public Map<String, Object> updateNextUploadAllowedAt(String platform, String topic, LocalDateTime nextUploadAllowedAt) {
         String normalizedPlatform = normalizePlatform(platform);
-        String normalizedAccountKey = accountKey == null ? "" : accountKey.trim();
-        if (!PLATFORMS.contains(normalizedPlatform) || normalizedAccountKey.isBlank()) {
+        String normalizedTopic = topic == null ? "" : topic.trim();
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedTopic.isBlank()) {
             throw new IllegalArgumentException("Invalid account");
         }
         int updated = repository.update(
                 """
                 UPDATE uploader_account
                 SET next_upload_allowed_at = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 nextUploadAllowedAt,
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (updated != 1) {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (rows.isEmpty()) {
             throw new IllegalArgumentException("Account not found");
@@ -153,10 +153,10 @@ public class AccountOverviewService {
         return rows.get(0);
     }
 
-    public Map<String, Object> updateQuietTime(String platform, String accountKey, LocalTime startTime, LocalTime endTime) {
+    public Map<String, Object> updateQuietTime(String platform, String topic, LocalTime startTime, LocalTime endTime) {
         String normalizedPlatform = normalizePlatform(platform);
-        String normalizedAccountKey = accountKey == null ? "" : accountKey.trim();
-        if (!PLATFORMS.contains(normalizedPlatform) || normalizedAccountKey.isBlank()) {
+        String normalizedTopic = topic == null ? "" : topic.trim();
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedTopic.isBlank()) {
             throw new IllegalArgumentException("Invalid account");
         }
         if (startTime == null || endTime == null) {
@@ -168,21 +168,21 @@ public class AccountOverviewService {
                 SET upload_quiet_start_time = ?,
                     upload_quiet_end_time = ?,
                     updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 Time.valueOf(startTime),
                 Time.valueOf(endTime),
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (updated != 1) {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (rows.isEmpty()) {
             throw new IllegalArgumentException("Account not found");
@@ -190,11 +190,11 @@ public class AccountOverviewService {
         return rows.get(0);
     }
 
-    public Map<String, Object> updateDownloaderMaxStagedCount(String platform, String accountKey, Integer maxStagedCount) {
+    public Map<String, Object> updateDownloaderMaxStagedCount(String platform, String topic, Integer maxStagedCount) {
         String normalizedPlatform = normalizePlatform(platform);
-        String normalizedAccountKey = accountKey == null ? "" : accountKey.trim();
+        String normalizedTopic = topic == null ? "" : topic.trim();
         int normalizedMax = maxStagedCount == null ? 5 : maxStagedCount;
-        if (!PLATFORMS.contains(normalizedPlatform) || normalizedAccountKey.isBlank()) {
+        if (!PLATFORMS.contains(normalizedPlatform) || normalizedTopic.isBlank()) {
             throw new IllegalArgumentException("Invalid account");
         }
         if (normalizedMax < 0 || normalizedMax > 100) {
@@ -204,20 +204,20 @@ public class AccountOverviewService {
                 """
                 UPDATE uploader_account
                 SET downloader_max_staged_count = ?, updated_at = NOW()
-                WHERE platform = ? AND account_key = ? AND is_deprecated = 0
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
                 """,
                 normalizedMax,
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (updated != 1) {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (rows.isEmpty()) {
             throw new IllegalArgumentException("Account not found");
@@ -228,7 +228,7 @@ public class AccountOverviewService {
     private String accountBaseSelectSql(String extraWhere) {
         return """
                 SELECT ol.platform,
-                       ol.account_key,
+                       ol.topic,
                        ua.last_upload_at,
                        ua.next_upload_allowed_at,
                        COALESCE(ua.upload_cooldown_min_seconds, 3600) AS upload_cooldown_min_seconds,
@@ -250,7 +250,7 @@ public class AccountOverviewService {
                 FROM operator_loginstate ol
                 LEFT JOIN uploader_account ua
                        ON ua.platform = ol.platform
-                      AND ua.account_key = ol.account_key
+                      AND ua.topic = ol.topic
                       AND ua.is_deprecated = 0
                 LEFT JOIN (
                     SELECT platform, account_id,
@@ -269,18 +269,18 @@ public class AccountOverviewService {
     private String accountStatsSelectSql(String extraWhere) {
         return """
                 SELECT ol.platform,
-                       ol.account_key,
+                       ol.topic,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
-                         WHERE submission.type = ol.account_key
+                         WHERE submission.topic = ol.topic
                            AND submission.status = 'ready'
                        ) AS downloader_pending_count,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
                          JOIN task task ON task.id = submission.task_id
-                         WHERE submission.type = ol.account_key
+                         WHERE submission.topic = ol.topic
                            AND submission.status = 'success'
                            AND NULLIF(submission.task_id, '') IS NOT NULL
                            AND task.status <> 'failed'
@@ -288,14 +288,14 @@ public class AccountOverviewService {
                              SELECT 1
                              FROM uploader_task upload_submission
                              WHERE upload_submission.task_id = submission.task_id
-                               AND upload_submission.account_key = submission.type
+                               AND upload_submission.topic = submission.topic
                            )
                        ) AS staged_running_count,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
                          JOIN task task ON task.id = submission.task_id
-                         WHERE submission.type = ol.account_key
+                         WHERE submission.topic = ol.topic
                            AND submission.status = 'success'
                            AND NULLIF(submission.task_id, '') IS NOT NULL
                            AND task.status = 'failed'
@@ -303,14 +303,14 @@ public class AccountOverviewService {
                              SELECT 1
                              FROM uploader_task upload_submission
                              WHERE upload_submission.task_id = submission.task_id
-                               AND upload_submission.account_key = submission.type
+                               AND upload_submission.topic = submission.topic
                            )
                        ) AS staged_failed_count,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.topic = ol.topic
                            AND upload_submission.status = 'success'
                            AND DATE(upload_submission.completed_at) = CURDATE()
                        ) AS today_upload_count,
@@ -318,14 +318,14 @@ public class AccountOverviewService {
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.topic = ol.topic
                            AND upload_submission.status = 'ready'
                        ) AS cooldown_waiting_count,
                        (
                          SELECT upload_submission.task_id
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.topic = ol.topic
                            AND upload_submission.status = 'running'
                          ORDER BY upload_submission.started_at DESC, upload_submission.id DESC
                          LIMIT 1
@@ -334,14 +334,14 @@ public class AccountOverviewService {
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.topic = ol.topic
                            AND upload_submission.status = 'running'
                        ) AS upload_running_count,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
                          WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.account_key = ol.account_key
+                           AND upload_submission.topic = ol.topic
                            AND upload_submission.status = 'failed'
                        ) AS failed_upload_count
                 FROM operator_loginstate ol
@@ -355,7 +355,7 @@ public class AccountOverviewService {
         boolean cookieExists = rs.getBoolean("cookie_exists");
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("storage", "database");
-        row.put("accountKey", rs.getString("account_key"));
+        row.put("topic", rs.getString("topic"));
         row.put("cookieExists", cookieExists);
         row.put("cookieSizeBytes", rs.getLong("cookie_size_bytes"));
         row.put("cookieUpdatedAt", toLocalDateTime(rs.getTimestamp("cookie_updated_at")));
@@ -389,7 +389,7 @@ public class AccountOverviewService {
     private Map<String, Object> mapAccountStats(ResultSet rs) throws java.sql.SQLException {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("platform", rs.getString("platform"));
-        row.put("accountKey", rs.getString("account_key"));
+        row.put("topic", rs.getString("topic"));
         row.put("downloaderPendingCount", rs.getInt("downloader_pending_count"));
         row.put("stagedRunningCount", rs.getInt("staged_running_count"));
         row.put("stagedFailedCount", rs.getInt("staged_failed_count"));
@@ -441,20 +441,20 @@ public class AccountOverviewService {
         return requirePlatform(platform);
     }
 
-    private String requireAccountKey(String accountKey) {
-        String normalized = accountKey == null ? "" : accountKey.trim();
+    private String requireTopic(String topic) {
+        String normalized = topic == null ? "" : topic.trim();
         if (!normalized.matches("[A-Za-z0-9_.-]{1,64}")) {
-            throw new IllegalArgumentException("Invalid account key");
+            throw new IllegalArgumentException("Invalid topic");
         }
         return normalized;
     }
 
-    private Map<String, Object> findAccount(String platform, String accountKey) {
+    private Map<String, Object> findAccount(String platform, String topic) {
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.account_key = ?"),
+                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 platform,
-                accountKey
+                topic
         );
         if (rows.isEmpty()) {
             throw new IllegalArgumentException("Account not found");
@@ -462,18 +462,18 @@ public class AccountOverviewService {
         return rows.get(0);
     }
 
-    private Map<String, Object> updateGenericState(String platform, String accountKey, String column, boolean value) {
+    private Map<String, Object> updateGenericState(String platform, String topic, String column, boolean value) {
         String normalizedPlatform = requireManagedPlatform(platform);
-        String normalizedAccountKey = requireAccountKey(accountKey);
+        String normalizedTopic = requireTopic(topic);
         int updated = repository.update(
-                "UPDATE uploader_account SET " + column + " = ?, updated_at = NOW() WHERE platform = ? AND account_key = ? AND is_deprecated = 0",
+                "UPDATE uploader_account SET " + column + " = ?, updated_at = NOW() WHERE platform = ? AND topic = ? AND is_deprecated = 0",
                 value,
                 normalizedPlatform,
-                normalizedAccountKey
+                normalizedTopic
         );
         if (updated != 1) {
             throw new IllegalArgumentException("Account not found");
         }
-        return findAccount(normalizedPlatform, normalizedAccountKey);
+        return findAccount(normalizedPlatform, normalizedTopic);
     }
 }
