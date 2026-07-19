@@ -39,8 +39,8 @@ public class TaskFlowService {
     );
     private static final Map<String, List<String>> STAGE_INPUT_FIELDS = Map.of(
             "downloader", List.of("source_url"),
-            "demucs", List.of("audio_source_url", "audio_source_path"),
-            "whisper", List.of("audio_vocals_url", "audio_vocals_path"),
+            "demucs", List.of("audio_source_url"),
+            "whisper", List.of("audio_vocals_url"),
             "translator", List.of("asr_json_path", "target_language"),
             "speaker", List.of("audio_vocals_url", "translation_json_path", "target_language"),
             "combiner", List.of("video_source_url", "audio_bgm_url", "tts_segments_dir", "translation_json_path"),
