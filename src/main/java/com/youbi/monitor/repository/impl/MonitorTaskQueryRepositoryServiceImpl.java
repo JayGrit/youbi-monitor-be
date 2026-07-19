@@ -27,11 +27,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(meta.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
+              COALESCE(NULLIF(meta.upload_title, ''), NULLIF(ts.source_title, ''), t.id) title,
               ts.source_url,
-              sv.webpage_url source_webpage_url,
+              ts.source_webpage_url,
               ts.source_thumbnail_url,
-              sv.duration source_duration_seconds,
+              ts.source_duration_seconds,
               bm.minio_storage_bytes,
               bm.minio_storage_object_count,
               bm.minio_storage_updated_at,
@@ -172,7 +172,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM backupper_minio
               GROUP BY task_id
             ) bm ON bm.task_id = t.id
-            LEFT JOIN submitter_video sv ON sv.id = t.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
@@ -205,11 +204,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SUMMARY_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(meta.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
+              COALESCE(NULLIF(meta.upload_title, ''), NULLIF(ts.source_title, ''), t.id) title,
               ts.source_url,
-              sv.webpage_url source_webpage_url,
+              ts.source_webpage_url,
               ts.source_thumbnail_url,
-              sv.duration source_duration_seconds,
+              ts.source_duration_seconds,
               bm.minio_storage_bytes,
               bm.minio_storage_object_count,
               bm.minio_storage_updated_at,
@@ -350,7 +349,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM backupper_minio
               GROUP BY task_id
             ) bm ON bm.task_id = t.id
-            LEFT JOIN submitter_video sv ON sv.id = t.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             __TASK_MONITOR_WHERE__
             __TASK_MONITOR_ORDER_BY__

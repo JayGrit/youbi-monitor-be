@@ -34,15 +34,13 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         }
 
         Map<String, Object> profile = repository.query("""
-                SELECT t.task_type, opts.has_background_audio, ts.narration_input_mode, opts.has_native_subtitle
+                SELECT t.task_type, opts.has_background_audio, opts.has_native_subtitle
                 FROM task t
-                LEFT JOIN task_source ts ON ts.task_id = t.id
                 LEFT JOIN task_options opts ON opts.task_id = t.id
                 WHERE t.id = ?
                 """, (rs, rowNum) -> Map.<String, Object>of(
                 "taskType", rs.getString("task_type") == null ? "" : rs.getString("task_type"),
                 "hasBackgroundAudio", rs.getObject("has_background_audio") == null || rs.getBoolean("has_background_audio"),
-                "narrationInputMode", rs.getString("narration_input_mode") == null ? "" : rs.getString("narration_input_mode"),
                 "hasNativeSubtitleKnown", rs.getObject("has_native_subtitle") != null,
                 "hasNativeSubtitle", rs.getObject("has_native_subtitle") != null && rs.getBoolean("has_native_subtitle")
         ), taskId).stream().findFirst().orElse(Map.of());
@@ -132,11 +130,10 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
 
     private Set<String> activeRouteIds(String taskType, Map<String, Object> profile, List<RouteConfigNode> configured) {
         boolean hasBackgroundAudio = Boolean.TRUE.equals(profile.get("hasBackgroundAudio"));
-        String narrationInputMode = String.valueOf(profile.getOrDefault("narrationInputMode", ""));
         boolean hasNativeSubtitleKnown = Boolean.TRUE.equals(profile.get("hasNativeSubtitleKnown"));
         boolean hasNativeSubtitle = Boolean.TRUE.equals(profile.get("hasNativeSubtitle"));
         return configured.stream()
-                .filter(node -> routeNodeEnabled(taskType, hasBackgroundAudio, narrationInputMode, hasNativeSubtitleKnown, hasNativeSubtitle, node))
+                .filter(node -> routeNodeEnabled(taskType, hasBackgroundAudio, hasNativeSubtitleKnown, hasNativeSubtitle, node))
                 .map(RouteConfigNode::id)
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
     }
@@ -196,7 +193,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         }
     }
 
-    private static boolean routeNodeEnabled(String taskType, boolean hasBackgroundAudio, String narrationInputMode,
+    private static boolean routeNodeEnabled(String taskType, boolean hasBackgroundAudio,
                                             boolean hasNativeSubtitleKnown, boolean hasNativeSubtitle,
                                             RouteConfigNode node) {
         if (!"narration".equals(taskType)) {
@@ -206,19 +203,9 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
             return true;
         }
         if ("demucs".equals(node.stage())) {
-            return "submission".equals(narrationInputMode)
-                    && hasNativeSubtitleKnown
+            return hasNativeSubtitleKnown
                     && !hasNativeSubtitle
                     && hasBackgroundAudio;
-        }
-        if ("prepared_text".equals(narrationInputMode)) {
-            return !(("downloader".equals(node.stage()) && "metadata".equals(node.subStage()))
-                    || ("downloader".equals(node.stage()) && "audio".equals(node.subStage()))
-                    || ("whisper".equals(node.stage()) && "source_transcription".equals(node.subStage()))
-                    || ("publisher".equals(node.stage()) && "script_generation".equals(node.subStage())));
-        }
-        if (!"submission".equals(narrationInputMode)) {
-            return true;
         }
         if ("downloader".equals(node.stage()) && "audio".equals(node.subStage())) {
             return hasNativeSubtitleKnown && !hasNativeSubtitle;

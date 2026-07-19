@@ -52,15 +52,13 @@ public class TaskRouteService {
 
     public List<RouteNode> routeForTask(String taskId) {
         List<TaskProfile> profiles = repository.query("""
-                SELECT t.task_type, opts.has_background_audio, ts.narration_input_mode, opts.has_native_subtitle
+                SELECT t.task_type, opts.has_background_audio, opts.has_native_subtitle
                 FROM task t
-                LEFT JOIN task_source ts ON ts.task_id = t.id
                 LEFT JOIN task_options opts ON opts.task_id = t.id
                 WHERE t.id = ?
                 """, (rs, rowNum) -> new TaskProfile(
                 rs.getString("task_type"),
                 rs.getObject("has_background_audio") == null || rs.getBoolean("has_background_audio"),
-                rs.getString("narration_input_mode"),
                 rs.getObject("has_native_subtitle") == null ? null : rs.getBoolean("has_native_subtitle")
         ), taskId);
         if (profiles.isEmpty() || profiles.get(0).taskType() == null || profiles.get(0).taskType().isBlank()) {
@@ -138,18 +136,8 @@ public class TaskRouteService {
             return profile.hasBackgroundAudio() || !"demucs".equals(step.stage());
         }
         if ("demucs".equals(step.stage())) {
-            return "submission".equals(normalizeSubStage(profile.narrationInputMode()))
-                    && Boolean.FALSE.equals(profile.hasNativeSubtitle())
+            return Boolean.FALSE.equals(profile.hasNativeSubtitle())
                     && profile.hasBackgroundAudio();
-        }
-        if ("prepared_text".equals(normalizeSubStage(profile.narrationInputMode()))) {
-            return !(("downloader".equals(step.stage()) && "metadata".equals(step.subStage()))
-                    || ("downloader".equals(step.stage()) && "audio".equals(step.subStage()))
-                    || ("whisper".equals(step.stage()) && "source_transcription".equals(step.subStage()))
-                    || ("publisher".equals(step.stage()) && "script_generation".equals(step.subStage())));
-        }
-        if (!"submission".equals(normalizeSubStage(profile.narrationInputMode()))) {
-            return true;
         }
         if ("downloader".equals(step.stage()) && "audio".equals(step.subStage())) {
             return Boolean.FALSE.equals(profile.hasNativeSubtitle());
@@ -176,7 +164,6 @@ public class TaskRouteService {
     private record TaskProfile(
             String taskType,
             boolean hasBackgroundAudio,
-            String narrationInputMode,
             Boolean hasNativeSubtitle
     ) {
     }

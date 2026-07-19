@@ -47,6 +47,7 @@ class TaskFlowRowQueryService extends MonitorRepositorySqlSupport {
                       proc.asr_json_path,
                       proc.translation_json_path,
                       proc.timings_json_path,
+                      proc.source_transcript_txt_url,
                       meta.upload_title,
                       meta.upload_description,
                       meta.upload_tags,
@@ -56,18 +57,17 @@ class TaskFlowRowQueryService extends MonitorRepositorySqlSupport {
                       meta.horizontal_cover_url,
                       meta.vertical_cover_url,
                       meta.final_video_url,
-                      sv.title,
-                      sv.description AS source_description,
-                      sv.uploader AS source_uploader,
-                      sv.webpage_url AS source_webpage_url,
-                      CAST(sv.tags AS CHAR) AS source_tags_json,
-                      sv.duration AS source_duration_seconds
+                      ts.source_title AS title,
+                      ts.source_description,
+                      ts.source_uploader,
+                      ts.source_webpage_url,
+                      ts.source_tags_json,
+                      ts.source_duration_seconds
                     FROM task t
                     LEFT JOIN task_source ts ON ts.task_id = t.id
                     LEFT JOIN task_options opts ON opts.task_id = t.id
                     LEFT JOIN task_processing proc ON proc.task_id = t.id
                     LEFT JOIN task_metadata meta ON meta.task_id = t.id
-                    LEFT JOIN submitter_video sv ON sv.id = t.submitter_video_id
                     WHERE t.id = ?
                     LIMIT 1
                     """, (rs, rowNum) -> rowMap(rs), id);

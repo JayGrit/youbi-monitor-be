@@ -70,7 +70,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 SELECT
                   CONCAT('%s:', stage.task_id) id,
                   stage.task_id,
-                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source_video.title, ''), stage.task_id) title,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), stage.task_id) title,
                   COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   '%s' stage,
                   '' platform,
@@ -79,7 +79,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 FROM %s stage
                 JOIN task task ON task.id = stage.task_id
                 LEFT JOIN task_metadata meta ON meta.task_id = stage.task_id
-                LEFT JOIN submitter_video source_video ON source_video.id = task.submitter_video_id
+                LEFT JOIN task_source source ON source.task_id = stage.task_id
                 WHERE stage.status = 'failed'
                 """.formatted(stage, stage, quotedIdentifier(table));
     }
@@ -89,7 +89,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 SELECT
                   CONCAT('uploader:', submission.platform, ':', submission.id) id,
                   submission.task_id,
-                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source_video.title, ''), submission.task_id) title,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), submission.task_id) title,
                   COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   'uploader' stage,
                   submission.platform platform,
@@ -102,7 +102,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                  AND uploader.stage_name = 'uploader'
                  AND uploader.sub_stage = 'main'
                 LEFT JOIN task_metadata meta ON meta.task_id = submission.task_id
-                LEFT JOIN submitter_video source_video ON source_video.id = task.submitter_video_id
+                LEFT JOIN task_source source ON source.task_id = submission.task_id
                 WHERE submission.status = 'failed'
                 """.formatted(quotedIdentifier(table));
     }
@@ -121,7 +121,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 SELECT
                   CONCAT('uploader:', uploader.task_id) id,
                   uploader.task_id,
-                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source_video.title, ''), uploader.task_id) title,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), uploader.task_id) title,
                   COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   'uploader' stage,
                   '' platform,
@@ -130,7 +130,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 FROM distributor_task_stages uploader
                 JOIN task task ON task.id = uploader.task_id
                 LEFT JOIN task_metadata meta ON meta.task_id = uploader.task_id
-                LEFT JOIN submitter_video source_video ON source_video.id = task.submitter_video_id
+                LEFT JOIN task_source source ON source.task_id = uploader.task_id
                 WHERE uploader.stage_name = 'uploader'
                   AND uploader.sub_stage = 'main'
                   AND uploader.status = 'failed'

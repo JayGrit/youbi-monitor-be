@@ -77,7 +77,6 @@ public class TaskFlowService {
         }
 
         Map<String, Object> taskInfo = taskQueryRepositoryService.findTaskFlowRow("task_info", "task_id", taskId);
-        enrichSourceMetadata(taskInfo);
         List<String> stageKeys = detailStageKeys(requestedStage);
         List<TaskFlowDetail.TaskFlowAsset> minioObjects = taskAssetService.listTaskAssets(taskId).stream()
                 .filter(asset -> stageKeys.contains(asset.stage()))
@@ -98,27 +97,6 @@ public class TaskFlowService {
         }
         boolean knownStage = STAGES.stream().anyMatch(definition -> definition.key().equals(stage));
         return knownStage ? List.of(stage) : List.of("downloader");
-    }
-
-    private void enrichSourceMetadata(Map<String, Object> taskInfo) {
-        Object submitterVideoId = taskInfo.get("submitter_video_id");
-        if (submitterVideoId == null) {
-            return;
-        }
-        Map<String, Object> source = taskQueryRepositoryService.findTaskFlowRow(
-                "submitter_video",
-                "id",
-                String.valueOf(submitterVideoId)
-        );
-        if (source.isEmpty()) {
-            return;
-        }
-        taskInfo.put("title", source.get("title"));
-        taskInfo.put("source_description", source.get("description"));
-        taskInfo.put("source_uploader", source.get("uploader"));
-        taskInfo.put("source_webpage_url", source.get("webpage_url"));
-        taskInfo.put("source_tags_json", source.get("tags"));
-        taskInfo.put("source_duration_seconds", source.get("duration"));
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
