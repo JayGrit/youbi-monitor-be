@@ -334,8 +334,8 @@ public class NarrationManualService {
                   meta.upload_description,
                   meta.upload_tags,
                   meta.cover_text,
-                  meta.vertical_cover_url,
-                  meta.horizontal_cover_url,
+                  meta.cover_3_4,
+                  meta.cover_4_3,
                   pn.image_prompt
                 FROM task t
                 LEFT JOIN task_metadata meta ON meta.task_id = t.id
@@ -351,8 +351,8 @@ public class NarrationManualService {
                 || text(row.get("upload_tags")).isBlank()
                 || text(row.get("cover_text")).isBlank()
                 || text(row.get("image_prompt")).isBlank()
-                || text(row.get("vertical_cover_url")).isBlank()
-                || text(row.get("horizontal_cover_url")).isBlank()) {
+                || text(row.get("cover_3_4")).isBlank()
+                || text(row.get("cover_4_3")).isBlank()) {
             return false;
         }
 
@@ -361,14 +361,14 @@ public class NarrationManualService {
         result.put("task_type", "narration");
         result.put("sub_stage", "publish_metadata");
         result.put("image_prompt", row.get("image_prompt"));
-        result.put("vertical_cover_url", row.get("vertical_cover_url"));
-        result.put("horizontal_cover_url", row.get("horizontal_cover_url"));
+        result.put("cover_3_4", row.get("cover_3_4"));
+        result.put("cover_4_3", row.get("cover_4_3"));
         result.put("manual_completed", true);
         String resultJson = objectMapper.writeValueAsString(result);
 
         repository.update("""
                 UPDATE task_metadata
-                SET final_cover_url = horizontal_cover_url
+                SET final_cover_url = cover_4_3
                 WHERE task_id = ?
                 """, taskId);
         repository.update("""
@@ -457,8 +457,8 @@ public class NarrationManualService {
     private enum ImageKind {
         COVER("cover", "封面图", "cover_image_url", "generate_cover_image", "cover_image_url", 1, 1, "1:1", false),
         BACKGROUND("background", "背景图", "background_image_url", "generate_background_image", "background_image_url", 4, 3, "4:3", false),
-        VERTICAL("vertical", "竖版封面", "vertical_cover_url", "generate_narration_vertical_cover", "vertical_cover_url", 3, 4, "3:4", true),
-        HORIZONTAL("horizontal", "横版封面", "horizontal_cover_url", "generate_narration_horizontal_cover", "horizontal_cover_url", 4, 3, "4:3", true);
+        VERTICAL("vertical", "竖版封面", "cover_3_4", "generate_narration_vertical_cover", "cover_3_4", 3, 4, "3:4", true),
+        HORIZONTAL("horizontal", "横版封面", "cover_4_3", "generate_narration_horizontal_cover", "cover_4_3", 4, 3, "4:3", true);
 
         private final String apiName;
         private final String label;
