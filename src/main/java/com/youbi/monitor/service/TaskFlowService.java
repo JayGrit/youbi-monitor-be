@@ -54,7 +54,7 @@ public class TaskFlowService {
             "translator", List.of("translation_json_path", "target_language"),
             "speaker", List.of("tts_segments_dir"),
             "combiner", List.of("audio_dubbing_url", "timings_json_path", "final_video_url"),
-            "publisher", List.of("upload_title", "upload_description", "upload_tags", "cover_text", "clean_cover_url", "final_cover_url"),
+            "publisher", List.of("upload_title", "upload_description", "upload_tags", "cover_text", "final_cover_url"),
             "uploader", List.of()
     );
 
