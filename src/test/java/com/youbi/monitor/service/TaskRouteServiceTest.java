@@ -73,7 +73,7 @@ class TaskRouteServiceTest {
         String sql = invocation.getArgument(0);
         RowMapper<Object> mapper = invocation.getArgument(1);
         List<Object> result = new ArrayList<>();
-        if (sql.contains("FROM video_info")) {
+        if (sql.contains("FROM task_info")) {
             ResultSet rs = mock(ResultSet.class);
             when(rs.getString("task_type")).thenReturn(taskType);
             when(rs.getObject("has_background_audio")).thenReturn(background);
