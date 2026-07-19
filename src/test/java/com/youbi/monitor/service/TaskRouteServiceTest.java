@@ -73,12 +73,11 @@ class TaskRouteServiceTest {
         String sql = invocation.getArgument(0);
         RowMapper<Object> mapper = invocation.getArgument(1);
         List<Object> result = new ArrayList<>();
-        if (sql.contains("FROM task_info")) {
+        if (sql.contains("FROM task t")) {
             ResultSet rs = mock(ResultSet.class);
             when(rs.getString("task_type")).thenReturn(taskType);
             when(rs.getObject("has_background_audio")).thenReturn(background);
             when(rs.getBoolean("has_background_audio")).thenReturn(background);
-            when(rs.getString("narration_input_mode")).thenReturn("submission");
             when(rs.getObject("has_native_subtitle")).thenReturn(Boolean.FALSE);
             when(rs.getBoolean("has_native_subtitle")).thenReturn(false);
             result.add(mapper.mapRow(rs, 0));

@@ -31,7 +31,8 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         service.listTaskMonitorItems(LocalDateTime.now(), 20, 0, "running", "dubbing", "speaker", "task", "created_desc");
 
         assertThat(capturedSql.get())
-                .contains("FROM task t", "LEFT JOIN task_info", "LEFT JOIN submitter_video")
+                .contains("FROM task t", "LEFT JOIN task_source", "LEFT JOIN task_metadata")
+                .doesNotContain("LEFT JOIN submitter_video")
                 .doesNotContain("whisper_asr_segment", "translator_segment", "translator_api_task", "speaker_segment")
                 .doesNotContain("LEFT JOIN downloader", "LEFT JOIN demucs", "LEFT JOIN whisper", "LEFT JOIN uploader");
     }
