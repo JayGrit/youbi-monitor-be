@@ -46,7 +46,7 @@ public class SpeakerSegmentMonitorService {
                 SELECT COUNT(*)
                 FROM speaker_segment s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN video_info v ON v.task_id = s.task_id
+                LEFT JOIN task_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
@@ -89,7 +89,7 @@ public class SpeakerSegmentMonitorService {
                     s.reference_wav_url AS referenceWavUrl
                 FROM speaker_segment s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN video_info v ON v.task_id = s.task_id
+                LEFT JOIN task_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
@@ -125,7 +125,7 @@ public class SpeakerSegmentMonitorService {
                     MAX(CASE WHEN s.status = 'success' THEN s.completed_at ELSE NULL END) AS latestCompletedAt
                 FROM speaker_segment s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN video_info v ON v.task_id = s.task_id
+                LEFT JOIN task_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
@@ -186,7 +186,7 @@ public class SpeakerSegmentMonitorService {
                     FROM (
                         SELECT s2.id
                         FROM speaker_segment s2
-                        LEFT JOIN video_info v2 ON v2.task_id = s2.task_id
+                        LEFT JOIN task_info v2 ON v2.task_id = s2.task_id
                         %s
                         ORDER BY s2.completed_at DESC, s2.id DESC
                         LIMIT 20

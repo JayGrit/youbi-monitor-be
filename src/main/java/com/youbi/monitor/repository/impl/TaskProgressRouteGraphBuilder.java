@@ -35,7 +35,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
 
         Map<String, Object> profile = repository.query("""
                 SELECT task_type, has_background_audio, narration_input_mode, has_native_subtitle
-                FROM video_info
+                FROM task_info
                 WHERE task_id = ?
                 """, (rs, rowNum) -> Map.<String, Object>of(
                 "taskType", rs.getString("task_type") == null ? "" : rs.getString("task_type"),

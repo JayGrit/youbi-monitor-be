@@ -53,7 +53,7 @@ public class TaskRouteService {
     public List<RouteNode> routeForTask(String taskId) {
         List<TaskProfile> profiles = repository.query("""
                 SELECT task_type, has_background_audio, narration_input_mode, has_native_subtitle
-                FROM video_info
+                FROM task_info
                 WHERE task_id = ?
                 """, (rs, rowNum) -> new TaskProfile(
                 rs.getString("task_type"),

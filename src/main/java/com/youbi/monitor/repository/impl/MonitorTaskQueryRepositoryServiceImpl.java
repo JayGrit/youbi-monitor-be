@@ -161,7 +161,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM uploader_task_status
               GROUP BY task_id
             ) us ON us.task_id = t.id
-            LEFT JOIN video_info vi ON vi.task_id = t.id
+            LEFT JOIN task_info vi ON vi.task_id = t.id
             LEFT JOIN (
               SELECT task_id,
                      COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_bytes ELSE 0 END), 0) minio_storage_bytes,
@@ -337,7 +337,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM uploader_task_status
               GROUP BY task_id
             ) us ON us.task_id = t.id
-            LEFT JOIN video_info vi ON vi.task_id = t.id
+            LEFT JOIN task_info vi ON vi.task_id = t.id
             LEFT JOIN (
               SELECT task_id,
                      COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_bytes ELSE 0 END), 0) minio_storage_bytes,
@@ -355,7 +355,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_COUNT_SQL = """
             SELECT COUNT(*)
             FROM task t
-            LEFT JOIN video_info vi ON vi.task_id = t.id
+            LEFT JOIN task_info vi ON vi.task_id = t.id
             __TASK_MONITOR_WHERE__
             """;
     public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository) {
@@ -415,14 +415,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 """);
         ensurePublisherColumn("result_json", "MEDIUMTEXT NULL");
         ensurePublisherColumn("error_message", "TEXT NULL");
-        ensureVideoInfoColumn("upload_title", "VARCHAR(512) NULL");
-        ensureVideoInfoColumn("upload_description", "TEXT NULL");
-        ensureVideoInfoColumn("upload_tags", "TEXT NULL");
-        ensureVideoInfoColumn("cover_text", "VARCHAR(128) NULL");
-        ensureVideoInfoColumn("clean_cover_url", "TEXT NULL");
-        ensureVideoInfoColumn("final_cover_url", "TEXT NULL");
-        ensureVideoInfoColumn("source_cover_url", "TEXT NULL");
-        ensureVideoInfoColumn("source_subtitle_txt_url", "TEXT NULL");
         ensureBackupperMinioTable();
     }
 
@@ -592,13 +584,6 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static Integer integerOrNull(ResultSet rs, String column) throws SQLException {
         int value = rs.getInt(column);
         return rs.wasNull() ? null : value;
-    }
-
-    private void ensureVideoInfoColumn(String column, String definition) {
-        if (tableExists("video_info") && !columnExists("video_info", column)) {
-            repository.update("ALTER TABLE video_info ADD COLUMN " + quotedIdentifier(column) + " " + definition);
-            invalidateSchemaCapability("video_info", column);
-        }
     }
 
     private String monitorSql(String template, SqlFilter filter, String sort) {

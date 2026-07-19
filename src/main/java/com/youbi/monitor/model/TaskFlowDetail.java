@@ -6,7 +6,7 @@ import java.util.Map;
 
 public record TaskFlowDetail(
         Map<String, Object> task,
-        Map<String, Object> videoInfo,
+        Map<String, Object> taskInfo,
         List<TaskFlowStage> stages,
         List<TaskFlowAsset> minioObjects,
         LocalDateTime serverTime

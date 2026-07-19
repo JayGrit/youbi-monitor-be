@@ -76,8 +76,8 @@ public class TaskFlowService {
             return null;
         }
 
-        Map<String, Object> videoInfo = taskQueryRepositoryService.findTaskFlowRow("video_info", "task_id", taskId);
-        enrichSourceMetadata(videoInfo);
+        Map<String, Object> taskInfo = taskQueryRepositoryService.findTaskFlowRow("task_info", "task_id", taskId);
+        enrichSourceMetadata(taskInfo);
         List<String> stageKeys = detailStageKeys(requestedStage);
         List<TaskFlowDetail.TaskFlowAsset> minioObjects = taskAssetService.listTaskAssets(taskId).stream()
                 .filter(asset -> stageKeys.contains(asset.stage()))
@@ -85,10 +85,10 @@ public class TaskFlowService {
         List<TaskFlowDetail.TaskFlowStage> stages = new ArrayList<>();
         for (StageDefinition definition : STAGES) {
             if (stageKeys.contains(definition.key())) {
-                stages.add(flowStage(taskId, definition, task, videoInfo, minioObjects, now));
+                stages.add(flowStage(taskId, definition, task, taskInfo, minioObjects, now));
             }
         }
-        return new TaskFlowDetail(task, videoInfo, stages, minioObjects, now);
+        return new TaskFlowDetail(task, taskInfo, stages, minioObjects, now);
     }
 
     private List<String> detailStageKeys(String requestedStage) {
@@ -100,8 +100,8 @@ public class TaskFlowService {
         return knownStage ? List.of(stage) : List.of("downloader");
     }
 
-    private void enrichSourceMetadata(Map<String, Object> videoInfo) {
-        Object submitterVideoId = videoInfo.get("submitter_video_id");
+    private void enrichSourceMetadata(Map<String, Object> taskInfo) {
+        Object submitterVideoId = taskInfo.get("submitter_video_id");
         if (submitterVideoId == null) {
             return;
         }
@@ -113,19 +113,19 @@ public class TaskFlowService {
         if (source.isEmpty()) {
             return;
         }
-        videoInfo.put("title", source.get("title"));
-        videoInfo.put("source_description", source.get("description"));
-        videoInfo.put("source_uploader", source.get("uploader"));
-        videoInfo.put("source_webpage_url", source.get("webpage_url"));
-        videoInfo.put("source_tags_json", source.get("tags"));
-        videoInfo.put("source_duration_seconds", source.get("duration"));
+        taskInfo.put("title", source.get("title"));
+        taskInfo.put("source_description", source.get("description"));
+        taskInfo.put("source_uploader", source.get("uploader"));
+        taskInfo.put("source_webpage_url", source.get("webpage_url"));
+        taskInfo.put("source_tags_json", source.get("tags"));
+        taskInfo.put("source_duration_seconds", source.get("duration"));
     }
 
     private TaskFlowDetail.TaskFlowStage flowStage(
             String taskId,
             StageDefinition definition,
             Map<String, Object> task,
-            Map<String, Object> videoInfo,
+            Map<String, Object> taskInfo,
             List<TaskFlowDetail.TaskFlowAsset> minioObjects,
             LocalDateTime now
     ) {
@@ -144,8 +144,8 @@ public class TaskFlowService {
                 elapsedSeconds(startedAt, completedAt, now),
                 stringValue(stageRow.get("operator")),
                 stringValue(stageRow.get("error_message")),
-                flowFields(definition.key(), STAGE_INPUT_FIELDS, task, videoInfo, stageRow, minioObjects),
-                flowFields(definition.key(), STAGE_OUTPUT_FIELDS, task, videoInfo, stageRow, minioObjects),
+                flowFields(definition.key(), STAGE_INPUT_FIELDS, task, taskInfo, stageRow, minioObjects),
+                flowFields(definition.key(), STAGE_OUTPUT_FIELDS, task, taskInfo, stageRow, minioObjects),
                 tables
         );
     }
@@ -183,13 +183,13 @@ public class TaskFlowService {
             String stageKey,
             Map<String, List<String>> fieldMap,
             Map<String, Object> task,
-            Map<String, Object> videoInfo,
+            Map<String, Object> taskInfo,
             Map<String, Object> stageRow,
             List<TaskFlowDetail.TaskFlowAsset> minioObjects
     ) {
         List<TaskFlowDetail.TaskFlowField> fields = new ArrayList<>();
         for (String name : fieldMap.getOrDefault(stageKey, List.of())) {
-            Object value = firstPresent(name, stageRow, videoInfo, task);
+            Object value = firstPresent(name, stageRow, taskInfo, task);
             if (isBlankValue(value)) {
                 continue;
             }

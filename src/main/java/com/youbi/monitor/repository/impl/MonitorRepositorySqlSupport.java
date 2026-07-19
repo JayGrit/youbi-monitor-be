@@ -65,7 +65,7 @@ abstract class MonitorRepositorySqlSupport {
             "x", "uploader_account_x"
     );
     protected static final String UNIFIED_UPLOADER_ACCOUNT_TABLE = "uploader_account";
-    protected static final List<String> PRESERVED_VIDEO_INFO_COLUMNS = List.of(
+    protected static final List<String> PRESERVED_TASK_INFO_COLUMNS = List.of(
             "task_id",
             "source_url",
             "submitter_video_id",
@@ -253,7 +253,7 @@ abstract class MonitorRepositorySqlSupport {
     protected static String finalVideoRefSql() {
         return """
                 COALESCE(
-                  NULLIF(video_info.final_video_url, ''),
+                  NULLIF(task_info.final_video_url, ''),
                   NULLIF(CONCAT('adrive://', COALESCE(
                     NULLIF(final_video.alidrive_remote_path, ''),
                     NULLIF(final_video.alidrive_file_id, '')

@@ -130,9 +130,10 @@ public class NarrationManualService {
         String imageUrl = minioEndpoint + "/" + minioBucket + "/" + objectKey;
         if (kind.publishMetadata) {
             repository.update(
-                    "UPDATE video_info SET " + kind.columnName + " = ? WHERE task_id = ?",
-                    imageUrl,
-                    taskId
+                    "INSERT INTO task_metadata (task_id, " + kind.columnName + ") VALUES (?, ?) "
+                            + "ON DUPLICATE KEY UPDATE " + kind.columnName + " = VALUES(" + kind.columnName + ")",
+                    taskId,
+                    imageUrl
             );
         } else {
             repository.update(
@@ -302,8 +303,11 @@ public class NarrationManualService {
                     error_message = NULL
                 WHERE task_id = ?
                 """, taskId);
-        repository.update("UPDATE video_info SET final_cover_url = ? WHERE task_id = ?",
-                narration.backgroundImageUrl(), taskId);
+        repository.update("""
+                INSERT INTO task_metadata (task_id, final_cover_url)
+                VALUES (?, ?)
+                ON DUPLICATE KEY UPDATE final_cover_url = VALUES(final_cover_url)
+                """, taskId, narration.backgroundImageUrl());
         repository.update("""
                 INSERT INTO publisher_result (task_id, status, result_json, error_message)
                 VALUES (?, 'success', ?, NULL)
@@ -333,7 +337,7 @@ public class NarrationManualService {
                   vi.vertical_cover_url,
                   vi.horizontal_cover_url,
                   pn.image_prompt
-                FROM video_info vi
+                FROM task_info vi
                 JOIN product_narration pn ON pn.task_id = vi.task_id
                 WHERE vi.task_id = ?
                 """, taskId);
@@ -362,7 +366,7 @@ public class NarrationManualService {
         String resultJson = objectMapper.writeValueAsString(result);
 
         repository.update("""
-                UPDATE video_info
+                UPDATE task_metadata
                 SET final_cover_url = horizontal_cover_url
                 WHERE task_id = ?
                 """, taskId);
