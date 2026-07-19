@@ -70,16 +70,16 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 SELECT
                   CONCAT('%s:', stage.task_id) id,
                   stage.task_id,
-                  COALESCE(NULLIF(task_info.upload_title, ''), NULLIF(source_video.title, ''), stage.task_id) title,
-                  COALESCE(NULLIF(task_info.topic, ''), '未分类') topic,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source_video.title, ''), stage.task_id) title,
+                  COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   '%s' stage,
                   '' platform,
                   COALESCE(NULLIF(stage.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(stage.completed_at, stage.started_at, task.completed_at, task.started_at, task.created_at) failed_at
                 FROM %s stage
                 JOIN task task ON task.id = stage.task_id
-                LEFT JOIN task_info task_info ON task_info.task_id = stage.task_id
-                LEFT JOIN submitter_video source_video ON source_video.id = task_info.submitter_video_id
+                LEFT JOIN task_metadata meta ON meta.task_id = stage.task_id
+                LEFT JOIN submitter_video source_video ON source_video.id = task.submitter_video_id
                 WHERE stage.status = 'failed'
                 """.formatted(stage, stage, quotedIdentifier(table));
     }
@@ -89,8 +89,8 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 SELECT
                   CONCAT('uploader:', submission.platform, ':', submission.id) id,
                   submission.task_id,
-                  COALESCE(NULLIF(task_info.upload_title, ''), NULLIF(source_video.title, ''), submission.task_id) title,
-                  COALESCE(NULLIF(task_info.topic, ''), '未分类') topic,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source_video.title, ''), submission.task_id) title,
+                  COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   'uploader' stage,
                   submission.platform platform,
                   COALESCE(NULLIF(submission.error_message, ''), NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
@@ -101,8 +101,8 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   ON uploader.task_id = submission.task_id
                  AND uploader.stage_name = 'uploader'
                  AND uploader.sub_stage = 'main'
-                LEFT JOIN task_info task_info ON task_info.task_id = submission.task_id
-                LEFT JOIN submitter_video source_video ON source_video.id = task_info.submitter_video_id
+                LEFT JOIN task_metadata meta ON meta.task_id = submission.task_id
+                LEFT JOIN submitter_video source_video ON source_video.id = task.submitter_video_id
                 WHERE submission.status = 'failed'
                 """.formatted(quotedIdentifier(table));
     }
@@ -121,16 +121,16 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 SELECT
                   CONCAT('uploader:', uploader.task_id) id,
                   uploader.task_id,
-                  COALESCE(NULLIF(task_info.upload_title, ''), NULLIF(source_video.title, ''), uploader.task_id) title,
-                  COALESCE(NULLIF(task_info.topic, ''), '未分类') topic,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source_video.title, ''), uploader.task_id) title,
+                  COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   'uploader' stage,
                   '' platform,
                   COALESCE(NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(uploader.completed_at, uploader.started_at, task.completed_at, task.started_at, task.created_at) failed_at
                 FROM distributor_task_stages uploader
                 JOIN task task ON task.id = uploader.task_id
-                LEFT JOIN task_info task_info ON task_info.task_id = uploader.task_id
-                LEFT JOIN submitter_video source_video ON source_video.id = task_info.submitter_video_id
+                LEFT JOIN task_metadata meta ON meta.task_id = uploader.task_id
+                LEFT JOIN submitter_video source_video ON source_video.id = task.submitter_video_id
                 WHERE uploader.stage_name = 'uploader'
                   AND uploader.sub_stage = 'main'
                   AND uploader.status = 'failed'

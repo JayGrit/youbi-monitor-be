@@ -27,17 +27,17 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(vi.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
-              vi.source_url,
+              COALESCE(NULLIF(meta.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
+              ts.source_url,
               sv.webpage_url source_webpage_url,
-              vi.source_thumbnail_url,
+              ts.source_thumbnail_url,
               sv.duration source_duration_seconds,
               bm.minio_storage_bytes,
               bm.minio_storage_object_count,
               bm.minio_storage_updated_at,
-              vi.topic topic,
-              vi.task_type distributor_task_type,
-              vi.has_background_audio,
+              t.topic topic,
+              t.task_type distributor_task_type,
+              opts.has_background_audio,
               __DISTRIBUTOR_STAGES_SELECT__
               t.status,
               t.current_stage,
@@ -161,7 +161,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM uploader_task_status
               GROUP BY task_id
             ) us ON us.task_id = t.id
-            LEFT JOIN task_info vi ON vi.task_id = t.id
+            LEFT JOIN task_source ts ON ts.task_id = t.id
+            LEFT JOIN task_options opts ON opts.task_id = t.id
+            LEFT JOIN task_metadata meta ON meta.task_id = t.id
             LEFT JOIN (
               SELECT task_id,
                      COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_bytes ELSE 0 END), 0) minio_storage_bytes,
@@ -170,7 +172,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM backupper_minio
               GROUP BY task_id
             ) bm ON bm.task_id = t.id
-            LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
+            LEFT JOIN submitter_video sv ON sv.id = t.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             LEFT JOIN (
               SELECT task_id, COUNT(*) fixed_count
@@ -203,17 +205,17 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_SUMMARY_SQL = """
             SELECT
               t.id,
-              COALESCE(NULLIF(vi.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
-              vi.source_url,
+              COALESCE(NULLIF(meta.upload_title, ''), NULLIF(sv.title, ''), t.id) title,
+              ts.source_url,
               sv.webpage_url source_webpage_url,
-              vi.source_thumbnail_url,
+              ts.source_thumbnail_url,
               sv.duration source_duration_seconds,
               bm.minio_storage_bytes,
               bm.minio_storage_object_count,
               bm.minio_storage_updated_at,
-              vi.topic topic,
-              vi.task_type distributor_task_type,
-              vi.has_background_audio,
+              t.topic topic,
+              t.task_type distributor_task_type,
+              opts.has_background_audio,
               __DISTRIBUTOR_STAGES_SELECT__
               t.status,
               t.current_stage,
@@ -337,7 +339,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM uploader_task_status
               GROUP BY task_id
             ) us ON us.task_id = t.id
-            LEFT JOIN task_info vi ON vi.task_id = t.id
+            LEFT JOIN task_source ts ON ts.task_id = t.id
+            LEFT JOIN task_options opts ON opts.task_id = t.id
+            LEFT JOIN task_metadata meta ON meta.task_id = t.id
             LEFT JOIN (
               SELECT task_id,
                      COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_bytes ELSE 0 END), 0) minio_storage_bytes,
@@ -346,7 +350,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM backupper_minio
               GROUP BY task_id
             ) bm ON bm.task_id = t.id
-            LEFT JOIN submitter_video sv ON sv.id = vi.submitter_video_id
+            LEFT JOIN submitter_video sv ON sv.id = t.submitter_video_id
             __DOWNLOADER_PROGRESS_JOIN__
             __TASK_MONITOR_WHERE__
             __TASK_MONITOR_ORDER_BY__
@@ -355,7 +359,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_COUNT_SQL = """
             SELECT COUNT(*)
             FROM task t
-            LEFT JOIN task_info vi ON vi.task_id = t.id
+            LEFT JOIN task_source ts ON ts.task_id = t.id
+            LEFT JOIN task_options opts ON opts.task_id = t.id
+            LEFT JOIN task_metadata meta ON meta.task_id = t.id
             __TASK_MONITOR_WHERE__
             """;
     public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository) {
@@ -642,7 +648,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     (
                       SELECT GROUP_CONCAT(dts.stage_name ORDER BY dts.stage_order SEPARATOR ',')
                       FROM distributor_type_stages dts
-                      WHERE dts.task_type = vi.task_type
+                      WHERE dts.task_type = t.task_type
                     ) distributor_stages,
                     """;
         }
@@ -739,7 +745,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addFilter(conditions, args, "t.status", status);
-        addFilter(conditions, args, "vi.topic", topic);
+        addFilter(conditions, args, "t.topic", topic);
         addFilter(conditions, args, "t.current_stage", stage);
         String normalizedTaskId = text(taskId);
         if (!normalizedTaskId.isBlank()) {

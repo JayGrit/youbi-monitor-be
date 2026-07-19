@@ -46,7 +46,6 @@ public class SpeakerSegmentMonitorService {
                 SELECT COUNT(*)
                 FROM speaker_segment s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN task_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
@@ -62,7 +61,7 @@ public class SpeakerSegmentMonitorService {
                 SELECT
                     s.id,
                     s.task_id AS taskId,
-                    COALESCE(NULLIF(v.task_type, ''), NULLIF(v.topic, ''), stage.stage_name) AS taskType,
+                    COALESCE(NULLIF(t.task_type, ''), NULLIF(t.topic, ''), stage.stage_name) AS taskType,
                     COALESCE(t.priority, 1) AS priority,
                     s.item_index AS itemIndex,
                     s.status,
@@ -89,7 +88,6 @@ public class SpeakerSegmentMonitorService {
                     s.reference_wav_url AS referenceWavUrl
                 FROM speaker_segment s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN task_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
@@ -125,7 +123,6 @@ public class SpeakerSegmentMonitorService {
                     MAX(CASE WHEN s.status = 'success' THEN s.completed_at ELSE NULL END) AS latestCompletedAt
                 FROM speaker_segment s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN task_info v ON v.task_id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
@@ -159,7 +156,7 @@ public class SpeakerSegmentMonitorService {
         }
         addDeviceFilter(conditions, args, first(query, "device"));
         addLike(conditions, args, "s.task_id", first(query, "taskId"));
-        addLike(conditions, args, "COALESCE(v.task_type, v.topic, '')", first(query, "taskType"));
+        addLike(conditions, args, "COALESCE(t.task_type, t.topic, '')", first(query, "taskType"));
         conditions.add("(t.status IS NULL OR t.status <> 'success')");
         return new QueryParts(conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions), args);
     }
@@ -186,7 +183,7 @@ public class SpeakerSegmentMonitorService {
                     FROM (
                         SELECT s2.id
                         FROM speaker_segment s2
-                        LEFT JOIN task_info v2 ON v2.task_id = s2.task_id
+                        LEFT JOIN task t ON t.id = s2.task_id
                         %s
                         ORDER BY s2.completed_at DESC, s2.id DESC
                         LIMIT 20
@@ -202,7 +199,7 @@ public class SpeakerSegmentMonitorService {
         conditions.add("s2.status IN ('success', 'failed')");
         addDeviceFilter(conditions, args, "s2.operator", first(query, "device"));
         addLike(conditions, args, "s2.task_id", first(query, "taskId"));
-        addLike(conditions, args, "COALESCE(v2.task_type, v2.topic, '')", first(query, "taskType"));
+        addLike(conditions, args, "COALESCE(t.task_type, t.topic, '')", first(query, "taskType"));
         return new QueryParts(" WHERE " + String.join(" AND ", conditions), args);
     }
 

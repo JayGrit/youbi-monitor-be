@@ -253,7 +253,7 @@ abstract class MonitorRepositorySqlSupport {
     protected static String finalVideoRefSql() {
         return """
                 COALESCE(
-                  NULLIF(task_info.final_video_url, ''),
+                  NULLIF(meta.final_video_url, ''),
                   NULLIF(CONCAT('adrive://', COALESCE(
                     NULLIF(final_video.alidrive_remote_path, ''),
                     NULLIF(final_video.alidrive_file_id, '')

@@ -330,16 +330,17 @@ public class NarrationManualService {
     private boolean finalizePublishMetadataIfComplete(String taskId) throws JsonProcessingException {
         List<Map<String, Object>> rows = repository.queryForList("""
                 SELECT
-                  vi.upload_title,
-                  vi.upload_description,
-                  vi.upload_tags,
-                  vi.cover_text,
-                  vi.vertical_cover_url,
-                  vi.horizontal_cover_url,
+                  meta.upload_title,
+                  meta.upload_description,
+                  meta.upload_tags,
+                  meta.cover_text,
+                  meta.vertical_cover_url,
+                  meta.horizontal_cover_url,
                   pn.image_prompt
-                FROM task_info vi
-                JOIN product_narration pn ON pn.task_id = vi.task_id
-                WHERE vi.task_id = ?
+                FROM task t
+                LEFT JOIN task_metadata meta ON meta.task_id = t.id
+                JOIN product_narration pn ON pn.task_id = t.id
+                WHERE t.id = ?
                 """, taskId);
         if (rows.isEmpty()) {
             return false;

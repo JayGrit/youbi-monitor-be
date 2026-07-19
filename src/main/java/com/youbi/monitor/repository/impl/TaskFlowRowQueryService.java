@@ -26,6 +26,53 @@ class TaskFlowRowQueryService extends MonitorRepositorySqlSupport {
         if (table == null || !tableExists(table)) {
             return Map.of();
         }
+        if ("task_info".equals(table) && "task_id".equals(idColumn)) {
+            List<Map<String, Object>> rows = repository.query("""
+                    SELECT
+                      t.id AS task_id,
+                      t.submitter_video_id,
+                      t.topic,
+                      t.task_type,
+                      ts.source_url,
+                      ts.source_thumbnail_url,
+                      ts.source_subtitle_txt_url,
+                      ts.metadata_url,
+                      ts.video_source_url,
+                      ts.audio_source_url,
+                      opts.target_language,
+                      proc.audio_vocals_url,
+                      proc.audio_bgm_url,
+                      proc.audio_dubbing_url,
+                      proc.tts_segments_dir,
+                      proc.asr_json_path,
+                      proc.translation_json_path,
+                      proc.timings_json_path,
+                      meta.upload_title,
+                      meta.upload_description,
+                      meta.upload_tags,
+                      meta.cover_text,
+                      meta.clean_cover_url,
+                      meta.final_cover_url,
+                      meta.horizontal_cover_url,
+                      meta.vertical_cover_url,
+                      meta.final_video_url,
+                      sv.title,
+                      sv.description AS source_description,
+                      sv.uploader AS source_uploader,
+                      sv.webpage_url AS source_webpage_url,
+                      CAST(sv.tags AS CHAR) AS source_tags_json,
+                      sv.duration AS source_duration_seconds
+                    FROM task t
+                    LEFT JOIN task_source ts ON ts.task_id = t.id
+                    LEFT JOIN task_options opts ON opts.task_id = t.id
+                    LEFT JOIN task_processing proc ON proc.task_id = t.id
+                    LEFT JOIN task_metadata meta ON meta.task_id = t.id
+                    LEFT JOIN submitter_video sv ON sv.id = t.submitter_video_id
+                    WHERE t.id = ?
+                    LIMIT 1
+                    """, (rs, rowNum) -> rowMap(rs), id);
+            return rows.isEmpty() ? Map.of() : rows.get(0);
+        }
         List<Map<String, Object>> rows = listTaskFlowRows(table, idColumn, id, idColumn, 1);
         return rows.isEmpty() ? Map.of() : rows.get(0);
     }
