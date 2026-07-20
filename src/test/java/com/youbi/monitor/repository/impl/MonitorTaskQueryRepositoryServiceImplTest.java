@@ -63,6 +63,9 @@ class MonitorTaskQueryRepositoryServiceImplTest {
         assertThat(sql).doesNotContain("__");
         assertThat(normalizedSql).contains("FROM whisper_asr_segment WHERE task_id = ?");
         assertThat(normalizedSql).contains("FROM translator_segment WHERE task_id = ?");
+        assertThat(normalizedSql).contains("LEFT JOIN task_source ts ON ts.task_id = t.id");
+        assertThat(normalizedSql).contains(") translator_segments ON translator_segments.task_id = t.id");
+        assertThat(normalizedSql).contains("translator_segments.translated_count");
         assertThat(normalizedSql).contains("FROM `translator_chunk` ch");
         assertThat(normalizedSql).doesNotContain("FROM `translator-chunk` ch");
         assertThat(normalizedSql).contains("ch.task_id = ? AND ch.row_role = 'normal'");

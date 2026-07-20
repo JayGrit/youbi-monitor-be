@@ -66,9 +66,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               tr.started_at translator_started_at,
               tr.completed_at translator_completed_at,
               tr.error_message translator_error,
-              COALESCE(tc.translator_completed_count, ts.translated_count) translator_completed_count,
+              COALESCE(tc.translator_completed_count, translator_segments.translated_count) translator_completed_count,
               tf.translator_failed_count translator_failed_count,
-              COALESCE(tc.translator_total_count, GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(ts.translated_count, 0))) translator_total_count,
+              COALESCE(tc.translator_total_count, GREATEST(COALESCE(fa.fixed_count, 0), COALESCE(translator_segments.translated_count, 0))) translator_total_count,
               NULL translator_child_error,
 
               CASE WHEN COALESCE(ss.speaker_failed_count, 0) > 0 THEN 'failed' ELSE sp.status END speaker_status,
@@ -184,7 +184,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
               FROM translator_segment
               __TRANSLATOR_SEGMENT_TASK_FILTER__
               GROUP BY task_id
-            ) ts ON ts.task_id = t.id
+            ) translator_segments ON translator_segments.task_id = t.id
             __TRANSLATOR_CHUNK_JOIN__
             __TRANSLATOR_FAILURE_JOIN__
             LEFT JOIN (
