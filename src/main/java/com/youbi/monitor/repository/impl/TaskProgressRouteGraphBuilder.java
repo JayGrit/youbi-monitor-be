@@ -291,7 +291,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         loadSubStageJobSummaries(taskId, now, summaries, "publisher", "publisher_jobs", activeIds);
         loadSubStageJobSummaries(taskId, now, summaries, "asseter", "asseter_jobs", activeIds);
         loadSubStageJobSummaries(taskId, now, summaries, "combiner", "combiner_jobs", activeIds);
-        loadMainJobSummary(taskId, now, summaries, "translator", "translator_jobs", routeId("translator", "main"), activeIds);
+        loadTranslatorJobSummary(taskId, now, summaries, routeId("translator", "main"), activeIds);
         loadMainJobSummary(taskId, now, summaries, "uploader", "uploader_task", routeId("uploader", "main"), activeIds);
         loadMainJobSummary(taskId, now, summaries, "uploader", "uploader_task_status", routeId("uploader", "main"), activeIds);
         loadMainJobSummary(taskId, now, summaries, "speaker", "speaker_segment",
@@ -343,6 +343,41 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
                 FROM %s
                 WHERE task_id = ?
                 """.formatted(quotedIdentifier(table)), (rs, rowNum) -> jobSummaryFromRow(serviceName, table, now, rs), taskId);
+        rows.stream()
+                .filter(summary -> summary.totalCount() > 0)
+                .findFirst()
+                .ifPresent(summary -> summaries.put(routeId, summary));
+    }
+
+    private void loadTranslatorJobSummary(String taskId, LocalDateTime now, Map<String, JobSummary> summaries,
+                                          String routeId, Set<String> activeIds) {
+        String table = "translator_jobs";
+        if (routeId == null || !activeIds.contains(routeId)
+                || !hasColumns(table, "task_id", "status", "started_at", "completed_at", "request_key", "job_name", "id")) {
+            return;
+        }
+        List<JobSummary> rows = repository.query("""
+                SELECT COUNT(*) total_count,
+                       SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) completed_count,
+                       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) failed_count,
+                       SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) running_count,
+                       SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) pending_count,
+                       SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) ready_count,
+                       MIN(started_at) started_at,
+                       MAX(completed_at) completed_at
+                FROM translator_jobs job
+                JOIN (
+                    SELECT MAX(id) latest_id
+                    FROM (
+                        SELECT id,
+                               SUBSTRING_INDEX(COALESCE(NULLIF(request_key, ''), job_name), ':run:' COLLATE utf8mb4_unicode_ci, 1) logical_key
+                        FROM translator_jobs
+                        WHERE task_id = ?
+                    ) keyed
+                    GROUP BY logical_key
+                ) latest ON latest.latest_id = job.id
+                WHERE job.task_id = ?
+                """, (rs, rowNum) -> jobSummaryFromRow("translator", table, now, rs), taskId, taskId);
         rows.stream()
                 .filter(summary -> summary.totalCount() > 0)
                 .findFirst()
