@@ -19,16 +19,16 @@ public class TaskRouteService {
             "subtitle", steps("downloader", "publisher", "demucs", "whisper", "translator", "combiner", "uploader"),
             "dubbing", steps("downloader", "publisher", "demucs", "whisper", "translator", "speaker", "combiner", "uploader"),
             "narration", List.of(
-                    new Step("downloader", "metadata"), new Step("downloader", "audio"),
-                    new Step("demucs", "main"), new Step("whisper", "source_transcription"),
-                    new Step("publisher", "script_generation"), new Step("publisher", "publish_metadata"),
-                    new Step("publisher", "segment_plan"), new Step("publisher", "image_generation"),
-                    new Step("asseter", "image_composition"), new Step("speaker", "narration"),
-                    new Step("combiner", "audio_merge"), new Step("whisper", "main"),
-                    new Step("asseter", "audio_visualization"), new Step("combiner", "video_render"),
-                    new Step("uploader", "main")
+                    new Step("downloader", "metadata", null), new Step("downloader", "audio", null),
+                    new Step("demucs", "main", null), new Step("whisper", "source_transcription", null),
+                    new Step("publisher", "script_generation", null), new Step("publisher", "publish_metadata", null),
+                    new Step("publisher", "segment_plan", null), new Step("publisher", "image_generation", null),
+                    new Step("asseter", "image_composition", null), new Step("speaker", "narration", null),
+                    new Step("combiner", "audio_merge", null), new Step("whisper", "main", null),
+                    new Step("asseter", "audio_visualization", null), new Step("combiner", "video_render", null),
+                    new Step("uploader", "main", null)
             ),
-            "asmr", List.of(new Step("downloader", "main"), new Step("publisher", "main"), new Step("combiner", "asmr"))
+            "asmr", List.of(new Step("downloader", "main", null), new Step("publisher", "main", null), new Step("combiner", "asmr", null))
     );
 
     private final MonitorRepository repository;
@@ -66,11 +66,15 @@ public class TaskRouteService {
         }
         TaskProfile profile = profiles.get(0);
         List<Step> configured = repository.query("""
-                SELECT stage_name, sub_stage
+                SELECT stage_name, sub_stage, COALESCE(NULLIF(remark, ''), '') AS label
                 FROM distributor_type_stages
                 WHERE task_type = ?
                 ORDER BY stage_order
-                """, (rs, rowNum) -> new Step(rs.getString("stage_name"), normalizeSubStage(rs.getString("sub_stage"))), profile.taskType());
+                """, (rs, rowNum) -> new Step(
+                rs.getString("stage_name"),
+                normalizeSubStage(rs.getString("sub_stage")),
+                rs.getString("label")
+        ), profile.taskType());
         if (configured.isEmpty()) {
             configured = FALLBACKS.get(profile.taskType());
             if (configured == null) {
@@ -90,7 +94,7 @@ public class TaskRouteService {
                     step.stage() + ":" + subStage,
                     step.stage(),
                     subStage,
-                    label(policy.label(), step.stage(), subStage),
+                    label(step.label()),
                     route.size() + 1,
                     policy.tableName()
             ));
@@ -101,34 +105,11 @@ public class TaskRouteService {
         return List.copyOf(route);
     }
 
-    private static String label(String defaultLabel, String stage, String subStage) {
-        if ("downloader".equals(stage) && "metadata".equals(subStage)) return "元数据下载";
-        if ("downloader".equals(stage) && "video".equals(subStage)) return "视频下载";
-        if ("downloader".equals(stage) && "audio".equals(subStage)) return "音频下载";
-        if ("whisper".equals(stage) && "source_transcription".equals(subStage)) return "源语音识别";
-        if ("publisher".equals(stage)) {
-            return switch (subStage) {
-                case "script_generation" -> "文案生成";
-                case "publish_metadata" -> "发布准备";
-                case "segment_plan" -> "文案分段";
-                case "image_generation" -> "图片生成";
-                default -> defaultLabel;
-            };
+    private static String label(String configuredLabel) {
+        if (configuredLabel == null || configuredLabel.isBlank()) {
+            return "Unknown";
         }
-        if ("asseter".equals(stage)) {
-            return switch (subStage) {
-                case "image_composition" -> "图片素材";
-                case "audio_visualization" -> "音频素材";
-                default -> defaultLabel;
-            };
-        }
-        if (!"combiner".equals(stage)) return defaultLabel;
-        return switch (subStage) {
-            case "audio_merge" -> "音频合并";
-            case "video_render" -> "视频渲染";
-            case "asmr" -> "ASMR 合成";
-            default -> defaultLabel;
-        };
+        return configuredLabel;
     }
 
     private static boolean stageEnabled(TaskProfile profile, Step step) {
@@ -157,7 +138,7 @@ public class TaskRouteService {
 
     private static List<Step> steps(String... stages) {
         List<Step> result = new ArrayList<>();
-        for (String stage : stages) result.add(new Step(stage, "main"));
+        for (String stage : stages) result.add(new Step(stage, "main", null));
         return List.copyOf(result);
     }
 
@@ -168,6 +149,6 @@ public class TaskRouteService {
     ) {
     }
 
-    private record Step(String stage, String subStage) {
+    private record Step(String stage, String subStage, String label) {
     }
 }

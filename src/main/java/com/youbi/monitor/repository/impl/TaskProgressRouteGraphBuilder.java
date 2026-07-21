@@ -484,43 +484,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         if (!configuredLabel.isBlank()) {
             return configuredLabel;
         }
-        return routeLabel(config.stage(), config.subStage());
-    }
-
-    private static String routeLabel(String stage, String subStage) {
-        String id = routeId(stage, subStage);
-        return switch (id) {
-            case "publisher:segment_plan" -> "文案分段";
-            case "publisher:image_generation" -> "图片生成";
-            case "publisher:script_generation" -> "文案生成";
-            case "publisher:publish_metadata" -> "发布准备";
-            case "publisher:dialogue_optimization" -> "对话优化";
-            case "downloader:metadata" -> "元数据下载";
-            case "downloader:video" -> "视频下载";
-            case "downloader:audio" -> "音频下载";
-            case "whisper:source_transcription" -> "源语音识别";
-            case "whisper:ppt_alignment" -> "字幕对齐";
-            case "asseter:image_composition" -> "图片素材";
-            case "asseter:audio_visualization" -> "音频素材";
-            case "combiner:audio_merge" -> "音频合并";
-            case "combiner:audio_align" -> "音频对齐";
-            case "combiner:video_render" -> "视频渲染";
-            case "combiner:asmr" -> "ASMR 合成";
-            case "combiner:blessing_video" -> "祝福视频";
-            case "speaker:ppt_dialogue" -> "PPT 对话配音";
-            default -> switch (stage) {
-                case "downloader" -> "下载";
-                case "publisher" -> "发布准备";
-                case "demucs" -> "人声分离";
-                case "whisper" -> "语音识别";
-                case "translator" -> "翻译";
-                case "speaker" -> "配音";
-                case "asseter" -> "素材加工";
-                case "combiner" -> "音视频合成";
-                case "uploader" -> "上传";
-                default -> stage;
-            };
-        };
+        return "Unknown";
     }
 
     private record RouteConfigNode(String stage, String subStage, int order, String label) {

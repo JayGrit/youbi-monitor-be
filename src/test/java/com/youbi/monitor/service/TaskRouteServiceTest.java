@@ -31,9 +31,9 @@ class TaskRouteServiceTest {
                 "combiner:audio_merge", "whisper:main", "asseter:audio_visualization",
                 "combiner:video_render", "uploader:main"));
         assertThat(narration).extracting(RouteNode::id).contains("combiner:audio_merge", "combiner:video_render");
-        assertThat(narration).extracting(RouteNode::label).contains("音频合并", "视频渲染");
+        assertThat(narration).extracting(RouteNode::label).containsOnly("Unknown");
         List<RouteNode> asmr = assertRoute("asmr", true, rows("downloader:main", "publisher:main", "combiner:asmr"));
-        assertThat(asmr.get(2).label()).isEqualTo("ASMR 合成");
+        assertThat(asmr.get(2).label()).isEqualTo("Unknown");
     }
 
     @Test
@@ -87,6 +87,7 @@ class TaskRouteServiceTest {
                 ResultSet rs = mock(ResultSet.class);
                 when(rs.getString("stage_name")).thenReturn(row[0]);
                 when(rs.getString("sub_stage")).thenReturn(row[1]);
+                when(rs.getString("label")).thenReturn(row.length > 2 ? row[2] : "");
                 result.add(mapper.mapRow(rs, index++));
             }
         }
