@@ -53,6 +53,7 @@ class TaskFlowRowQueryService extends MonitorRepositorySqlSupport {
                       meta.upload_tags,
                       meta.cover_text,
                       meta.final_cover_url,
+                      meta.cover_16_9,
                       meta.cover_4_3,
                       meta.cover_3_4,
                       meta.final_video_url,
