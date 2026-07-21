@@ -287,6 +287,7 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
     private Map<String, JobSummary> loadJobSummaries(String taskId, List<RouteConfigNode> configured, Set<String> activeIds,
                                                      LocalDateTime now) {
         Map<String, JobSummary> summaries = new HashMap<>();
+        loadMainJobSummary(taskId, now, summaries, "downloader", "downloader_detail", routeId("downloader", "main"), activeIds);
         loadSubStageJobSummaries(taskId, now, summaries, "publisher", "publisher_jobs", activeIds);
         loadSubStageJobSummaries(taskId, now, summaries, "asseter", "asseter_jobs", activeIds);
         loadSubStageJobSummaries(taskId, now, summaries, "combiner", "combiner_jobs", activeIds);
@@ -403,21 +404,26 @@ class TaskProgressRouteGraphBuilder extends MonitorRepositorySqlSupport {
         long elapsed = 0;
         String error = null;
         boolean useBase = "main".equals(config.subStage()) && physical == null;
-        if (completed) {
-            status = "success";
-            completedAt = logs.completedAt().get(config.id());
-        } else if (physical != null) {
-            status = physical.status();
+        if (physical != null) {
             startedAt = physical.startedAt();
             completedAt = physical.completedAt();
             elapsed = physical.elapsedSeconds();
             error = physical.errorMessage();
         } else if (useBase && base != null) {
-            status = base.status();
             startedAt = base.startedAt();
             completedAt = base.completedAt();
             elapsed = base.elapsedSeconds();
             error = base.errorMessage();
+        }
+        if (completed) {
+            status = "success";
+            if (completedAt == null) {
+                completedAt = logs.completedAt().get(config.id());
+            }
+        } else if (physical != null) {
+            status = physical.status();
+        } else if (useBase && base != null) {
+            status = base.status();
         } else {
             status = logs.released().contains(config.id()) ? "ready" : "pending";
         }
