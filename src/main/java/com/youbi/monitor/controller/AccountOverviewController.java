@@ -64,8 +64,12 @@ public class AccountOverviewController {
 
     // 修改指定平台账号的账号标识。
     @PostMapping("/api/accounts/{platform}/{topic}/key")
-    public Map<String, Object> renameKey(@PathVariable String platform, @PathVariable String topic, @RequestBody SocialTopicUpdateRequest request) {
-        return accountOverviewService.renameTopic(platform, topic, request.newTopic());
+    public ResponseEntity<?> renameKey(@PathVariable String platform, @PathVariable String topic, @RequestBody SocialTopicUpdateRequest request) {
+        try {
+            return ResponseEntity.ok(accountOverviewService.renameTopic(platform, topic, request.newTopic()));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
     }
 
     // 启用或停用指定平台账号。

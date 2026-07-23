@@ -49,6 +49,7 @@ public class AccountOverviewService {
     @PostConstruct
     public void ensureSchema() {
         schemaService.ensureLatestVideoPublishColumns();
+        schemaService.ensureUploaderAccountAlertColumns();
     }
 
     public List<String> types() {
@@ -101,6 +102,7 @@ public class AccountOverviewService {
         if (oldKey.equals(nextKey)) {
             return findAccount(normalizedPlatform, oldKey);
         }
+        ensureNoPendingUploaderTasks(normalizedPlatform, oldKey);
         if (repository.update("UPDATE operator_loginstate SET topic = ?, updated_at = NOW() WHERE platform = ? AND topic = ?", nextKey, normalizedPlatform, oldKey) != 1) {
             throw new IllegalArgumentException("Account not found");
         }
@@ -246,6 +248,7 @@ public class AccountOverviewService {
                        COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time,
                        COALESCE(ua.upload_quiet_end_time, TIME('07:00:00')) AS upload_quiet_end_time,
                        COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count,
+                       COALESCE(ua.asset_warning_threshold, 100) AS asset_warning_threshold,
                        ua.subscribers,
                        ua.new_subscribers,
                        COALESCE(ua.is_enabled, 1) AS is_enabled,
@@ -388,6 +391,7 @@ public class AccountOverviewService {
         row.put("uploadQuietStartTime", toLocalTime(rs.getTime("upload_quiet_start_time")));
         row.put("uploadQuietEndTime", toLocalTime(rs.getTime("upload_quiet_end_time")));
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
+        row.put("assetWarningThreshold", rs.getInt("asset_warning_threshold"));
         row.put("subscribers", nullableLong(rs, "subscribers"));
         row.put("newSubscribers", nullableLong(rs, "new_subscribers"));
         row.put("statsLoading", true);
@@ -462,6 +466,19 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Invalid topic");
         }
         return normalized;
+    }
+
+    private void ensureNoPendingUploaderTasks(String platform, String topic) {
+        Integer count = repository.queryForObject("""
+                SELECT COUNT(*)
+                FROM uploader_task
+                WHERE platform = ?
+                  AND topic = ?
+                  AND status IN ('ready', 'failed')
+                """, Integer.class, platform, topic);
+        if (count != null && count > 0) {
+            throw new IllegalArgumentException("该账号还有 ready/failed 上传子任务，不能修改 topic");
+        }
     }
 
     private Map<String, Object> findAccount(String platform, String topic) {
