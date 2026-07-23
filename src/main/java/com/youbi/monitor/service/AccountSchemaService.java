@@ -102,6 +102,24 @@ public class AccountSchemaService {
         }
     }
 
+    void ensureUploaderAccountAlertColumns() {
+        if (!tableExists("uploader_account")) {
+            return;
+        }
+        if (!columnExists("uploader_account", "scheduled_publish_max_days")) {
+            repository.update("""
+                    ALTER TABLE uploader_account
+                    ADD COLUMN scheduled_publish_max_days INT NOT NULL DEFAULT 3
+                    """);
+        }
+        if (!columnExists("uploader_account", "asset_warning_threshold")) {
+            repository.update("""
+                    ALTER TABLE uploader_account
+                    ADD COLUMN asset_warning_threshold INT NOT NULL DEFAULT 100
+                    """);
+        }
+    }
+
     void ensureOperatorLoginstateTables() {
         if (!tableExists("operator_profile")) {
             repository.update("""
