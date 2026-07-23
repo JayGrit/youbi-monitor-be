@@ -84,6 +84,24 @@ public class AccountSchemaService {
                 """);
     }
 
+    void ensureLatestVideoPublishColumns() {
+        if (!tableExists("uploader_account")) {
+            return;
+        }
+        if (!columnExists("uploader_account", "latest_video_publish_at")) {
+            repository.update("""
+                    ALTER TABLE uploader_account
+                    ADD COLUMN latest_video_publish_at DATETIME NULL
+                    """);
+        }
+        if (!columnExists("uploader_account", "latest_video_publish_at_epoch")) {
+            repository.update("""
+                    ALTER TABLE uploader_account
+                    ADD COLUMN latest_video_publish_at_epoch BIGINT NULL
+                    """);
+        }
+    }
+
     void ensureOperatorLoginstateTables() {
         if (!tableExists("operator_profile")) {
             repository.update("""

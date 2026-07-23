@@ -2,6 +2,7 @@ package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.repository.MonitorRepository;
+import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,13 +34,21 @@ public class AccountOverviewService {
 
     private final MonitorRepository repository;
     private final BackupperStatusService backupperStatusService;
+    private final AccountSchemaService schemaService;
 
     public AccountOverviewService(
             MonitorRepository repository,
-            BackupperStatusService backupperStatusService
+            BackupperStatusService backupperStatusService,
+            AccountSchemaService schemaService
     ) {
         this.repository = repository;
         this.backupperStatusService = backupperStatusService;
+        this.schemaService = schemaService;
+    }
+
+    @PostConstruct
+    public void ensureSchema() {
+        schemaService.ensureLatestVideoPublishColumns();
     }
 
     public List<String> types() {
@@ -231,6 +240,7 @@ public class AccountOverviewService {
                        ol.topic,
                        ua.last_upload_at,
                        ua.next_upload_allowed_at,
+                       ua.latest_video_publish_at,
                        COALESCE(ua.upload_cooldown_min_seconds, 3600) AS upload_cooldown_min_seconds,
                        COALESCE(ua.upload_cooldown_max_seconds, 7200) AS upload_cooldown_max_seconds,
                        COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time,
@@ -372,6 +382,7 @@ public class AccountOverviewService {
         }
         row.put("lastUploadAt", toLocalDateTime(rs.getTimestamp("last_upload_at")));
         row.put("nextUploadAllowedAt", toLocalDateTime(rs.getTimestamp("next_upload_allowed_at")));
+        row.put("latestVideoPublishAt", toLocalDateTime(rs.getTimestamp("latest_video_publish_at")));
         row.put("uploadCooldownMinSeconds", nullableInt(rs, "upload_cooldown_min_seconds"));
         row.put("uploadCooldownMaxSeconds", nullableInt(rs, "upload_cooldown_max_seconds"));
         row.put("uploadQuietStartTime", toLocalTime(rs.getTime("upload_quiet_start_time")));
