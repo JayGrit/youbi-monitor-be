@@ -103,6 +103,7 @@ public class AccountOverviewService {
             return findAccount(normalizedPlatform, oldKey);
         }
         ensureNoPendingUploaderTasks(normalizedPlatform, oldKey);
+        ensureTopicAvailable(normalizedPlatform, nextKey);
         if (repository.update("UPDATE operator_loginstate SET topic = ?, updated_at = NOW() WHERE platform = ? AND topic = ?", nextKey, normalizedPlatform, oldKey) != 1) {
             throw new IllegalArgumentException("Account not found");
         }
@@ -478,6 +479,18 @@ public class AccountOverviewService {
                 """, Integer.class, platform, topic);
         if (count != null && count > 0) {
             throw new IllegalArgumentException("该账号还有 ready/failed 上传子任务，不能修改 topic");
+        }
+    }
+
+    private void ensureTopicAvailable(String platform, String topic) {
+        Integer count = repository.queryForObject("""
+                SELECT COUNT(*)
+                FROM operator_loginstate
+                WHERE platform = ?
+                  AND topic = ?
+                """, Integer.class, platform, topic);
+        if (count != null && count > 0) {
+            throw new IllegalArgumentException("目标 topic 已存在，不能修改");
         }
     }
 

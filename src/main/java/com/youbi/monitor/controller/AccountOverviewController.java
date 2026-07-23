@@ -67,7 +67,7 @@ public class AccountOverviewController {
     public ResponseEntity<?> renameKey(@PathVariable String platform, @PathVariable String topic, @RequestBody SocialTopicUpdateRequest request) {
         try {
             return ResponseEntity.ok(accountOverviewService.renameTopic(platform, topic, request.newTopic()));
-        } catch (Exception exception) {
+        } catch (IllegalArgumentException exception) {
             return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
         }
     }
