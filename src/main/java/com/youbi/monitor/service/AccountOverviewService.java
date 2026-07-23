@@ -236,6 +236,7 @@ public class AccountOverviewService {
                        COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time,
                        COALESCE(ua.upload_quiet_end_time, TIME('07:00:00')) AS upload_quiet_end_time,
                        COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count,
+                       ua.subscribers,
                        COALESCE(ua.is_enabled, 1) AS is_enabled,
                        ua.is_available AS is_available,
                        NULL AS mid,
@@ -375,6 +376,7 @@ public class AccountOverviewService {
         row.put("uploadQuietStartTime", toLocalTime(rs.getTime("upload_quiet_start_time")));
         row.put("uploadQuietEndTime", toLocalTime(rs.getTime("upload_quiet_end_time")));
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
+        row.put("subscribers", nullableLong(rs, "subscribers"));
         row.put("statsLoading", true);
         row.put("enabled", rs.getBoolean("is_enabled"));
         row.put("available", nullableBoolean(rs, "is_available"));
