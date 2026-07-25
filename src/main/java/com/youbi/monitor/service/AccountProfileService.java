@@ -57,9 +57,13 @@ public class AccountProfileService {
         String table = table(platform);
         String normalized = normalizeTopic(topic);
         String displayName = TextSupport.text(request == null ? "" : request.displayName());
+        String avatarUrl = TextSupport.text(request == null ? "" : request.avatarUrl());
         int updated = repositoryService.updateDisplayName(table, normalized, displayName.isBlank() ? null : TextSupport.truncate(displayName, 128));
         if (updated < 1) {
             throw new IOException("Topic not found: " + normalized);
+        }
+        if (!avatarUrl.isBlank()) {
+            repositoryService.updateAvatarUrl(table, normalized, TextSupport.truncate(avatarUrl, 1024));
         }
         return repositoryService.findProfile(table, normalized);
     }
