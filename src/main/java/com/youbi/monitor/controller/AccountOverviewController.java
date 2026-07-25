@@ -9,6 +9,7 @@ import com.youbi.monitor.dto.AccountProfileUpdateRequest;
 import com.youbi.monitor.dto.SocialTopicUpdateRequest;
 import com.youbi.monitor.service.AccountProfileService;
 import com.youbi.monitor.service.AccountOverviewService;
+import com.youbi.monitor.service.AccountFollowerProfileSyncService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,10 +27,16 @@ import java.util.Map;
 public class AccountOverviewController {
     private final AccountOverviewService accountOverviewService;
     private final AccountProfileService accountProfileService;
+    private final AccountFollowerProfileSyncService accountFollowerProfileSyncService;
 
-    public AccountOverviewController(AccountOverviewService accountOverviewService, AccountProfileService accountProfileService) {
+    public AccountOverviewController(
+            AccountOverviewService accountOverviewService,
+            AccountProfileService accountProfileService,
+            AccountFollowerProfileSyncService accountFollowerProfileSyncService
+    ) {
         this.accountOverviewService = accountOverviewService;
         this.accountProfileService = accountProfileService;
+        this.accountFollowerProfileSyncService = accountFollowerProfileSyncService;
     }
 
     // 查询各平台账号总览信息。
@@ -89,6 +96,16 @@ public class AccountOverviewController {
     public ResponseEntity<?> updateProfile(@PathVariable String platform, @PathVariable String topic, @RequestBody AccountProfileUpdateRequest request) {
         try {
             return ResponseEntity.ok(accountProfileService.updateProfile(platform, topic, request));
+        } catch (Exception exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
+
+    // 异步同步指定平台账号的线上资料信息。
+    @PostMapping("/api/accounts/{platform}/{topic}/profile/sync")
+    public ResponseEntity<?> syncProfile(@PathVariable String platform, @PathVariable String topic) {
+        try {
+            return ResponseEntity.accepted().body(accountFollowerProfileSyncService.start(platform, topic));
         } catch (Exception exception) {
             return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
         }

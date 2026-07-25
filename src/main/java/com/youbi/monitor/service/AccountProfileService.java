@@ -68,6 +68,20 @@ public class AccountProfileService {
         return repositoryService.findProfile(table, normalized);
     }
 
+    public AccountProfileUpdateResult applyProfileSync(String platform, String topic, String displayName, String avatarUrl) throws IOException {
+        String table = table(platform);
+        String normalized = normalizeTopic(topic);
+        String normalizedDisplayName = TextSupport.text(displayName);
+        String normalizedAvatarUrl = TextSupport.text(avatarUrl);
+        if (!normalizedDisplayName.isBlank()) {
+            repositoryService.updateDisplayName(table, normalized, TextSupport.truncate(normalizedDisplayName, 128));
+        }
+        if (!normalizedAvatarUrl.isBlank()) {
+            repositoryService.updateAvatarUrl(table, normalized, TextSupport.truncate(normalizedAvatarUrl, 1024));
+        }
+        return repositoryService.findProfile(table, normalized);
+    }
+
     public AccountProfileUpdateResult uploadAvatar(String platform, String topic, MultipartFile file) throws Exception {
         String table = table(platform);
         String normalized = normalizeTopic(topic);
