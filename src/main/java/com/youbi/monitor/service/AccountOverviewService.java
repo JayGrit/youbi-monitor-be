@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.ResultSet;
 import java.sql.Time;
 import java.sql.Timestamp;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.ArrayList;
@@ -359,7 +360,31 @@ public class AccountOverviewService {
                          WHERE upload_submission.platform = ol.platform
                            AND upload_submission.topic = ol.topic
                            AND upload_submission.status = 'failed'
-                       ) AS failed_upload_count
+                       ) AS failed_upload_count,
+                       (
+                         SELECT income.daily_income
+                         FROM backupper_income income
+                         WHERE income.platform COLLATE utf8mb4_unicode_ci = ol.platform
+                           AND income.topic = ol.topic
+                           AND income.income_date = CURDATE()
+                           AND income.status = 'success'
+                           AND income.income_updated = 1
+                           AND income.daily_income IS NOT NULL
+                         ORDER BY income.updated_at DESC, income.id DESC
+                         LIMIT 1
+                       ) AS current_income,
+                       (
+                         SELECT income.updated_at
+                         FROM backupper_income income
+                         WHERE income.platform COLLATE utf8mb4_unicode_ci = ol.platform
+                           AND income.topic = ol.topic
+                           AND income.income_date = CURDATE()
+                           AND income.status = 'success'
+                           AND income.income_updated = 1
+                           AND income.daily_income IS NOT NULL
+                         ORDER BY income.updated_at DESC, income.id DESC
+                         LIMIT 1
+                       ) AS current_income_updated_at
                 FROM operator_loginstate ol
                 WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
@@ -418,6 +443,8 @@ public class AccountOverviewService {
         row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
         row.put("uploadRunningCount", rs.getInt("upload_running_count"));
         row.put("failedUploadCount", rs.getInt("failed_upload_count"));
+        row.put("currentIncome", nullableBigDecimal(rs, "current_income"));
+        row.put("currentIncomeUpdatedAt", toLocalDateTime(rs.getTimestamp("current_income_updated_at")));
         row.put("statsLoading", false);
         return row;
     }
@@ -442,6 +469,11 @@ public class AccountOverviewService {
 
     private static Boolean nullableBoolean(ResultSet rs, String column) throws java.sql.SQLException {
         boolean value = rs.getBoolean(column);
+        return rs.wasNull() ? null : value;
+    }
+
+    private static BigDecimal nullableBigDecimal(ResultSet rs, String column) throws java.sql.SQLException {
+        BigDecimal value = rs.getBigDecimal(column);
         return rs.wasNull() ? null : value;
     }
 
