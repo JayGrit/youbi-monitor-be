@@ -9,5 +9,4 @@ public interface IAccountProfileRepositoryService {
 
     AccountProfileUpdateResult findProfile(String table, String topic);
 
-    void ensureProfileColumns(String table);
 }

@@ -7,7 +7,6 @@ import com.youbi.monitor.model.UploaderPhoneRecord;
 import java.io.IOException;
 
 public interface IUploaderPhoneRepositoryService {
-    void ensureSchema();
 
     UploaderPhoneMatrixResponse matrix();
 

@@ -65,25 +65,5 @@ public class AccountProfileRepositoryServiceImpl implements IAccountProfileRepos
         );
     }
 
-    @Override
-    public void ensureProfileColumns(String table) {
-        ensureColumn("uploader_phone_account", "display_name", "VARCHAR(128) NULL");
-        ensureColumn("uploader_phone_account", "avatar_url", "VARCHAR(1024) NULL");
-    }
 
-    private void ensureColumn(String table, String column, String definition) {
-        Integer count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?
-                """,
-                Integer.class,
-                table,
-                column
-        );
-        if (count == null || count == 0) {
-            repository.update("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
-        }
-    }
 }

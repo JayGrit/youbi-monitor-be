@@ -24,10 +24,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         this.repository = repository;
     }
 
-    @PostConstruct
-    public void ensureSchema() {
-        ensureDeprecatedColumn();
-    }
 
     @Override
     public Optional<UploaderAccountState> state(String platform, String topic) {
@@ -159,7 +155,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     @Override
     public boolean renameTopic(String platform, String oldTopic, String newTopic) {
-        ensureDeprecatedColumn();
         String normalizedPlatform = normalizePlatform(platform);
         String normalizedOldTopic = normalizeTopic(oldTopic);
         String normalizedNewTopic = normalizeTopic(newTopic);
@@ -284,7 +279,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     @Override
     public boolean updateQuietTime(String platform, String topic, LocalTime startTime, LocalTime endTime) {
-        ensureQuietTimeColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
@@ -303,7 +297,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
 
     @Override
     public boolean updateDownloaderMaxStagedCount(String platform, String topic, int maxStagedCount) {
-        ensureDownloaderStagingColumns();
         int updated = repository.update(
                 """
                 UPDATE uploader_account
@@ -318,15 +311,6 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         return updated == 1;
     }
 
-    private void ensureDeprecatedColumn() {
-        if (!tableExists(TABLE) || columnExists(TABLE, "is_deprecated")) {
-            return;
-        }
-        repository.update("""
-                ALTER TABLE uploader_account
-                ADD COLUMN is_deprecated TINYINT(1) NOT NULL DEFAULT 0
-                """);
-    }
 
     private boolean tableExists(String table) {
         Integer count = repository.queryForObject(
@@ -355,41 +339,7 @@ public class UploaderAccountRepositoryServiceImpl implements IUploaderAccountRep
         return count != null && count > 0;
     }
 
-    private void ensureDownloaderStagingColumns() {
-        if (!tableExists(TABLE)) {
-            return;
-        }
-        if (!columnExists(TABLE, "downloader_max_staged_count")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN downloader_max_staged_count INT NOT NULL DEFAULT 5
-                    """
-            );
-        }
-    }
 
-    private void ensureQuietTimeColumns() {
-        if (!tableExists(TABLE)) {
-            return;
-        }
-        if (!columnExists(TABLE, "upload_quiet_start_time")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN upload_quiet_start_time TIME NOT NULL DEFAULT '01:00:00'
-                    """
-            );
-        }
-        if (!columnExists(TABLE, "upload_quiet_end_time")) {
-            repository.update(
-                    """
-                    ALTER TABLE uploader_account
-                    ADD COLUMN upload_quiet_end_time TIME NOT NULL DEFAULT '07:00:00'
-                    """
-            );
-        }
-    }
 
     private static String normalizePlatform(String value) {
         return value == null ? "" : value.trim().toLowerCase();

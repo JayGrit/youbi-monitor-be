@@ -50,9 +50,6 @@ public class AliDriveRepositoryServiceImpl implements IAliDriveRepositoryService
         return tokens.isEmpty() ? "" : text(tokens.get(0));
     }
 
-    @Override
-    public void ensureAccountSchema() {
-    }
 
     private boolean tableExists(String tableName) {
         return true;

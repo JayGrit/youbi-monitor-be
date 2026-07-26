@@ -387,78 +387,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         this.serviceHeartbeatQueryService = serviceHeartbeatQueryService;
     }
 
-    @Override
-    public void ensureMonitorSchema() {
-        dropColumnIfExists("task", "operator");
-        repository.update("""
-                CREATE TABLE IF NOT EXISTS distributor_task_stages (
-                    task_id VARCHAR(64) NOT NULL,
-                    stage_name VARCHAR(64) NOT NULL,
-                    sub_stage VARCHAR(64) NOT NULL DEFAULT 'main',
-                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                    started_at DATETIME NULL,
-                    completed_at DATETIME NULL,
-                    error_message TEXT NULL,
-                    `operator` VARCHAR(128) NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    PRIMARY KEY (task_id, stage_name, sub_stage),
-                    KEY idx_distributor_task_stages_stage_status (stage_name, status, sub_stage, task_id),
-                    KEY idx_distributor_task_stages_status_operator (status, `operator`, stage_name, updated_at)
-                )
-                """);
-        repository.update("""
-                CREATE TABLE IF NOT EXISTS publisher_result (
-                    task_id VARCHAR(64) PRIMARY KEY,
-                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                    result_json MEDIUMTEXT NULL,
-                    error_message TEXT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-                )
-                """);
-        ensurePublisherColumn("result_json", "MEDIUMTEXT NULL");
-        ensurePublisherColumn("error_message", "TEXT NULL");
-        ensureBackupperMinioTable();
-    }
 
-    private void ensureBackupperMinioTable() {
-        repository.update("""
-                CREATE TABLE IF NOT EXISTS backupper_minio (
-                    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                    task_id VARCHAR(64) NOT NULL,
-                    task_type VARCHAR(32) NULL,
-                    stage VARCHAR(32) NOT NULL,
-                    status VARCHAR(32) NOT NULL DEFAULT 'pending',
-                    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
-                    started_at DATETIME NULL,
-                    finished_at DATETIME NULL,
-                    last_error TEXT NULL,
-                    location VARCHAR(64) NULL,
-                    alidrive_file_id VARCHAR(128) NULL,
-                    alidrive_remote_path TEXT NULL,
-                    archive_json MEDIUMTEXT NULL,
-                    cleaned_at DATETIME NULL,
-                    source_object_count INT UNSIGNED NULL,
-                    source_bytes BIGINT UNSIGNED NULL,
-                    deleted_object_count INT UNSIGNED NULL,
-                    deleted_json MEDIUMTEXT NULL,
-                    failed_json MEDIUMTEXT NULL,
-                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                    UNIQUE KEY uk_backupper_minio_task_stage (task_id, stage),
-                    KEY idx_backupper_minio_stage_status (stage, status),
-                    KEY idx_backupper_minio_task (task_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """);
-    }
 
-    private void ensurePublisherColumn(String column, String definition) {
-        if (!columnExists("publisher_result", column)) {
-            repository.update("ALTER TABLE publisher_result ADD COLUMN " + quotedIdentifier(column) + " " + definition);
-            invalidateSchemaCapability("publisher_result", column);
-        }
-    }
 
     @Override
     public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String stage, String taskId, String sort) {

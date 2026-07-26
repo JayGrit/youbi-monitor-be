@@ -12,5 +12,4 @@ public interface IAliDriveRepositoryService {
 
     String loadRefreshToken(String topic);
 
-    void ensureAccountSchema();
 }

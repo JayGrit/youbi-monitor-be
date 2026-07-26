@@ -22,9 +22,6 @@ public class JinritoutiaoAccountRepositoryServiceImpl implements IJinritoutiaoAc
         this.repository = repository;
     }
 
-    @Override
-    public void ensureSchema() {
-    }
 
     @Override
     public List<JinritoutiaoAccountStatus> listAccounts() {

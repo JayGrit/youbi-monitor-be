@@ -126,15 +126,7 @@ abstract class MonitorRepositorySqlSupport {
         }
     }
 
-    protected void ensureOperatorColumn(String table) {
-    }
 
-    protected void dropColumnIfExists(String table, String column) {
-        if (tableExists(table) && columnExists(table, column)) {
-            repository.update("ALTER TABLE " + quotedIdentifier(table) + " DROP COLUMN " + quotedIdentifier(column));
-            invalidateSchemaCapability(table, column);
-        }
-    }
 
     protected static String quotedIdentifier(String identifier) {
         return "`" + identifier.replace("`", "``") + "`";
@@ -314,9 +306,6 @@ abstract class MonitorRepositorySqlSupport {
         return existsTerms.isEmpty() ? "0" : String.join(" OR ", existsTerms);
     }
 
-    private void ensureUnifiedUploaderStagingColumns() {
-        return;
-    }
 
     private void ensureUploaderAccountRow(String platform, String topic) {
         repository.update("""

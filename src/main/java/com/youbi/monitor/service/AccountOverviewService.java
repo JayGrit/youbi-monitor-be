@@ -35,23 +35,15 @@ public class AccountOverviewService {
 
     private final MonitorRepository repository;
     private final BackupperStatusService backupperStatusService;
-    private final AccountSchemaService schemaService;
 
     public AccountOverviewService(
             MonitorRepository repository,
-            BackupperStatusService backupperStatusService,
-            AccountSchemaService schemaService
+            BackupperStatusService backupperStatusService
     ) {
         this.repository = repository;
         this.backupperStatusService = backupperStatusService;
-        this.schemaService = schemaService;
     }
 
-    @PostConstruct
-    public void ensureSchema() {
-        schemaService.ensureLatestVideoPublishColumns();
-        schemaService.ensureUploaderAccountAlertColumns();
-    }
 
     public List<String> types() {
         return repository.queryForList("""

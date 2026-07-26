@@ -165,8 +165,6 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         if (!tableExists("operator_loginstate")) {
             return List.of();
         }
-        ensureUploaderPhoneAccountColumn("display_name", "VARCHAR(128) NULL");
-        ensureUploaderPhoneAccountColumn("avatar_url", "VARCHAR(1024) NULL");
         return repository.query(
                 """
                 SELECT account.id,
@@ -225,19 +223,8 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         return count != null && count > 0;
     }
 
-    @Override
-    public void ensureSchema() {
-        if (tableExists(ACCOUNT_TABLE)) {
-            ensureUploaderPhoneAccountColumn("display_name", "VARCHAR(128) NULL");
-            ensureUploaderPhoneAccountColumn("avatar_url", "VARCHAR(1024) NULL");
-        }
-    }
 
-    private void migrateLegacyAccountColumns() {
-    }
 
-    private void dropLegacyPhoneColumns() {
-    }
 
     private void seedPhone(String phone, String remark) {
         repository.update(
@@ -251,14 +238,7 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         );
     }
 
-    private void ensureUploaderPhoneColumn(String column, String definition) {
-    }
 
-    private void ensureUploaderPhoneAccountColumn(String column, String definition) {
-        if (!columnExists(ACCOUNT_TABLE, column)) {
-            repository.update("ALTER TABLE " + ACCOUNT_TABLE + " ADD COLUMN " + column + " " + definition);
-        }
-    }
 
     private boolean columnExists(String table, String column) {
         Integer count = repository.queryForObject(
@@ -274,11 +254,7 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
         return count != null && count > 0;
     }
 
-    private void dropColumnIfExists(String table, String column) {
-    }
 
-    private void ensureAccountColumn(String table, String column, String definition) {
-    }
 
     private boolean tableExists(String table) {
         Integer count = repository.queryForObject(

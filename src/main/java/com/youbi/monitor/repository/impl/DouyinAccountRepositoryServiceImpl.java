@@ -22,9 +22,6 @@ public class DouyinAccountRepositoryServiceImpl implements IDouyinAccountReposit
         this.repository = repository;
     }
 
-    @Override
-    public void ensureSchema() {
-    }
 
     @Override
     public List<DouyinAccountStatus> listAccounts() {

@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 
 public interface IDiagnosticArtifactRepositoryService {
-    void ensureSchema();
 
     long countOperatorExecutions(Map<String, String> filters);
 

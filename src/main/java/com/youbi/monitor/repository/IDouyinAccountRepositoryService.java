@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Optional;
 
 public interface IDouyinAccountRepositoryService {
-    void ensureSchema();
 
     List<DouyinAccountStatus> listAccounts();
 

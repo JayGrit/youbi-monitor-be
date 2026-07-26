@@ -22,9 +22,6 @@ public class KuaishouAccountRepositoryServiceImpl implements IKuaishouAccountRep
         this.repository = repository;
     }
 
-    @Override
-    public void ensureSchema() {
-    }
 
     @Override
     public List<KuaishouAccountStatus> listAccounts() {

@@ -22,9 +22,6 @@ public class ShipinhaoAccountRepositoryServiceImpl implements IShipinhaoAccountR
         this.repository = repository;
     }
 
-    @Override
-    public void ensureSchema() {
-    }
 
     @Override
     public List<ShipinhaoAccountStatus> listAccounts() {

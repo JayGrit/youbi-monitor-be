@@ -22,9 +22,6 @@ public class XiaohongshuAccountRepositoryServiceImpl implements IXiaohongshuAcco
         this.repository = repository;
     }
 
-    @Override
-    public void ensureSchema() {
-    }
 
     @Override
     public List<XiaohongshuAccountStatus> listAccounts() {

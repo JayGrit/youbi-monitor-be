@@ -22,9 +22,6 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         this.repository = repository;
     }
 
-    @Override
-    public void ensureSchema() {
-    }
 
     @Override
     public long countOperatorExecutions(Map<String, String> filters) {
