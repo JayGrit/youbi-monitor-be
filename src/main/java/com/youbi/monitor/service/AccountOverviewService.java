@@ -230,6 +230,33 @@ public class AccountOverviewService {
         return rows.get(0);
     }
 
+    public Map<String, Object> updateScheduledPublish(String platform, String topic, Boolean supported, Integer maxDays) {
+        String normalizedPlatform = requireManagedPlatform(platform);
+        String normalizedTopic = requireTopic(topic);
+        boolean normalizedSupported = Boolean.TRUE.equals(supported);
+        int normalizedMaxDays = maxDays == null ? 3 : maxDays;
+        if (normalizedMaxDays < 0 || normalizedMaxDays > 365) {
+            throw new IllegalArgumentException("Invalid scheduled publish max days: " + normalizedMaxDays);
+        }
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET supports_scheduled_publish = ?,
+                    scheduled_publish_max_days = ?,
+                    updated_at = NOW()
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
+                """,
+                normalizedSupported,
+                normalizedMaxDays,
+                normalizedPlatform,
+                normalizedTopic
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return findAccount(normalizedPlatform, normalizedTopic);
+    }
+
     private String accountBaseSelectSql(String extraWhere) {
         return """
                 SELECT ol.platform,
@@ -242,6 +269,8 @@ public class AccountOverviewService {
                        COALESCE(ua.upload_quiet_start_time, TIME('01:00:00')) AS upload_quiet_start_time,
                        COALESCE(ua.upload_quiet_end_time, TIME('07:00:00')) AS upload_quiet_end_time,
                        COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count,
+                       COALESCE(ua.supports_scheduled_publish, 0) AS supports_scheduled_publish,
+                       COALESCE(ua.scheduled_publish_max_days, 3) AS scheduled_publish_max_days,
                        COALESCE(ua.asset_warning_threshold, 100) AS asset_warning_threshold,
                        ua.subscribers,
                        ua.new_subscribers,
@@ -409,6 +438,8 @@ public class AccountOverviewService {
         row.put("uploadQuietStartTime", toLocalTime(rs.getTime("upload_quiet_start_time")));
         row.put("uploadQuietEndTime", toLocalTime(rs.getTime("upload_quiet_end_time")));
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
+        row.put("supportsScheduledPublish", rs.getBoolean("supports_scheduled_publish"));
+        row.put("scheduledPublishMaxDays", rs.getInt("scheduled_publish_max_days"));
         row.put("assetWarningThreshold", rs.getInt("asset_warning_threshold"));
         row.put("subscribers", nullableLong(rs, "subscribers"));
         row.put("newSubscribers", nullableLong(rs, "new_subscribers"));

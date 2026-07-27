@@ -3,6 +3,7 @@ package com.youbi.monitor.controller;
 import com.youbi.monitor.dto.AccountDownloaderMaxStagedCountUpdateRequest;
 import com.youbi.monitor.dto.AccountNextUploadAllowedAtUpdateRequest;
 import com.youbi.monitor.dto.AccountQuietTimeUpdateRequest;
+import com.youbi.monitor.dto.AccountScheduledPublishUpdateRequest;
 import com.youbi.monitor.dto.BackupperStatus;
 import com.youbi.monitor.dto.AccountCooldownUpdateRequest;
 import com.youbi.monitor.dto.AccountProfileUpdateRequest;
@@ -146,6 +147,21 @@ public class AccountOverviewController {
                 platform,
                 topic,
                 request == null ? null : request.maxStagedCount()
+        );
+    }
+
+    // 更新指定平台账号的定时发布能力。
+    @PostMapping("/api/accounts/{platform}/{topic}/scheduled-publish")
+    public Map<String, Object> updateScheduledPublish(
+            @PathVariable String platform,
+            @PathVariable String topic,
+            @RequestBody(required = false) AccountScheduledPublishUpdateRequest request
+    ) {
+        return accountOverviewService.updateScheduledPublish(
+                platform,
+                topic,
+                request == null ? null : request.supported(),
+                request == null ? null : request.maxDays()
         );
     }
 
