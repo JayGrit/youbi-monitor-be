@@ -1,6 +1,7 @@
 package com.youbi.monitor.controller;
 
 import com.youbi.monitor.dto.AliDriveDownloadRequest;
+import com.youbi.monitor.dto.AliDrivePreflightResult;
 import com.youbi.monitor.service.AliDriveService;
 import com.youbi.monitor.dto.AliDriveTransferResult;
 import com.youbi.monitor.dto.AliDriveUploadRequest;
@@ -70,6 +71,19 @@ public class AliDriveController {
             return new AliDriveTransferResult(false, exc.getMessage(), "", "", "", "", 0, Map.of());
         } catch (IOException exc) {
             return new AliDriveTransferResult(false, exc.getMessage(), "", "", "", "", 0, Map.of());
+        }
+    }
+
+    // 解析临时下载地址并读取首字节，确认阿里云盘文件当前确实可下载。
+    @PostMapping("/api/alidrive/preflight")
+    public AliDrivePreflightResult preflight(@RequestBody AliDriveDownloadRequest request) {
+        try {
+            return aliDriveService.preflight(request);
+        } catch (InterruptedException exc) {
+            Thread.currentThread().interrupt();
+            return new AliDrivePreflightResult(false, exc.getMessage(), false, "", "", "", 0, 0, 0, "", Map.of());
+        } catch (IOException exc) {
+            return new AliDrivePreflightResult(false, exc.getMessage(), false, "", "", "", 0, 0, 0, "", Map.of());
         }
     }
 }

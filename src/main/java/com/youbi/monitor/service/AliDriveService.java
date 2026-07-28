@@ -1,6 +1,7 @@
 package com.youbi.monitor.service;
 
 import com.youbi.monitor.dto.AliDriveDownloadRequest;
+import com.youbi.monitor.dto.AliDrivePreflightResult;
 import com.youbi.monitor.dto.AliDriveTransferResult;
 import com.youbi.monitor.dto.AliDriveUploadRequest;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -177,15 +178,8 @@ public class AliDriveService {
     }
 
     public AliDriveTransferResult download(AliDriveDownloadRequest request) throws IOException, InterruptedException {
-        JsonNode meta;
-        if (!text(request.fileId()).isBlank()) {
-            meta = metaByFileId(request.fileId());
-        } else {
-            meta = metaByPath(normalizeRemotePath(required(request.remotePath(), "remotePath")));
-        }
-        if (!"file".equals(meta.path("type").asText())) {
-            throw new IOException("AliDrive target is not a file: " + meta.path("name").asText());
-        }
+        JsonNode meta = resolveDownloadMeta(request);
+        validateDownloadMeta(meta);
 
         String fileId = required(meta.path("file_id").asText(""), "file_id");
         String downloadUrl = downloadUrl(fileId);
@@ -219,6 +213,84 @@ public class AliDriveService {
                 System.currentTimeMillis() - startedAt
         );
         return new AliDriveTransferResult(true, "downloaded", fileId, meta.path("name").asText(), meta.path("path").asText(text(request.remotePath())), destination.toString(), Files.size(destination), safeRaw(meta));
+    }
+
+    public AliDrivePreflightResult preflight(AliDriveDownloadRequest request) throws IOException, InterruptedException {
+        JsonNode meta = resolveDownloadMeta(request);
+        validateDownloadMeta(meta);
+
+        String fileId = required(meta.path("file_id").asText(""), "file_id");
+        long size = meta.path("size").asLong(0);
+        if (size <= 0) {
+            throw new IOException("AliDrive target is empty: " + meta.path("name").asText(fileId));
+        }
+        String resolvedDownloadUrl = downloadUrl(fileId);
+        DownloadProbe probe = probeDownloadUrl(resolvedDownloadUrl);
+        String remotePath = meta.path("path").asText(text(request.remotePath()));
+        log.info(
+                "AliDrive download preflight succeeded fileId={} host={} size={} httpStatus={} probedBytes={}",
+                fileId,
+                probe.downloadHost(),
+                size,
+                probe.httpStatus(),
+                probe.probedBytes()
+        );
+        return new AliDrivePreflightResult(
+                true,
+                "downloadable",
+                true,
+                fileId,
+                meta.path("name").asText(),
+                remotePath,
+                size,
+                probe.httpStatus(),
+                probe.probedBytes(),
+                probe.downloadHost(),
+                safeRaw(meta)
+        );
+    }
+
+    private JsonNode resolveDownloadMeta(AliDriveDownloadRequest request) throws IOException, InterruptedException {
+        if (!text(request.fileId()).isBlank()) {
+            return metaByFileId(request.fileId());
+        }
+        return metaByPath(normalizeRemotePath(required(request.remotePath(), "remotePath")));
+    }
+
+    private void validateDownloadMeta(JsonNode meta) throws IOException {
+        if (!"file".equals(meta.path("type").asText())) {
+            throw new IOException("AliDrive target is not a file: " + meta.path("name").asText());
+        }
+        String status = meta.path("status").asText("available");
+        if (!"available".equalsIgnoreCase(status)) {
+            throw new IOException(
+                    "AliDrive target is not available: " + meta.path("name").asText() + " status=" + status
+            );
+        }
+    }
+
+    private DownloadProbe probeDownloadUrl(String downloadUrl) throws IOException, InterruptedException {
+        URI downloadUri = URI.create(downloadUrl);
+        HttpRequest request = HttpRequest.newBuilder(downloadUri)
+                .timeout(Duration.ofSeconds(60))
+                .header("User-Agent", USER_AGENT)
+                .header("Referer", ORIGIN + "/")
+                .header("Range", "bytes=0-0")
+                .header("Accept-Encoding", "identity")
+                .GET()
+                .build();
+        HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+        try (InputStream input = response.body()) {
+            int status = response.statusCode();
+            if (status != 200 && status != 206) {
+                throw new IOException("AliDrive download probe failed: HTTP " + status);
+            }
+            int firstByte = input.read();
+            if (firstByte < 0) {
+                throw new IOException("AliDrive download probe returned an empty response");
+            }
+            return new DownloadProbe(status, 1, firstText(downloadUri.getHost(), "unknown"));
+        }
     }
 
     private JsonNode createFile(String filename, String parentFileId, long size, int partNumber, String checkNameMode) throws IOException, InterruptedException {
@@ -599,5 +671,8 @@ public class AliDriveService {
     }
 
     private record SignPair(String signature, String publicKey) {
+    }
+
+    private record DownloadProbe(int httpStatus, int probedBytes, String downloadHost) {
     }
 }
