@@ -81,9 +81,37 @@ public class AliDriveController {
             return aliDriveService.preflight(request);
         } catch (InterruptedException exc) {
             Thread.currentThread().interrupt();
-            return new AliDrivePreflightResult(false, exc.getMessage(), false, "", "", "", 0, 0, 0, "", Map.of());
+            return failedPreflight(request, exc.getMessage());
         } catch (IOException exc) {
-            return new AliDrivePreflightResult(false, exc.getMessage(), false, "", "", "", 0, 0, 0, "", Map.of());
+            return failedPreflight(request, exc.getMessage());
         }
+    }
+
+    private static AliDrivePreflightResult failedPreflight(AliDriveDownloadRequest request, String message) {
+        String fileId = request == null ? "" : text(request.fileId());
+        String remotePath = request == null ? "" : text(request.remotePath());
+        return new AliDrivePreflightResult(
+                false,
+                "AliDrive preflight failed: fileId=" + valueOrEmpty(fileId)
+                        + " remotePath=" + valueOrEmpty(remotePath)
+                        + " reason=" + text(message),
+                false,
+                fileId,
+                "",
+                remotePath,
+                0,
+                0,
+                0,
+                "",
+                Map.of()
+        );
+    }
+
+    private static String valueOrEmpty(String value) {
+        return value.isBlank() ? "<empty>" : value;
+    }
+
+    private static String text(String value) {
+        return value == null ? "" : value.trim();
     }
 }
