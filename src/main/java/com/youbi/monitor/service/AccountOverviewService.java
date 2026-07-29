@@ -276,6 +276,7 @@ public class AccountOverviewService {
                        ua.new_subscribers,
                        COALESCE(ua.is_enabled, 1) AS is_enabled,
                        ua.is_available AS is_available,
+                       COALESCE(ua.is_rate_limited, 0) AS is_rate_limited,
                        NULL AS mid,
                        NULL AS uname,
                        NULL AS user_id,
@@ -446,6 +447,7 @@ public class AccountOverviewService {
         row.put("statsLoading", true);
         row.put("enabled", rs.getBoolean("is_enabled"));
         row.put("available", nullableBoolean(rs, "is_available"));
+        row.put("rateLimited", rs.getBoolean("is_rate_limited"));
         row.put("valid", null);
         row.put("message", cookieExists ? "已保存" : "未登录");
         row.put("raw", Map.of());
