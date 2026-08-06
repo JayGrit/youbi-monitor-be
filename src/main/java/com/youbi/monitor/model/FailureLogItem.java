@@ -8,6 +8,7 @@ public record FailureLogItem(
         String title,
         String topic,
         String stage,
+        String subStage,
         String platform,
         String errorMessage,
         LocalDateTime failedAt

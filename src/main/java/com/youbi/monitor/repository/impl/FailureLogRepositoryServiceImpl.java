@@ -8,21 +8,10 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @Service
 public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport implements IFailureLogRepositoryService {
-    private static final Map<String, String> STAGE_TABLES = Map.of(
-            "downloader", "downloader",
-            "publisher", "publisher",
-            "demucs", "demucs",
-            "whisper", "whisper",
-            "translator", "translator",
-            "speaker", "speaker",
-            "combiner", "combiner"
-    );
-
     public FailureLogRepositoryServiceImpl(MonitorRepository repository) {
         super(repository);
     }
@@ -30,20 +19,15 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
     @Override
     public List<FailureLogItem> listFailureLogs() {
         List<String> queries = new ArrayList<>();
-        for (Map.Entry<String, String> entry : STAGE_TABLES.entrySet()) {
-            if (!tableExists(entry.getValue())) {
-                continue;
-            }
-            queries.add(stageQuery(entry.getKey(), entry.getValue()));
-        }
-        Set<String> uploadTaskTables = new LinkedHashSet<>(UPLOADER_TASK_TABLES.values());
-        for (String table : uploadTaskTables) {
+        Set<String> uploadTaskTables = new LinkedHashSet<>();
+        for (String table : new LinkedHashSet<>(UPLOADER_TASK_TABLES.values())) {
             if (!tableExists(table)) {
                 continue;
             }
+            uploadTaskTables.add(table);
             queries.add(uploadQuery(table));
         }
-        queries.add(genericUploaderQuery());
+        queries.add(distributorStageQuery(uploadTaskTables));
 
         String sql = """
                 SELECT failure_log.*
@@ -59,29 +43,11 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 rs.getString("title"),
                 rs.getString("topic"),
                 rs.getString("stage"),
+                rs.getString("sub_stage"),
                 rs.getString("platform"),
                 rs.getString("error_message"),
                 timestamp(rs, "failed_at")
         ));
-    }
-
-    private static String stageQuery(String stage, String table) {
-        return """
-                SELECT
-                  CONCAT('%s:', stage.task_id) id,
-                  stage.task_id,
-                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), stage.task_id) title,
-                  COALESCE(NULLIF(task.topic, ''), '未分类') topic,
-                  '%s' stage,
-                  '' platform,
-                  COALESCE(NULLIF(stage.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
-                  COALESCE(stage.completed_at, stage.started_at, task.completed_at, task.started_at, task.created_at) failed_at
-                FROM %s stage
-                JOIN task task ON task.id = stage.task_id
-                LEFT JOIN task_metadata meta ON meta.task_id = stage.task_id
-                LEFT JOIN task_source source ON source.task_id = stage.task_id
-                WHERE stage.status = 'failed'
-                """.formatted(stage, stage, quotedIdentifier(table));
     }
 
     private static String uploadQuery(String table) {
@@ -92,6 +58,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), submission.task_id) title,
                   COALESCE(NULLIF(task.topic, ''), '未分类') topic,
                   'uploader' stage,
+                  'main' sub_stage,
                   submission.platform platform,
                   COALESCE(NULLIF(submission.error_message, ''), NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(submission.completed_at, submission.updated_at, submission.started_at, submission.created_at) failed_at
@@ -107,34 +74,32 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 """.formatted(quotedIdentifier(table));
     }
 
-    private String genericUploaderQuery() {
-        String failedUploadExists = UPLOADER_TASK_TABLES.values().stream()
-                .filter(this::tableExists)
+    private static String distributorStageQuery(Set<String> uploadTaskTables) {
+        String failedUploadExists = uploadTaskTables.stream()
                 .map(table -> """
                         SELECT 1 FROM %s submission
-                        WHERE submission.task_id = uploader.task_id AND submission.status = 'failed'
+                        WHERE submission.task_id = stage.task_id AND submission.status = 'failed'
                         """.formatted(quotedIdentifier(table)))
                 .map(query -> "EXISTS (" + query + ")")
                 .reduce((left, right) -> left + " OR " + right)
                 .orElse("FALSE");
         return """
                 SELECT
-                  CONCAT('uploader:', uploader.task_id) id,
-                  uploader.task_id,
-                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), uploader.task_id) title,
+                  CONCAT('stage:', stage.stage_name, ':', stage.sub_stage, ':', stage.task_id) id,
+                  stage.task_id,
+                  COALESCE(NULLIF(meta.upload_title, ''), NULLIF(source.source_title, ''), stage.task_id) title,
                   COALESCE(NULLIF(task.topic, ''), '未分类') topic,
-                  'uploader' stage,
+                  stage.stage_name stage,
+                  stage.sub_stage sub_stage,
                   '' platform,
-                  COALESCE(NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
-                  COALESCE(uploader.completed_at, uploader.started_at, task.completed_at, task.started_at, task.created_at) failed_at
-                FROM distributor_task_stages uploader
-                JOIN task task ON task.id = uploader.task_id
-                LEFT JOIN task_metadata meta ON meta.task_id = uploader.task_id
-                LEFT JOIN task_source source ON source.task_id = uploader.task_id
-                WHERE uploader.stage_name = 'uploader'
-                  AND uploader.sub_stage = 'main'
-                  AND uploader.status = 'failed'
-                  AND NOT (%s)
+                  COALESCE(NULLIF(stage.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
+                  COALESCE(stage.completed_at, stage.updated_at, stage.started_at, task.completed_at, task.started_at, task.created_at) failed_at
+                FROM distributor_task_stages stage
+                JOIN task task ON task.id = stage.task_id
+                LEFT JOIN task_metadata meta ON meta.task_id = stage.task_id
+                LEFT JOIN task_source source ON source.task_id = stage.task_id
+                WHERE stage.status = 'failed'
+                  AND NOT (stage.stage_name = 'uploader' AND stage.sub_stage = 'main' AND (%s))
                 """.formatted(failedUploadExists);
     }
 }
