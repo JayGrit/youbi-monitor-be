@@ -257,6 +257,28 @@ public class AccountOverviewService {
         return findAccount(normalizedPlatform, normalizedTopic);
     }
 
+    public Map<String, Object> updateOnlyDraftBox(String platform, String topic, boolean enabled) {
+        String normalizedPlatform = requireManagedPlatform(platform);
+        String normalizedTopic = requireTopic(topic);
+        if (!"jinritoutiao".equals(normalizedPlatform)) {
+            throw new IllegalArgumentException("Only Jinri Toutiao supports draft-box-only mode");
+        }
+        int updated = repository.update(
+                """
+                UPDATE uploader_account
+                SET only_draft_box = ?, updated_at = NOW()
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
+                """,
+                enabled,
+                normalizedPlatform,
+                normalizedTopic
+        );
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return findAccount(normalizedPlatform, normalizedTopic);
+    }
+
     private String accountBaseSelectSql(String extraWhere) {
         return """
                 SELECT ol.platform,
@@ -271,6 +293,7 @@ public class AccountOverviewService {
                        COALESCE(ua.downloader_max_staged_count, 5) AS downloader_max_staged_count,
                        COALESCE(ua.supports_scheduled_publish, 0) AS supports_scheduled_publish,
                        COALESCE(ua.scheduled_publish_max_days, 3) AS scheduled_publish_max_days,
+                       COALESCE(ua.only_draft_box, 0) AS only_draft_box,
                        COALESCE(ua.asset_warning_threshold, 100) AS asset_warning_threshold,
                        ua.subscribers,
                        ua.new_subscribers,
@@ -441,6 +464,7 @@ public class AccountOverviewService {
         row.put("downloaderMaxStagedCount", rs.getInt("downloader_max_staged_count"));
         row.put("supportsScheduledPublish", rs.getBoolean("supports_scheduled_publish"));
         row.put("scheduledPublishMaxDays", rs.getInt("scheduled_publish_max_days"));
+        row.put("onlyDraftBox", rs.getBoolean("only_draft_box"));
         row.put("assetWarningThreshold", rs.getInt("asset_warning_threshold"));
         row.put("subscribers", nullableLong(rs, "subscribers"));
         row.put("newSubscribers", nullableLong(rs, "new_subscribers"));

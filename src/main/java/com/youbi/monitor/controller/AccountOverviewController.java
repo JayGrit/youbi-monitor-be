@@ -165,6 +165,20 @@ public class AccountOverviewController {
         );
     }
 
+    // 更新指定平台账号的仅草稿箱发布模式。
+    @PostMapping("/api/accounts/{platform}/{topic}/only-draft-box")
+    public Map<String, Object> updateOnlyDraftBox(
+            @PathVariable String platform,
+            @PathVariable String topic,
+            @RequestBody Map<String, Object> request
+    ) {
+        return accountOverviewService.updateOnlyDraftBox(
+                platform,
+                topic,
+                Boolean.TRUE.equals(request == null ? null : request.get("enabled"))
+        );
+    }
+
     // 更新指定平台账号的静默时间段。
     @PostMapping("/api/accounts/{platform}/{topic}/quiet-time")
     public Map<String, Object> updateQuietTime(
