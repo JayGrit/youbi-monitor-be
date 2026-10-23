@@ -26,11 +26,7 @@ public class UploaderPhoneRepositoryServiceImpl implements IUploaderPhoneReposit
             new PlatformTable("shipinhao"),
             new PlatformTable("kuaishou"),
             new PlatformTable("jinritoutiao"),
-            new PlatformTable("x"),
-            new PlatformTable("youtube"),
-            new PlatformTable("doubao"),
-            new PlatformTable("notebooklm"),
-            new PlatformTable("chatgpt")
+            new PlatformTable("doubao")
     );
 
     private final UploaderPhoneRepository repository;
