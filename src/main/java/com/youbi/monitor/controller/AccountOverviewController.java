@@ -136,6 +136,16 @@ public class AccountOverviewController {
         );
     }
 
+    // 解除账号的上传时间冷却，实际投递仍由 uploader 调度。
+    @PostMapping("/api/accounts/{platform}/{topic}/next-upload-allowed-at/now")
+    public ResponseEntity<?> allowUploadNow(@PathVariable String platform, @PathVariable String topic) {
+        try {
+            return ResponseEntity.ok(accountOverviewService.allowUploadNow(platform, topic));
+        } catch (IllegalArgumentException exception) {
+            return ResponseEntity.badRequest().body(Map.of("message", exception.getMessage()));
+        }
+    }
+
     // 更新指定平台账号的 downloader 最大暂存任务数。
     @PostMapping("/api/accounts/{platform}/{topic}/downloader-max-staged-count")
     public Map<String, Object> updateDownloaderMaxStagedCount(

@@ -59,7 +59,7 @@ public class AccountOverviewService {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountBaseSelectSql("") + """
-                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.topic
+                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ua.topic
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccount(rs))
         );
@@ -70,7 +70,7 @@ public class AccountOverviewService {
         Map<String, List<Map<String, Object>>> result = new LinkedHashMap<>();
         PLATFORMS.forEach(platform -> result.put(platform, new ArrayList<>()));
         repository.query(accountStatsSelectSql("") + """
-                ORDER BY FIELD(ol.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ol.topic
+                ORDER BY FIELD(ua.platform, 'douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt'), ua.topic
                 """,
                 rs -> result.computeIfAbsent(rs.getString("platform"), ignored -> new ArrayList<>()).add(mapAccountStats(rs))
         );
@@ -147,7 +147,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
+                accountBaseSelectSql("AND ua.platform = ? AND ua.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedTopic
@@ -156,6 +156,20 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         return rows.get(0);
+    }
+
+    public Map<String, Object> allowUploadNow(String platform, String topic) {
+        String normalizedPlatform = requirePlatform(platform);
+        String normalizedTopic = requireTopic(topic);
+        int updated = repository.update("""
+                UPDATE uploader_account
+                SET next_upload_allowed_at = NOW(), updated_at = NOW()
+                WHERE platform = ? AND topic = ? AND is_deprecated = 0
+                """, normalizedPlatform, normalizedTopic);
+        if (updated != 1) {
+            throw new IllegalArgumentException("Account not found");
+        }
+        return findAccount(normalizedPlatform, normalizedTopic);
     }
 
     public Map<String, Object> updateQuietTime(String platform, String topic, LocalTime startTime, LocalTime endTime) {
@@ -184,7 +198,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
+                accountBaseSelectSql("AND ua.platform = ? AND ua.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedTopic
@@ -219,7 +233,7 @@ public class AccountOverviewService {
             throw new IllegalArgumentException("Account not found");
         }
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
+                accountBaseSelectSql("AND ua.platform = ? AND ua.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 normalizedPlatform,
                 normalizedTopic
@@ -281,8 +295,8 @@ public class AccountOverviewService {
 
     private String accountBaseSelectSql(String extraWhere) {
         return """
-                SELECT ol.platform,
-                       ol.topic,
+                SELECT ua.platform,
+                       ua.topic,
                        ua.last_upload_at,
                        ua.next_upload_allowed_at,
                        ua.latest_video_publish_at,
@@ -309,11 +323,10 @@ public class AccountOverviewService {
                        ol.updated_at AS cookie_updated_at,
                        phone_profile.display_name,
                        phone_profile.avatar_url
-                FROM operator_loginstate ol
-                LEFT JOIN uploader_account ua
-                       ON ua.platform = ol.platform
-                      AND ua.topic = ol.topic
-                      AND ua.is_deprecated = 0
+                FROM uploader_account ua
+                LEFT JOIN operator_loginstate ol
+                       ON ol.platform = ua.platform
+                      AND ol.topic = ua.topic
                 LEFT JOIN (
                     SELECT platform, account_id,
                            MAX(display_name) AS display_name,
@@ -321,28 +334,29 @@ public class AccountOverviewService {
                     FROM uploader_phone_account
                     GROUP BY platform, account_id
                 ) phone_profile
-                       ON phone_profile.platform = ol.platform
+                       ON phone_profile.platform = ua.platform
                       AND phone_profile.account_id = ol.id
-                WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
+                WHERE ua.is_deprecated = 0
+                  AND ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
                 """.formatted(extraWhere == null ? "" : extraWhere);
     }
 
     private String accountStatsSelectSql(String extraWhere) {
         return """
-                SELECT ol.platform,
-                       ol.topic,
+                SELECT ua.platform,
+                       ua.topic,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
-                         WHERE submission.topic = ol.topic
+                         WHERE submission.topic = ua.topic
                            AND submission.status = 'ready'
                        ) AS downloader_pending_count,
                        (
                          SELECT COUNT(*)
                          FROM downloader_submission submission
                          JOIN task task ON task.id = submission.task_id
-                         WHERE submission.topic = ol.topic
+                         WHERE submission.topic = ua.topic
                            AND submission.status = 'success'
                            AND NULLIF(submission.task_id, '') IS NOT NULL
                            AND task.status <> 'failed'
@@ -357,7 +371,7 @@ public class AccountOverviewService {
                          SELECT COUNT(*)
                          FROM downloader_submission submission
                          JOIN task task ON task.id = submission.task_id
-                         WHERE submission.topic = ol.topic
+                         WHERE submission.topic = ua.topic
                            AND submission.status = 'success'
                            AND NULLIF(submission.task_id, '') IS NOT NULL
                            AND task.status = 'failed'
@@ -371,46 +385,30 @@ public class AccountOverviewService {
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
-                         WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.topic = ol.topic
+                         WHERE upload_submission.platform = ua.platform
+                           AND upload_submission.topic = ua.topic
                            AND upload_submission.status = 'success'
                            AND DATE(upload_submission.completed_at) = CURDATE()
                        ) AS today_upload_count,
                        (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
-                         WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.topic = ol.topic
+                         WHERE upload_submission.platform = ua.platform
+                           AND upload_submission.topic = ua.topic
                            AND upload_submission.status = 'ready'
                        ) AS cooldown_waiting_count,
                        (
-                         SELECT upload_submission.task_id
-                         FROM uploader_task upload_submission
-                         WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.topic = ol.topic
-                           AND upload_submission.status = 'running'
-                         ORDER BY upload_submission.started_at DESC, upload_submission.id DESC
-                         LIMIT 1
-                       ) AS upload_running_task_id,
-                       (
                          SELECT COUNT(*)
                          FROM uploader_task upload_submission
-                         WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.topic = ol.topic
-                           AND upload_submission.status = 'running'
-                       ) AS upload_running_count,
-                       (
-                         SELECT COUNT(*)
-                         FROM uploader_task upload_submission
-                         WHERE upload_submission.platform = ol.platform
-                           AND upload_submission.topic = ol.topic
+                         WHERE upload_submission.platform = ua.platform
+                           AND upload_submission.topic = ua.topic
                            AND upload_submission.status = 'failed'
                        ) AS failed_upload_count,
                        (
                          SELECT income.daily_income
                          FROM backupper_income income
-                         WHERE income.platform COLLATE utf8mb4_unicode_ci = ol.platform
-                           AND income.topic = ol.topic
+                         WHERE income.platform COLLATE utf8mb4_unicode_ci = ua.platform
+                           AND income.topic = ua.topic
                            AND income.income_date = CURDATE()
                            AND income.status = 'success'
                            AND income.income_updated = 1
@@ -421,8 +419,8 @@ public class AccountOverviewService {
                        (
                          SELECT income.updated_at
                          FROM backupper_income income
-                         WHERE income.platform COLLATE utf8mb4_unicode_ci = ol.platform
-                           AND income.topic = ol.topic
+                         WHERE income.platform COLLATE utf8mb4_unicode_ci = ua.platform
+                           AND income.topic = ua.topic
                            AND income.income_date = CURDATE()
                            AND income.status = 'success'
                            AND income.income_updated = 1
@@ -430,8 +428,9 @@ public class AccountOverviewService {
                          ORDER BY income.updated_at DESC, income.id DESC
                          LIMIT 1
                        ) AS current_income_updated_at
-                FROM operator_loginstate ol
-                WHERE ol.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
+                FROM uploader_account ua
+                WHERE ua.is_deprecated = 0
+                  AND ua.platform IN ('douyin', 'xiaohongshu', 'bilibili', 'shipinhao', 'kuaishou', 'jinritoutiao', 'x', 'youtube', 'doubao', 'notebooklm', 'chatgpt')
                 %s
                 """.formatted(extraWhere == null ? "" : extraWhere);
     }
@@ -489,8 +488,6 @@ public class AccountOverviewService {
         row.put("stagedFailedCount", rs.getInt("staged_failed_count"));
         row.put("todayUploadCount", rs.getInt("today_upload_count"));
         row.put("cooldownWaitingCount", rs.getInt("cooldown_waiting_count"));
-        row.put("uploadRunningTaskId", rs.getString("upload_running_task_id"));
-        row.put("uploadRunningCount", rs.getInt("upload_running_count"));
         row.put("failedUploadCount", rs.getInt("failed_upload_count"));
         row.put("currentIncome", nullableBigDecimal(rs, "current_income"));
         row.put("currentIncomeUpdatedAt", toLocalDateTime(rs.getTimestamp("current_income_updated_at")));
@@ -577,7 +574,7 @@ public class AccountOverviewService {
 
     private Map<String, Object> findAccount(String platform, String topic) {
         List<Map<String, Object>> rows = repository.query(
-                accountBaseSelectSql("AND ol.platform = ? AND ol.topic = ?"),
+                accountBaseSelectSql("AND ua.platform = ? AND ua.topic = ?"),
                 (rs, rowNum) -> mapAccount(rs),
                 platform,
                 topic
