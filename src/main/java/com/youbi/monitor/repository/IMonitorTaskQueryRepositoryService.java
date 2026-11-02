@@ -10,9 +10,11 @@ import java.util.Map;
 
 public interface IMonitorTaskQueryRepositoryService {
 
-    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String stage, String taskId, String sort);
+    List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String taskType, String stage, String search);
 
-    long countTaskMonitorItems(String status, String topic, String stage, String taskId);
+    long countTaskMonitorItems(String status, String topic, String taskType, String stage, String search);
+
+    Map<String, List<String>> listTaskFilterOptions();
 
     TaskProgressDetail findTaskProgress(String taskId, LocalDateTime now);
 

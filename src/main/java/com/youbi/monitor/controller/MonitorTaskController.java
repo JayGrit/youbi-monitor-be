@@ -35,13 +35,18 @@ public class MonitorTaskController {
             @RequestParam(defaultValue = "20") int limit,
             @RequestParam(defaultValue = "all") String status,
             @RequestParam(defaultValue = "all") String topic,
+            @RequestParam(defaultValue = "all") String taskType,
             @RequestParam(defaultValue = "all") String stage,
-            @RequestParam(defaultValue = "") String taskId,
-            @RequestParam(defaultValue = "created_desc") String sort
+            @RequestParam(defaultValue = "") String search
     ) {
         int boundedPage = Math.max(1, page);
         int boundedLimit = Math.min(100, Math.max(1, limit));
-        return monitorService.listTasks(boundedPage, boundedLimit, status, topic, stage, taskId, sort);
+        return monitorService.listTasks(boundedPage, boundedLimit, status, topic, taskType, stage, search);
+    }
+
+    @GetMapping("/api/video-tasks/monitor/filters")
+    public java.util.Map<String, List<String>> monitorFilters() {
+        return monitorService.listTaskFilterOptions();
     }
 
     // 查询各流水线服务的心跳状态。

@@ -34,12 +34,16 @@ public class MonitorService {
         this.taskFlowService = taskFlowService;
     }
 
-    public MonitorResponse listTasks(int page, int limit, String status, String topic, String stage, String taskId, String sort) {
+    public MonitorResponse listTasks(int page, int limit, String status, String topic, String taskType, String stage, String search) {
         LocalDateTime now = LocalDateTime.now();
         int offset = Math.max(0, page - 1) * limit;
-        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, topic, stage, taskId, sort);
-        long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, topic, stage, taskId);
+        List<TaskMonitorItem> tasks = taskQueryRepositoryService.listTaskMonitorItems(now, limit, offset, status, topic, taskType, stage, search);
+        long totalCount = taskQueryRepositoryService.countTaskMonitorItems(status, topic, taskType, stage, search);
         return new MonitorResponse(tasks, now, page, limit, totalCount);
+    }
+
+    public java.util.Map<String, List<String>> listTaskFilterOptions() {
+        return taskQueryRepositoryService.listTaskFilterOptions();
     }
 
     public List<ServiceHeartbeat> listServiceHeartbeats() {

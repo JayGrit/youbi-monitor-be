@@ -14,6 +14,7 @@ public record TaskMonitorItem(
         Integer minioStorageObjectCount,
         LocalDateTime minioStorageUpdatedAt,
         String topic,
+        String taskType,
         String status,
         String currentStage,
         LocalDateTime createdAt,

@@ -391,23 +391,29 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
 
 
     @Override
-    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String stage, String taskId, String sort) {
-        SqlFilter filter = taskMonitorFilter(status, topic, stage, taskId);
+    public List<TaskMonitorItem> listTaskMonitorItems(LocalDateTime now, int limit, int offset, String status, String topic, String taskType, String stage, String search) {
+        SqlFilter filter = taskMonitorFilter(status, topic, taskType, stage, search);
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
-        String sql = monitorSql(MONITOR_SUMMARY_SQL, filter, sort)
-                .replace("__TASK_MONITOR_WHERE__", filter.clause())
-                .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
+        String sql = monitorSql(MONITOR_SUMMARY_SQL, filter);
         List<TaskMonitorItem> rows = repository.query(sql, new TaskRowMapper(now), args.toArray());
         return withRouteGraphs(rows, now);
     }
 
     @Override
-    public long countTaskMonitorItems(String status, String topic, String stage, String taskId) {
-        SqlFilter filter = taskMonitorFilter(status, topic, stage, taskId);
-        Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter, ""), Long.class, filter.args().toArray());
+    public long countTaskMonitorItems(String status, String topic, String taskType, String stage, String search) {
+        SqlFilter filter = taskMonitorFilter(status, topic, taskType, stage, search);
+        Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter), Long.class, filter.args().toArray());
         return count == null ? 0 : count;
+    }
+
+    @Override
+    public Map<String, List<String>> listTaskFilterOptions() {
+        return Map.of(
+                "topics", repository.queryForList("SELECT DISTINCT topic FROM task WHERE topic IS NOT NULL AND TRIM(topic) <> '' ORDER BY topic", String.class),
+                "taskTypes", repository.queryForList("SELECT DISTINCT task_type FROM task WHERE task_type IS NOT NULL AND TRIM(task_type) <> '' ORDER BY task_type", String.class)
+        );
     }
 
     @Override
@@ -447,7 +453,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
             enriched.add(new TaskMonitorItem(
                     row.taskId(), row.title(), row.sourceUrl(), row.sourceWebpageUrl(), row.sourceThumbnailUrl(),
                     row.sourceDurationSeconds(), row.minioStorageBytes(), row.minioStorageObjectCount(),
-                    row.minioStorageUpdatedAt(), row.topic(), row.status(), row.currentStage(), row.createdAt(),
+                    row.minioStorageUpdatedAt(), row.topic(), row.taskType(), row.status(), row.currentStage(), row.createdAt(),
                     row.startedAt(), row.completedAt(), row.elapsedSeconds(), row.bilibiliUploadTopic(),
                     row.bilibiliUploadAccountName(), row.errorMessage(), row.distributorStages(), row.nodes(),
                     graph.nodes(), graph.edges()
@@ -520,7 +526,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         return rs.wasNull() ? null : value;
     }
 
-    private String monitorSql(String template, SqlFilter filter, String sort) {
+    private String monitorSql(String template, SqlFilter filter) {
         return applyCapabilities(template)
                 .replace("__ASR_TASK_FILTER__", "")
                 .replace("__TRANSLATOR_SEGMENT_TASK_FILTER__", "")
@@ -528,7 +534,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 .replace("__TRANSLATOR_FAILURE_TASK_FILTER__", "")
                 .replace("__SPEAKER_SEGMENT_TASK_FILTER__", "")
                 .replace("__TASK_MONITOR_WHERE__", filter.clause())
-                .replace("__TASK_MONITOR_ORDER_BY__", monitorOrderBy(sort));
+                .replace("__TASK_MONITOR_ORDER_BY__", "ORDER BY t.created_at DESC");
     }
 
     private String progressSql(String template, SqlFilter filter) {
@@ -661,24 +667,18 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 """.formatted(quotedIdentifier(table));
     }
 
-    private static String monitorOrderBy(String sort) {
-        String normalized = text(sort);
-        if ("minio_storage_desc".equalsIgnoreCase(normalized)) {
-            return "ORDER BY COALESCE(bm.minio_storage_bytes, 0) DESC, t.created_at DESC";
-        }
-        return "ORDER BY t.created_at DESC";
-    }
-
-    private static SqlFilter taskMonitorFilter(String status, String topic, String stage, String taskId) {
+    private static SqlFilter taskMonitorFilter(String status, String topic, String taskType, String stage, String search) {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addFilter(conditions, args, "t.status", status);
         addFilter(conditions, args, "t.topic", topic);
+        addFilter(conditions, args, "t.task_type", taskType);
         addFilter(conditions, args, "t.current_stage", stage);
-        String normalizedTaskId = text(taskId);
-        if (!normalizedTaskId.isBlank()) {
-            conditions.add("t.id LIKE ?");
-            args.add("%" + normalizedTaskId + "%");
+        String normalizedSearch = text(search);
+        if (!normalizedSearch.isBlank()) {
+            conditions.add("(t.id LIKE ? OR meta.upload_title LIKE ?)");
+            args.add("%" + normalizedSearch + "%");
+            args.add("%" + normalizedSearch + "%");
         }
         if (conditions.isEmpty()) {
             return new SqlFilter("", List.of());
@@ -756,6 +756,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                     integerOrNull(rs, "minio_storage_object_count"),
                     timestamp(rs, "minio_storage_updated_at"),
                     rs.getString("topic"),
+                    rs.getString("distributor_task_type"),
                     rs.getString("status"),
                     rs.getString("current_stage"),
                     timestamp(rs, "created_at"),
