@@ -10,6 +10,7 @@ public record FailureLogItem(
         String stage,
         String subStage,
         String platform,
+        String submissionStatus,
         String errorMessage,
         LocalDateTime failedAt
 ) {

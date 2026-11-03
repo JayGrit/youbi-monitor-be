@@ -45,6 +45,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 rs.getString("stage"),
                 rs.getString("sub_stage"),
                 rs.getString("platform"),
+                rs.getString("submission_status"),
                 rs.getString("error_message"),
                 timestamp(rs, "failed_at")
         ));
@@ -60,6 +61,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   'uploader' stage,
                   'main' sub_stage,
                   submission.platform platform,
+                  submission.status submission_status,
                   COALESCE(NULLIF(submission.error_message, ''), NULLIF(uploader.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(submission.completed_at, submission.updated_at, submission.started_at, submission.created_at) failed_at
                 FROM %s submission
@@ -71,6 +73,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                 LEFT JOIN task_metadata meta ON meta.task_id = submission.task_id
                 LEFT JOIN task_source source ON source.task_id = submission.task_id
                 WHERE submission.status = 'failed'
+                   OR (submission.status = 'ready' AND uploader.status = 'failed')
                 """.formatted(quotedIdentifier(table));
     }
 
@@ -78,7 +81,8 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
         String failedUploadExists = uploadTaskTables.stream()
                 .map(table -> """
                         SELECT 1 FROM %s submission
-                        WHERE submission.task_id = stage.task_id AND submission.status = 'failed'
+                        WHERE submission.task_id = stage.task_id
+                          AND (submission.status = 'failed' OR submission.status = 'ready')
                         """.formatted(quotedIdentifier(table)))
                 .map(query -> "EXISTS (" + query + ")")
                 .reduce((left, right) -> left + " OR " + right)
@@ -92,6 +96,7 @@ public class FailureLogRepositoryServiceImpl extends MonitorRepositorySqlSupport
                   stage.stage_name stage,
                   stage.sub_stage sub_stage,
                   '' platform,
+                  '' submission_status,
                   COALESCE(NULLIF(stage.error_message, ''), NULLIF(task.error_message, ''), '未知错误') error_message,
                   COALESCE(stage.completed_at, stage.updated_at, stage.started_at, task.completed_at, task.started_at, task.created_at) failed_at
                 FROM distributor_task_stages stage
