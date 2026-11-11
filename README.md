@@ -13,6 +13,8 @@ services.
 - Failure log, queue monitor and static asset APIs.
 - AliDrive transfer helpers and MinIO-backed upload work directories.
 - Distributor lifecycle proxy for stop, retry, restart and speaker reset.
+- Read-only newyouth podcast growth dashboard API (`GET /api/newyouth/overview`),
+  calculated from completed hourly video and account snapshots.
 
 It should not directly run media processing, browser automation or upload work.
 Those responsibilities belong to the service workers.
