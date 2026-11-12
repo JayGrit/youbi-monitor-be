@@ -35,4 +35,17 @@ class NewYouthServiceTest {
         assertEquals(12L, slices.get(0).get("growth"));
         assertEquals("其他", slices.get(10).get("title"));
     }
+    @Test
+    void pieIncludesUnassociatedBv() {
+        var rows = List.of(new NewYouthService.VideoGrowth(null, "BVunassociated",
+                "Unpaired video", 10, 15));
+        Map<String, Object> pie = NewYouthService.buildPie(
+                LocalDateTime.of(2026, 11, 12, 1, 0),
+                LocalDateTime.of(2026, 11, 12, 2, 0), rows);
+        assertEquals(5L, pie.get("totalGrowth"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> slices = (List<Map<String, Object>>) pie.get("slices");
+        assertEquals("BVunassociated", slices.get(0).get("bvid"));
+    }
+
 }

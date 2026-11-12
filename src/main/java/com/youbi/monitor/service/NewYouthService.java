@@ -45,7 +45,7 @@ public class NewYouthService {
 
         Map<LocalDateTime, Run> runs = new HashMap<>();
         repository.query("""
-                SELECT id, scheduled_slot FROM product_podcast_monitor_run
+                SELECT id, scheduled_slot FROM product_podcast_web_run
                 WHERE uploader_account_id = ? AND finished_at IS NOT NULL
                   AND scheduled_slot BETWEEN ? AND ?
                 ORDER BY scheduled_slot
@@ -74,25 +74,36 @@ public class NewYouthService {
                 SELECT current_data.task_id, current_data.bvid,
                        COALESCE(NULLIF(inventory.title, ''), NULLIF(podcast.title, ''), current_data.bvid) AS title,
                        previous_data.view_count AS previous_views, current_data.view_count AS current_views
-                FROM product_podcast_video_data_history previous_data
-                JOIN product_podcast_video_data_history current_data
-                  ON current_data.task_id = previous_data.task_id
-                 AND current_data.bvid = previous_data.bvid
+                FROM product_podcast_web_video_data_history previous_data
+                JOIN (
+                    SELECT bvid, MAX(run_id) AS run_id
+                    FROM product_podcast_web_video_data_history
+                    WHERE uploader_account_id = ? AND run_id <= ? AND view_count IS NOT NULL
+                    GROUP BY bvid
+                ) previous_latest ON previous_latest.bvid = previous_data.bvid
+                    AND previous_latest.run_id = previous_data.run_id
+                JOIN product_podcast_web_video_data_history current_data
+                    ON current_data.bvid = previous_data.bvid
+                JOIN (
+                    SELECT bvid, MAX(run_id) AS run_id
+                    FROM product_podcast_web_video_data_history
+                    WHERE uploader_account_id = ? AND run_id <= ? AND view_count IS NOT NULL
+                    GROUP BY bvid
+                ) current_latest ON current_latest.bvid = current_data.bvid
+                    AND current_latest.run_id = current_data.run_id
                 LEFT JOIN product_podcast podcast ON podcast.task_id = current_data.task_id
-                LEFT JOIN product_podcast_video_inventory inventory
-                  ON inventory.uploader_account_id = ? AND inventory.bvid = current_data.bvid
-                WHERE previous_data.run_id = ? AND current_data.run_id = ?
-                  AND previous_data.view_count IS NOT NULL AND current_data.view_count IS NOT NULL
+                LEFT JOIN product_podcast_web_video_inventory inventory
+                    ON inventory.uploader_account_id = ? AND inventory.bvid = current_data.bvid
                 """, (rs, ignored) -> new VideoGrowth(rs.getString("task_id"), rs.getString("bvid"),
                 cleanTitle(rs.getString("title")), rs.getLong("previous_views"), rs.getLong("current_views")),
-                accountId, start.id(), end.id());
+                accountId, start.id(), accountId, end.id(), accountId);
         return buildPie(startSlot, endSlot, rows);
     }
 
     static Map<String, Object> buildPie(LocalDateTime start, LocalDateTime end, List<VideoGrowth> rows) {
         List<VideoGrowth> positives = rows.stream().filter(row -> row.growth() > 0)
                 .sorted(Comparator.comparingLong(VideoGrowth::growth).reversed()
-                        .thenComparing(VideoGrowth::taskId)).toList();
+                        .thenComparing(VideoGrowth::bvid)).toList();
         long total = positives.stream().mapToLong(VideoGrowth::growth).sum();
         long topTotal = positives.stream().limit(10).mapToLong(VideoGrowth::growth).sum();
         List<Map<String, Object>> slices = new ArrayList<>();
@@ -141,10 +152,9 @@ public class NewYouthService {
         Map<Long, Long> counts = new HashMap<>();
         repository.query("""
                 SELECT history.run_id, history.follower_count
-                FROM product_podcast_account_data_history history
-                JOIN product_podcast_monitor_run run ON run.id = history.run_id
-                WHERE history.uploader_account_id = ? AND history.follower_status = 'success'
-                  AND history.follower_count IS NOT NULL
+                FROM product_podcast_web_account_data_history history
+                JOIN product_podcast_web_run run ON run.id = history.run_id
+                WHERE history.uploader_account_id = ? AND history.follower_count IS NOT NULL
                   AND run.finished_at IS NOT NULL
                   AND run.scheduled_slot BETWEEN ? AND ?
                 """, (rs, ignored) -> Map.entry(rs.getLong("run_id"), rs.getLong("follower_count")),
