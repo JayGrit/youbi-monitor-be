@@ -73,30 +73,32 @@ public class NewYouthService {
         List<VideoGrowth> rows = repository.query("""
                 SELECT current_data.task_id, current_data.bvid,
                        COALESCE(NULLIF(inventory.title, ''), NULLIF(podcast.title, ''), current_data.bvid) AS title,
-                       previous_data.view_count AS previous_views, current_data.view_count AS current_views
-                FROM product_podcast_web_video_data_history previous_data
-                JOIN (
+                       COALESCE(previous_data.view_count, 0) AS previous_views,
+                       current_data.view_count AS current_views
+                FROM (
                     SELECT bvid, MAX(run_id) AS run_id
                     FROM product_podcast_web_video_data_history
                     WHERE uploader_account_id = ? AND run_id <= ? AND view_count IS NOT NULL
                     GROUP BY bvid
-                ) previous_latest ON previous_latest.bvid = previous_data.bvid
-                    AND previous_latest.run_id = previous_data.run_id
+                ) current_latest
                 JOIN product_podcast_web_video_data_history current_data
-                    ON current_data.bvid = previous_data.bvid
-                JOIN (
+                    ON current_data.bvid = current_latest.bvid
+                    AND current_data.run_id = current_latest.run_id
+                LEFT JOIN (
                     SELECT bvid, MAX(run_id) AS run_id
                     FROM product_podcast_web_video_data_history
                     WHERE uploader_account_id = ? AND run_id <= ? AND view_count IS NOT NULL
                     GROUP BY bvid
-                ) current_latest ON current_latest.bvid = current_data.bvid
-                    AND current_latest.run_id = current_data.run_id
+                ) previous_latest ON previous_latest.bvid = current_data.bvid
+                LEFT JOIN product_podcast_web_video_data_history previous_data
+                    ON previous_data.bvid = previous_latest.bvid
+                    AND previous_data.run_id = previous_latest.run_id
                 LEFT JOIN product_podcast podcast ON podcast.task_id = current_data.task_id
                 LEFT JOIN product_podcast_web_video_inventory inventory
                     ON inventory.uploader_account_id = ? AND inventory.bvid = current_data.bvid
                 """, (rs, ignored) -> new VideoGrowth(rs.getString("task_id"), rs.getString("bvid"),
                 cleanTitle(rs.getString("title")), rs.getLong("previous_views"), rs.getLong("current_views")),
-                accountId, start.id(), accountId, end.id(), accountId);
+                accountId, end.id(), accountId, start.id(), accountId);
         return buildPie(startSlot, endSlot, rows);
     }
 
