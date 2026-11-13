@@ -72,11 +72,12 @@ public class NewYouthService {
             return emptyPie(startSlot, endSlot);
         }
         List<VideoGrowth> rows = repository.query("""
-                SELECT current_data.task_id, current_data.bvid,
-                       COALESCE(NULLIF(inventory.title, ''), NULLIF(podcast.title, ''), current_data.bvid) AS title,
+                SELECT COALESCE(current_data.task_id, bv_podcast.task_id) AS task_id, current_data.bvid,
+                       COALESCE(NULLIF(inventory.title, ''), NULLIF(podcast.title, ''),
+                                NULLIF(bv_podcast.title, ''), current_data.bvid) AS title,
                        COALESCE(previous_data.view_count, 0) AS previous_views,
                        current_data.view_count AS current_views,
-                       inventory.published_at AS published_at
+                       COALESCE(uploader.scheduled_publish_at, uploader.completed_at) AS published_at
                 FROM (
                     SELECT bvid, MAX(run_id) AS run_id
                     FROM product_podcast_web_video_data_history
@@ -96,6 +97,12 @@ public class NewYouthService {
                     ON previous_data.bvid = previous_latest.bvid
                     AND previous_data.run_id = previous_latest.run_id
                 LEFT JOIN product_podcast podcast ON podcast.task_id = current_data.task_id
+                LEFT JOIN product_podcast bv_podcast
+                    ON current_data.task_id IS NULL AND bv_podcast.bilibili_video_url = current_data.bvid
+                LEFT JOIN uploader_task uploader
+                    ON uploader.task_id = COALESCE(current_data.task_id, bv_podcast.task_id)
+                    AND uploader.platform = 'bilibili' AND uploader.topic = 'newyouth'
+                    AND uploader.status = 'success'
                 LEFT JOIN product_podcast_web_video_inventory inventory
                     ON inventory.uploader_account_id = ? AND inventory.bvid = current_data.bvid
                 """, (rs, ignored) -> new VideoGrowth(rs.getString("task_id"), rs.getString("bvid"),
