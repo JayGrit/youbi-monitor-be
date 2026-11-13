@@ -5,6 +5,7 @@ import org.springframework.stereotype.Service;
 
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -74,7 +75,8 @@ public class NewYouthService {
                 SELECT current_data.task_id, current_data.bvid,
                        COALESCE(NULLIF(inventory.title, ''), NULLIF(podcast.title, ''), current_data.bvid) AS title,
                        COALESCE(previous_data.view_count, 0) AS previous_views,
-                       current_data.view_count AS current_views
+                       current_data.view_count AS current_views,
+                       inventory.published_at AS published_at
                 FROM (
                     SELECT bvid, MAX(run_id) AS run_id
                     FROM product_podcast_web_video_data_history
@@ -97,7 +99,8 @@ public class NewYouthService {
                 LEFT JOIN product_podcast_web_video_inventory inventory
                     ON inventory.uploader_account_id = ? AND inventory.bvid = current_data.bvid
                 """, (rs, ignored) -> new VideoGrowth(rs.getString("task_id"), rs.getString("bvid"),
-                cleanTitle(rs.getString("title")), rs.getLong("previous_views"), rs.getLong("current_views")),
+                cleanTitle(rs.getString("title")), rs.getLong("previous_views"), rs.getLong("current_views"),
+                rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toLocalDateTime()),
                 accountId, end.id(), accountId, start.id(), accountId);
         return buildPie(startSlot, endSlot, rows);
     }
@@ -107,9 +110,14 @@ public class NewYouthService {
                 .sorted(Comparator.comparingLong(VideoGrowth::growth).reversed()
                         .thenComparing(VideoGrowth::bvid)).toList();
         long total = positives.stream().mapToLong(VideoGrowth::growth).sum();
-        long topTotal = positives.stream().limit(10).mapToLong(VideoGrowth::growth).sum();
         List<Map<String, Object>> slices = new ArrayList<>();
-        positives.stream().limit(10).forEach(row -> {
+        Map<String, Long> groupGrowth = new LinkedHashMap<>();
+        groupGrowth.put("today", 0L);
+        groupGrowth.put("recent", 0L);
+        groupGrowth.put("earlier", 0L);
+        positives.forEach(row -> {
+            String ageGroup = ageGroup(row.publishedAt(), end.toLocalDate());
+            groupGrowth.merge(ageGroup, row.growth(), Long::sum);
             Map<String, Object> slice = new LinkedHashMap<>();
             slice.put("taskId", row.taskId());
             slice.put("bvid", row.bvid());
@@ -118,16 +126,16 @@ public class NewYouthService {
             slice.put("growth", row.growth());
             slice.put("previousViews", row.previousViews());
             slice.put("currentViews", row.currentViews());
+            slice.put("publishedAt", row.publishedAt() == null ? null : row.publishedAt().toString());
+            slice.put("ageGroup", ageGroup);
             slices.add(slice);
         });
-        if (positives.size() > 10) {
-            slices.add(Map.of("title", "其他", "growth", total - topTotal));
-        }
+        List<Map<String, Object>> groups = new ArrayList<>();
+        groupGrowth.forEach((key, growth) -> groups.add(Map.of("key", key, "growth", growth)));
         Map<String, Object> result = emptyPie(start, end);
         result.put("available", true);
         result.put("totalGrowth", total);
-        result.put("topTenGrowth", topTotal);
-        result.put("otherGrowth", total - topTotal);
+        result.put("groups", groups);
         result.put("comparableVideos", rows.size());
         result.put("negativeCorrections", rows.stream().filter(row -> row.growth() < 0).count());
         result.put("slices", slices);
@@ -140,8 +148,10 @@ public class NewYouthService {
         result.put("startSlot", start.toString());
         result.put("endSlot", end.toString());
         result.put("totalGrowth", 0L);
-        result.put("topTenGrowth", 0L);
-        result.put("otherGrowth", 0L);
+        result.put("groups", List.of(
+                Map.of("key", "today", "growth", 0L),
+                Map.of("key", "recent", "growth", 0L),
+                Map.of("key", "earlier", "growth", 0L)));
         result.put("comparableVideos", 0);
         result.put("negativeCorrections", 0);
         result.put("slices", List.of());
@@ -183,9 +193,17 @@ public class NewYouthService {
         return title == null ? "" : title.replace("\\n", " ").replace('\n', ' ').replace('\r', ' ').trim();
     }
 
+    private static String ageGroup(LocalDateTime publishedAt, LocalDate today) {
+        if (publishedAt == null) return "earlier";
+        LocalDate date = publishedAt.toLocalDate();
+        if (!date.isBefore(today)) return "today";
+        return !date.isBefore(today.minusDays(2)) ? "recent" : "earlier";
+    }
+
     record Run(long id, LocalDateTime slot) {}
 
-    record VideoGrowth(String taskId, String bvid, String title, long previousViews, long currentViews) {
+    record VideoGrowth(String taskId, String bvid, String title, long previousViews, long currentViews,
+                       LocalDateTime publishedAt) {
         long growth() { return currentViews - previousViews; }
     }
 }
