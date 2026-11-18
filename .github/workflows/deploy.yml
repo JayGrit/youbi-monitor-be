@@ -31,7 +31,7 @@ jobs:
           TXY_PATH="$1"
           RELEASE_TAG="$2"
 
-          exec 9>/var/lock/youbi-docker-deploy.lock
+          exec 9>/var/lock/youbi-monitor-be-deploy.lock
           flock -w 1800 9
 
           if [ ! -d "${TXY_PATH}/.git" ]; then
