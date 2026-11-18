@@ -14,7 +14,6 @@ import java.util.Map;
 
 @Service
 public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtifactRepositoryService {
-    private static final String OPERATOR_DIAGNOSTIC_TABLE = "operator_diagnostic";
 
     private final DiagnosticArtifactRepository repository;
 
@@ -24,33 +23,8 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
 
 
     @Override
-    public long countOperatorExecutions(Map<String, String> filters) {
+    public List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters) {
         QueryParts parts = executionWhere(filters);
-        Long count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM (
-                    SELECT d.op_id
-                    FROM operator_diagnostic d
-                    LEFT JOIN operator_task t ON t.op_id = d.op_id
-                    %s
-                    GROUP BY d.op_id
-                ) grouped
-                """.formatted(parts.where()),
-                Long.class,
-                parts.args().toArray()
-        );
-        return count == null ? 0 : count;
-    }
-
-    @Override
-    public List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters, int offset, int limit) {
-        QueryParts parts = executionWhere(filters);
-        List<Object> args = new ArrayList<>(parts.args());
-        if (limit > 0) {
-            args.add(limit);
-            args.add(Math.max(0, offset));
-        }
         return repository.queryForList("""
                 SELECT
                     d.op_id AS opId,
@@ -88,33 +62,12 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 %s
                 GROUP BY d.op_id
                 ORDER BY completedAt DESC, opId DESC
-                %s
-                """.formatted(parts.where(), limit > 0 ? "LIMIT ? OFFSET ?" : ""), args.toArray());
+                """.formatted(parts.where()), parts.args().toArray());
     }
 
     @Override
-    public long countOperatorQueue(Map<String, String> filters) {
+    public List<Map<String, Object>> listOperatorQueue(Map<String, String> filters) {
         QueryParts parts = taskWhere(filters);
-        Long count = repository.queryForObject(
-                """
-                SELECT COUNT(*)
-                FROM operator_task t
-                %s
-                """.formatted(parts.where()),
-                Long.class,
-                parts.args().toArray()
-        );
-        return count == null ? 0 : count;
-    }
-
-    @Override
-    public List<Map<String, Object>> listOperatorQueue(Map<String, String> filters, int offset, int limit) {
-        QueryParts parts = taskWhere(filters);
-        List<Object> args = new ArrayList<>(parts.args());
-        if (limit > 0) {
-            args.add(limit);
-            args.add(Math.max(0, offset));
-        }
         return repository.queryForList("""
                 SELECT
                     t.id,
@@ -146,30 +99,17 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
                     t.created_at ASC,
                     t.id ASC
-                %s
-                """.formatted(parts.where(), limit > 0 ? "LIMIT ? OFFSET ?" : ""), args.toArray());
+                """.formatted(parts.where()), parts.args().toArray());
     }
 
     @Override
-    public long countOperatorDiagnostics(String opId) {
-        Long count = repository.queryForObject(
-                "SELECT COUNT(*) FROM " + OPERATOR_DIAGNOSTIC_TABLE + " WHERE op_id = ?",
-                Long.class,
-                text(opId)
-        );
-        return count == null ? 0 : count;
-    }
-
-    @Override
-    public List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId, int offset, int limit) {
-        String sql = """
+    public List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId) {
+        return repository.query("""
                 SELECT *
                 FROM operator_diagnostic
                 WHERE op_id = ?
                 ORDER BY step_index ASC, id ASC
-                """;
-        if (limit <= 0) return repository.query(sql, this::mapDiagnostic, text(opId));
-        return repository.query(sql + " LIMIT ? OFFSET ?", this::mapDiagnostic, text(opId), limit, Math.max(0, offset));
+                """, this::mapDiagnostic, text(opId));
     }
 
     @Override
@@ -178,7 +118,6 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 SELECT *
                 FROM operator_diagnostic
                 WHERE id = ?
-                LIMIT 1
                 """, this::mapDiagnostic, id);
         return rows.isEmpty() ? null : rows.get(0);
     }
@@ -187,6 +126,10 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addLike(conditions, args, "d.op_id", filters.get("opId"));
+        if (filters.containsKey("exactOpId")) {
+            conditions.add("d.op_id = ?");
+            args.add(filters.get("exactOpId"));
+        }
         addLike(conditions, args, "t.task_id", filters.get("taskId"));
         addLike(conditions, args, "t.topic", filters.get("topic"));
         addPlatformFilter(conditions, args, filters.get("platform"));

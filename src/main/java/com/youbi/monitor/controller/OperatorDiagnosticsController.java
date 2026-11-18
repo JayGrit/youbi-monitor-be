@@ -56,8 +56,8 @@ public class OperatorDiagnosticsController {
 
     // 查询指定 operator 任务的诊断信息。
     @GetMapping("/tasks/{opId}/diagnostics")
-    public Map<String, Object> diagnostics(@PathVariable String opId, @RequestParam MultiValueMap<String, String> query) {
-        return operatorDiagnosticsService.getDiagnostics(opId, query);
+    public Map<String, Object> diagnostics(@PathVariable String opId) {
+        return operatorDiagnosticsService.getDiagnostics(opId);
     }
 
     // 通过后端凭证读取私有 MinIO 诊断附件，避免前端直连私有 bucket。

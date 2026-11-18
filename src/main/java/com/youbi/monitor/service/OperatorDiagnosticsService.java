@@ -29,8 +29,6 @@ import java.util.Map;
 
 @Service
 public class OperatorDiagnosticsService {
-    private static final int DEFAULT_LIMIT = 10;
-    private static final int MAX_LIMIT = 100;
     private static final DateTimeFormatter SQL_DATETIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final IDiagnosticArtifactRepositoryService repositoryService;
@@ -52,91 +50,30 @@ public class OperatorDiagnosticsService {
     }
 
     public Map<String, Object> listTasks(MultiValueMap<String, String> query) {
-        if ("true".equals(first(query, "all"))) {
-            return allItems(repositoryService.listOperatorExecutions(filters(query), 0, 0).stream()
-                    .map(this::normalizeExecution).toList());
-        }
-        int page = positiveInt(first(query, "page"), 1);
-        int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), DEFAULT_LIMIT));
-        Map<String, String> filters = filters(query);
-        long total = repositoryService.countOperatorExecutions(filters);
-        int pageCount = total == 0 ? 0 : (int) Math.ceil((double) total / limit);
-        int normalizedPage = pageCount == 0 ? 1 : Math.min(page, pageCount);
-        int offset = (normalizedPage - 1) * limit;
-        List<Map<String, Object>> items = repositoryService.listOperatorExecutions(filters, offset, limit)
-                .stream()
-                .map(this::normalizeExecution)
-                .toList();
-        return Map.of(
-                "items", items,
-                "total", total,
-                "page", normalizedPage,
-                "limit", limit,
-                "pageCount", pageCount
-        );
+        return allItems(repositoryService.listOperatorExecutions(filters(query)).stream()
+                .map(this::normalizeExecution).toList());
     }
 
     public Map<String, Object> listQueue(MultiValueMap<String, String> query) {
-        if ("true".equals(first(query, "all"))) {
-            return allItems(repositoryService.listOperatorQueue(filters(query), 0, 0).stream()
-                    .map(this::normalizeQueueTask).toList());
-        }
-        int page = positiveInt(first(query, "page"), 1);
-        int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), 50));
-        Map<String, String> filters = filters(query);
-        long total = repositoryService.countOperatorQueue(filters);
-        int pageCount = total == 0 ? 0 : (int) Math.ceil((double) total / limit);
-        int normalizedPage = pageCount == 0 ? 1 : Math.min(page, pageCount);
-        int offset = (normalizedPage - 1) * limit;
-        List<Map<String, Object>> items = repositoryService.listOperatorQueue(filters, offset, limit)
-                .stream()
-                .map(this::normalizeQueueTask)
-                .toList();
-        return Map.of(
-                "items", items,
-                "total", total,
-                "page", normalizedPage,
-                "limit", limit,
-                "pageCount", pageCount
-        );
+        return allItems(repositoryService.listOperatorQueue(filters(query)).stream()
+                .map(this::normalizeQueueTask).toList());
     }
 
     public Map<String, Object> getTask(String opId) {
-        Map<String, String> filters = Map.of("opId", TextSupport.text(opId));
-        return repositoryService.listOperatorExecutions(filters, 0, 1)
+        return repositoryService.listOperatorExecutions(Map.of("exactOpId", TextSupport.text(opId)))
                 .stream()
                 .findFirst()
                 .map(this::normalizeExecution)
                 .orElseGet(() -> Map.of("opId", TextSupport.text(opId), "status", "not_found", "diagnosticCount", 0));
     }
 
-    public Map<String, Object> getDiagnostics(String opId, MultiValueMap<String, String> query) {
-        if ("true".equals(first(query, "all"))) {
-            return allItems(repositoryService.listOperatorDiagnostics(TextSupport.text(opId), 0, 0).stream()
-                    .map(this::diagnosticJson).toList());
-        }
-        int page = positiveInt(first(query, "page"), 1);
-        int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), DEFAULT_LIMIT));
-        long total = repositoryService.countOperatorDiagnostics(TextSupport.text(opId));
-        int pageCount = total == 0 ? 0 : (int) Math.ceil((double) total / limit);
-        int normalizedPage = pageCount == 0 ? 1 : Math.min(page, pageCount);
-        int offset = (normalizedPage - 1) * limit;
-        List<Map<String, Object>> items = repositoryService.listOperatorDiagnostics(TextSupport.text(opId), offset, limit)
-                .stream()
-                .map(this::diagnosticJson)
-                .toList();
-        return Map.of(
-                "items", items,
-                "total", total,
-                "page", normalizedPage,
-                "limit", limit,
-                "pageCount", pageCount
-        );
+    public Map<String, Object> getDiagnostics(String opId) {
+        return allItems(repositoryService.listOperatorDiagnostics(TextSupport.text(opId)).stream()
+                .map(this::diagnosticJson).toList());
     }
 
     private Map<String, Object> allItems(List<?> items) {
-        return Map.of("items", items, "total", items.size(), "page", 1,
-                "limit", items.size(), "pageCount", items.isEmpty() ? 0 : 1);
+        return Map.of("items", items, "total", items.size());
     }
 
     public ResponseEntity<StreamingResponseBody> getDiagnosticArtifact(long id, String kind) {
@@ -294,15 +231,6 @@ public class OperatorDiagnosticsService {
 
     private String first(MultiValueMap<String, String> query, String key) {
         return query == null ? null : query.getFirst(key);
-    }
-
-    private int positiveInt(String value, int fallback) {
-        try {
-            int parsed = Integer.parseInt(TextSupport.text(value));
-            return parsed > 0 ? parsed : fallback;
-        } catch (Exception exception) {
-            return fallback;
-        }
     }
 
     private String text(Object value) {

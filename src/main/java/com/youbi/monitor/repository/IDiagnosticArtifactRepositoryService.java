@@ -7,17 +7,11 @@ import java.util.Map;
 
 public interface IDiagnosticArtifactRepositoryService {
 
-    long countOperatorExecutions(Map<String, String> filters);
+    List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters);
 
-    List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters, int offset, int limit);
+    List<Map<String, Object>> listOperatorQueue(Map<String, String> filters);
 
-    long countOperatorQueue(Map<String, String> filters);
-
-    List<Map<String, Object>> listOperatorQueue(Map<String, String> filters, int offset, int limit);
-
-    long countOperatorDiagnostics(String opId);
-
-    List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId, int offset, int limit);
+    List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId);
 
     DiagnosticArtifactRecord getOperatorDiagnostic(long id);
 }
