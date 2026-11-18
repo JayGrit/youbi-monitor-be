@@ -47,8 +47,10 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     public List<Map<String, Object>> listOperatorExecutions(Map<String, String> filters, int offset, int limit) {
         QueryParts parts = executionWhere(filters);
         List<Object> args = new ArrayList<>(parts.args());
-        args.add(Math.max(1, limit));
-        args.add(Math.max(0, offset));
+        if (limit > 0) {
+            args.add(limit);
+            args.add(Math.max(0, offset));
+        }
         return repository.queryForList("""
                 SELECT
                     d.op_id AS opId,
@@ -86,8 +88,8 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                 %s
                 GROUP BY d.op_id
                 ORDER BY completedAt DESC, opId DESC
-                LIMIT ? OFFSET ?
-                """.formatted(parts.where()), args.toArray());
+                %s
+                """.formatted(parts.where(), limit > 0 ? "LIMIT ? OFFSET ?" : ""), args.toArray());
     }
 
     @Override
@@ -109,8 +111,10 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     public List<Map<String, Object>> listOperatorQueue(Map<String, String> filters, int offset, int limit) {
         QueryParts parts = taskWhere(filters);
         List<Object> args = new ArrayList<>(parts.args());
-        args.add(Math.max(1, limit));
-        args.add(Math.max(0, offset));
+        if (limit > 0) {
+            args.add(limit);
+            args.add(Math.max(0, offset));
+        }
         return repository.queryForList("""
                 SELECT
                     t.id,
@@ -126,6 +130,7 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     t.priority,
                     t.created_at AS createdAt,
                     t.started_at AS startedAt,
+                    (t.status = 'ready' AND t.started_at IS NULL AND t.attempt_count = 0) AS deletable,
                     t.completed_at AS completedAt,
                     t.error_code AS errorCode,
                     t.error_message AS errorMessage
@@ -141,8 +146,8 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
                     t.created_at ASC,
                     t.id ASC
-                LIMIT ? OFFSET ?
-                """.formatted(parts.where()), args.toArray());
+                %s
+                """.formatted(parts.where(), limit > 0 ? "LIMIT ? OFFSET ?" : ""), args.toArray());
     }
 
     @Override
@@ -157,13 +162,14 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
 
     @Override
     public List<DiagnosticArtifactRecord> listOperatorDiagnostics(String opId, int offset, int limit) {
-        return repository.query("""
+        String sql = """
                 SELECT *
                 FROM operator_diagnostic
                 WHERE op_id = ?
                 ORDER BY step_index ASC, id ASC
-                LIMIT ? OFFSET ?
-                """, this::mapDiagnostic, text(opId), Math.max(1, limit), Math.max(0, offset));
+                """;
+        if (limit <= 0) return repository.query(sql, this::mapDiagnostic, text(opId));
+        return repository.query(sql + " LIMIT ? OFFSET ?", this::mapDiagnostic, text(opId), limit, Math.max(0, offset));
     }
 
     @Override

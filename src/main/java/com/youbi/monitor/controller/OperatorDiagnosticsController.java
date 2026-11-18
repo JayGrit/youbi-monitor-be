@@ -1,10 +1,13 @@
 package com.youbi.monitor.controller;
 
 import com.youbi.monitor.service.OperatorDiagnosticsService;
+import com.youbi.monitor.service.OperatorQueueClient;
 import org.springframework.util.MultiValueMap;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -18,8 +21,19 @@ import java.util.Map;
 public class OperatorDiagnosticsController {
     private final OperatorDiagnosticsService operatorDiagnosticsService;
 
-    public OperatorDiagnosticsController(OperatorDiagnosticsService operatorDiagnosticsService) {
+    private final OperatorQueueClient operatorQueueClient;
+
+    public OperatorDiagnosticsController(
+            OperatorDiagnosticsService operatorDiagnosticsService,
+            OperatorQueueClient operatorQueueClient
+    ) {
         this.operatorDiagnosticsService = operatorDiagnosticsService;
+        this.operatorQueueClient = operatorQueueClient;
+    }
+
+    @PostMapping(value = "/queue/{action:delete|priority}", produces = "application/json")
+    public ResponseEntity<String> editQueue(@PathVariable String action, @RequestBody String body) {
+        return operatorQueueClient.editQueue(action, body);
     }
 
     // 查询 operator 任务列表。

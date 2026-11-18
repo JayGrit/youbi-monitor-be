@@ -52,6 +52,10 @@ public class OperatorDiagnosticsService {
     }
 
     public Map<String, Object> listTasks(MultiValueMap<String, String> query) {
+        if ("true".equals(first(query, "all"))) {
+            return allItems(repositoryService.listOperatorExecutions(filters(query), 0, 0).stream()
+                    .map(this::normalizeExecution).toList());
+        }
         int page = positiveInt(first(query, "page"), 1);
         int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), DEFAULT_LIMIT));
         Map<String, String> filters = filters(query);
@@ -73,6 +77,10 @@ public class OperatorDiagnosticsService {
     }
 
     public Map<String, Object> listQueue(MultiValueMap<String, String> query) {
+        if ("true".equals(first(query, "all"))) {
+            return allItems(repositoryService.listOperatorQueue(filters(query), 0, 0).stream()
+                    .map(this::normalizeQueueTask).toList());
+        }
         int page = positiveInt(first(query, "page"), 1);
         int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), 50));
         Map<String, String> filters = filters(query);
@@ -103,6 +111,10 @@ public class OperatorDiagnosticsService {
     }
 
     public Map<String, Object> getDiagnostics(String opId, MultiValueMap<String, String> query) {
+        if ("true".equals(first(query, "all"))) {
+            return allItems(repositoryService.listOperatorDiagnostics(TextSupport.text(opId), 0, 0).stream()
+                    .map(this::diagnosticJson).toList());
+        }
         int page = positiveInt(first(query, "page"), 1);
         int limit = Math.min(MAX_LIMIT, positiveInt(first(query, "limit"), DEFAULT_LIMIT));
         long total = repositoryService.countOperatorDiagnostics(TextSupport.text(opId));
@@ -120,6 +132,11 @@ public class OperatorDiagnosticsService {
                 "limit", limit,
                 "pageCount", pageCount
         );
+    }
+
+    private Map<String, Object> allItems(List<?> items) {
+        return Map.of("items", items, "total", items.size(), "page", 1,
+                "limit", items.size(), "pageCount", items.isEmpty() ? 0 : 1);
     }
 
     public ResponseEntity<StreamingResponseBody> getDiagnosticArtifact(long id, String kind) {
@@ -195,6 +212,7 @@ public class OperatorDiagnosticsService {
         result.put("topic", text(row.get("topic")));
         result.put("status", text(row.get("status")));
         result.put("priority", number(row.get("priority")));
+        result.put("deletable", Boolean.TRUE.equals(row.get("deletable")) || number(row.get("deletable")) == 1);
         result.put("createdAt", row.get("createdAt"));
         result.put("startedAt", row.get("startedAt"));
         result.put("completedAt", row.get("completedAt"));
