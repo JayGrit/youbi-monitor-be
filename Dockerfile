@@ -12,6 +12,8 @@ FROM ${RUNTIME_IMAGE}
 WORKDIR /app
 COPY --from=builder /app/target/monitor-be-0.0.1-SNAPSHOT.jar app.jar
 ENV TZ=Asia/Shanghai
+ENV YDBI_MYSQL_HOST=127.0.0.1
+ENV YDBI_MINIO_CLIENT_ENDPOINT=http://127.0.0.1:9000
 ENV JAVA_OPTS="-Xmx512m -Xms256m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 EXPOSE 8200
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

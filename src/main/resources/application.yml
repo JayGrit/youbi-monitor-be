@@ -9,7 +9,7 @@ spring:
       max-file-size: 200MB
       max-request-size: 201MB
   datasource:
-    url: jdbc:mysql://120.53.92.66:3306/youbi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+    url: jdbc:mysql://${YDBI_MYSQL_HOST:120.53.92.66}:3306/youbi?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
     username: hoshuuch
     password: 490229
     driver-class-name: com.mysql.cj.jdbc.Driver
@@ -38,6 +38,7 @@ youbi:
     base-url: ${YDBI_DISTRIBUTOR_BASE_URL:http://127.0.0.1:8210}
   minio:
     endpoint: ${YDBI_MINIO_ENDPOINT:http://120.53.92.66:9000}
+    client-endpoint: ${YDBI_MINIO_CLIENT_ENDPOINT:${youbi.minio.endpoint}}
     access-key: ${YDBI_MINIO_ACCESS_KEY:minioadmin}
     secret-key: ${YDBI_MINIO_SECRET_KEY:minioadmin}
     bucket: ${YDBI_MINIO_BUCKET:ydbi}

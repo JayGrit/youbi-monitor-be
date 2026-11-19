@@ -38,12 +38,13 @@ public class OperatorDiagnosticsService {
     public OperatorDiagnosticsService(
             IDiagnosticArtifactRepositoryService repositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
+            @Value("${youbi.minio.client-endpoint}") String minioClientEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey
     ) {
         this.repositoryService = repositoryService;
         this.minioClient = MinioClient.builder()
-                .endpoint(minioEndpoint)
+                .endpoint(minioClientEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
         this.minioEndpointHost = endpointHost(minioEndpoint);

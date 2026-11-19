@@ -40,6 +40,7 @@ public class AccountProfileService {
     public AccountProfileService(
             IAccountProfileRepositoryService repositoryService,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
+            @Value("${youbi.minio.client-endpoint}") String minioClientEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.assets-bucket:youbi-assets}") String assetsBucket
@@ -48,7 +49,7 @@ public class AccountProfileService {
         this.minioEndpoint = trimTrailingSlash(TextSupport.text(minioEndpoint));
         this.assetsBucket = TextSupport.text(assetsBucket).isBlank() ? "youbi-assets" : TextSupport.text(assetsBucket);
         this.minioClient = MinioClient.builder()
-                .endpoint(minioEndpoint)
+                .endpoint(minioClientEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
     }

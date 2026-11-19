@@ -36,6 +36,7 @@ public class NarrationManualService {
             MonitorRepository repository,
             ObjectMapper objectMapper,
             @Value("${youbi.minio.endpoint}") String minioEndpoint,
+            @Value("${youbi.minio.client-endpoint}") String minioClientEndpoint,
             @Value("${youbi.minio.access-key}") String minioAccessKey,
             @Value("${youbi.minio.secret-key}") String minioSecretKey,
             @Value("${youbi.minio.bucket}") String minioBucket
@@ -46,7 +47,7 @@ public class NarrationManualService {
         this.minioEndpoint = trimTrailingSlash(minioEndpoint);
         this.minioBucket = text(minioBucket).isBlank() ? "ydbi" : text(minioBucket);
         this.minioClient = MinioClient.builder()
-                .endpoint(minioEndpoint)
+                .endpoint(minioClientEndpoint)
                 .credentials(minioAccessKey, minioSecretKey)
                 .build();
     }
