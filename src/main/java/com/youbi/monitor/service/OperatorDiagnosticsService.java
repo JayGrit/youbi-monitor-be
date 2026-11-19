@@ -56,8 +56,27 @@ public class OperatorDiagnosticsService {
     }
 
     public Map<String, Object> listQueue(MultiValueMap<String, String> query) {
-        return allItems(repositoryService.listOperatorQueue(filters(query)).stream()
-                .map(this::normalizeQueueTask).toList());
+        Map<String, String> filters = filters(query);
+        String exactTaskId = text(first(query, "exactTaskId"));
+        if (!exactTaskId.isBlank()) {
+            filters.put("exactTaskId", exactTaskId);
+        }
+        String requestedPage = first(query, "page");
+        String requestedLimit = first(query, "limit");
+        if (requestedPage == null && requestedLimit == null) {
+            return allItems(repositoryService.listOperatorQueue(filters, null, 0).stream()
+                    .map(this::normalizeQueueTask).toList());
+        }
+
+        int limit = Math.min(200, positiveInt(requestedLimit, 50));
+        var stats = repositoryService.operatorQueueStats(filters);
+        long pageCount = (stats.total() + limit - 1) / limit;
+        long page = Math.min(positiveInt(requestedPage, 1), Math.max(1, pageCount));
+        List<Map<String, Object>> items = stats.total() == 0 ? List.of()
+                : repositoryService.listOperatorQueue(filters, limit, (page - 1) * limit).stream()
+                        .map(this::normalizeQueueTask).toList();
+        return Map.of("items", items, "total", stats.total(), "page", page,
+                "limit", limit, "pageCount", pageCount, "hasActive", stats.hasActive());
     }
 
     public Map<String, Object> getTask(String opId) {
@@ -227,6 +246,15 @@ public class OperatorDiagnosticsService {
             } catch (DateTimeParseException ignored) {
                 return null;
             }
+        }
+    }
+
+    private int positiveInt(String value, int fallback) {
+        try {
+            int parsed = Integer.parseInt(text(value));
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException exception) {
+            return fallback;
         }
     }
 

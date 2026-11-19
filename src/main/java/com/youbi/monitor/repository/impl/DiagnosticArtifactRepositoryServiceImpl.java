@@ -66,8 +66,15 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
     }
 
     @Override
-    public List<Map<String, Object>> listOperatorQueue(Map<String, String> filters) {
+    public List<Map<String, Object>> listOperatorQueue(Map<String, String> filters, Integer limit, long offset) {
         QueryParts parts = taskWhere(filters);
+        List<Object> args = new ArrayList<>(parts.args());
+        String pagination = "";
+        if (limit != null) {
+            pagination = "LIMIT ? OFFSET ?";
+            args.add(limit);
+            args.add(offset);
+        }
         return repository.queryForList("""
                 SELECT
                     t.id,
@@ -99,7 +106,21 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
                     CASE WHEN t.status = 'ready' THEN t.priority ELSE 0 END DESC,
                     t.created_at ASC,
                     t.id ASC
-                """.formatted(parts.where()), parts.args().toArray());
+                %s
+                """.formatted(parts.where(), pagination), args.toArray());
+    }
+
+    @Override
+    public QueueStats operatorQueueStats(Map<String, String> filters) {
+        QueryParts parts = taskWhere(filters);
+        return repository.queryForObject("""
+                SELECT COUNT(*) AS total,
+                       COALESCE(MAX(t.status IN ('ready', 'running')), 0) AS hasActive
+                FROM operator_task t
+                %s
+                """.formatted(parts.where()),
+                (rs, rowNum) -> new QueueStats(rs.getLong("total"), rs.getBoolean("hasActive")),
+                parts.args().toArray());
     }
 
     @Override
@@ -157,7 +178,13 @@ public class DiagnosticArtifactRepositoryServiceImpl implements IDiagnosticArtif
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
         addLike(conditions, args, "t.op_id", filters.get("opId"));
-        addLike(conditions, args, "t.task_id", filters.get("taskId"));
+        String exactTaskId = text(filters.get("exactTaskId"));
+        if (exactTaskId.isBlank()) {
+            addLike(conditions, args, "t.task_id", filters.get("taskId"));
+        } else {
+            conditions.add("t.task_id = ?");
+            args.add(exactTaskId);
+        }
         addLike(conditions, args, "t.topic", filters.get("topic"));
         addLike(conditions, args, "COALESCE(t.task_type, t.action, '')", filters.get("action"));
         String platform = text(filters.get("platform"));

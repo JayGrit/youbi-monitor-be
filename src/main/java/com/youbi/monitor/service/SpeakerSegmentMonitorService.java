@@ -44,12 +44,10 @@ public class SpeakerSegmentMonitorService {
     private long count(QueryParts parts) {
         Long count = repository.queryForObject("""
                 SELECT COUNT(*)
-                FROM speaker_segment s
-                LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN distributor_task_stages stage
-                    ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
-                """.formatted(parts.where()), Long.class, parts.args().toArray());
+                LEFT JOIN task t ON t.id = s.task_id
+                %s
+                """.formatted(parts.from(), parts.where()), Long.class, parts.args().toArray());
         return count == null ? 0 : count;
     }
 
@@ -86,7 +84,7 @@ public class SpeakerSegmentMonitorService {
                     s.error_message AS errorMessage,
                     s.tts_wav_url AS ttsWavUrl,
                     s.reference_wav_url AS referenceWavUrl
-                FROM speaker_segment s
+                %s
                 LEFT JOIN task t ON t.id = s.task_id
                 LEFT JOIN distributor_task_stages stage
                     ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
@@ -107,7 +105,7 @@ public class SpeakerSegmentMonitorService {
                     CASE WHEN s.status IN ('ready', 'pending') THEN s.item_index END ASC,
                     s.id ASC
                 LIMIT ? OFFSET ?
-                """.formatted(parts.where()), args.toArray());
+                """.formatted(parts.from(), parts.where()), args.toArray());
     }
 
     private Map<String, Object> summary(QueryParts parts) {
@@ -121,14 +119,12 @@ public class SpeakerSegmentMonitorService {
                     SUM(CASE WHEN s.status = 'failed' THEN 1 ELSE 0 END) AS failed,
                     COUNT(*) AS total,
                     MAX(CASE WHEN s.status = 'success' THEN s.completed_at ELSE NULL END) AS latestCompletedAt
-                FROM speaker_segment s
+                %s
                 LEFT JOIN task t ON t.id = s.task_id
-                LEFT JOIN distributor_task_stages stage
-                    ON stage.task_id = s.task_id AND stage.stage_name = 'speaker' AND stage.sub_stage = 'main'
                 %s
                 GROUP BY COALESCE(NULLIF(TRIM(s.operator), ''), '未分配')
                 ORDER BY device ASC
-                """.formatted(parts.where()), parts.args().toArray());
+                """.formatted(parts.from(), parts.where()), parts.args().toArray());
         List<Map<String, Object>> devices = rows.stream().map(this::normalizeDeviceSummary).toList();
         long running = sum(devices, "running");
         long unfinished = devices.stream()
@@ -149,58 +145,58 @@ public class SpeakerSegmentMonitorService {
     private QueryParts where(MultiValueMap<String, String> query, boolean includeStatus) {
         List<String> conditions = new ArrayList<>();
         List<Object> args = new ArrayList<>();
-        if (includeStatus) {
-            addStatusFilter(conditions, args, query);
+        String status = includeStatus ? text(first(query, "status")) : "";
+        String from = "FROM speaker_segment s";
+        if (status.isBlank() || "default".equals(status)) {
+            from = defaultScopeFrom(query, args);
+        } else if ("unfinished".equals(status)) {
+            conditions.add("s.status IN ('pending', 'ready', 'running')");
         } else {
-            addDefaultScopeFilter(conditions, args, query);
+            conditions.add("s.status = ?");
+            args.add(status);
         }
         addDeviceFilter(conditions, args, first(query, "device"));
         addLike(conditions, args, "s.task_id", first(query, "taskId"));
         addLike(conditions, args, "COALESCE(t.task_type, t.topic, '')", first(query, "taskType"));
         conditions.add("(t.status IS NULL OR t.status <> 'success')");
-        return new QueryParts(conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions), args);
+        return new QueryParts(from, " WHERE " + String.join(" AND ", conditions), args);
     }
 
-    private void addStatusFilter(List<String> conditions, List<Object> args, MultiValueMap<String, String> query) {
-        String status = text(first(query, "status"));
-        if (status.isBlank() || "default".equals(status)) {
-            addDefaultScopeFilter(conditions, args, query);
-            return;
-        }
-        if ("unfinished".equals(status)) {
-            conditions.add("s.status IN ('pending', 'ready', 'running')");
-            return;
-        }
-        conditions.add("s.status = ?");
-        args.add(status);
-    }
-
-    private void addDefaultScopeFilter(List<String> conditions, List<Object> args, MultiValueMap<String, String> query) {
-        QueryParts completedFilters = recentCompletedFilters(query);
-        conditions.add("""
-                (s.status IN ('pending', 'ready', 'running') OR s.id IN (
+    private String defaultScopeFrom(MultiValueMap<String, String> query, List<Object> args) {
+        List<String> conditions = new ArrayList<>();
+        List<Object> completedArgs = new ArrayList<>();
+        addDeviceFilter(conditions, completedArgs, "s2.operator", first(query, "device"));
+        addLike(conditions, completedArgs, "s2.task_id", first(query, "taskId"));
+        addLike(conditions, completedArgs, "COALESCE(t.task_type, t.topic, '')", first(query, "taskType"));
+        String completedFilters = conditions.isEmpty() ? "" : " AND " + String.join(" AND ", conditions);
+        String recentByStatus = """
+                (SELECT s2.id, s2.completed_at
+                 FROM speaker_segment s2
+                 LEFT JOIN task t ON t.id = s2.task_id
+                 WHERE s2.status = ? %s
+                 ORDER BY s2.completed_at DESC, s2.id DESC
+                 LIMIT 20)
+                """.formatted(completedFilters);
+        args.add("success");
+        args.addAll(completedArgs);
+        args.add("failed");
+        args.addAll(completedArgs);
+        // Apply the task status filter after the global limit, as in the default queue scope.
+        return """
+                FROM (
+                    SELECT id FROM speaker_segment
+                    WHERE status IN ('pending', 'ready', 'running')
+                    UNION ALL
                     SELECT recent.id
                     FROM (
-                        SELECT s2.id
-                        FROM speaker_segment s2
-                        LEFT JOIN task t ON t.id = s2.task_id
-                        %s
-                        ORDER BY s2.completed_at DESC, s2.id DESC
+                        SELECT completed.id
+                        FROM (%s UNION ALL %s) completed
+                        ORDER BY completed.completed_at DESC, completed.id DESC
                         LIMIT 20
                     ) recent
-                ))
-                """.formatted(completedFilters.where()));
-        args.addAll(completedFilters.args());
-    }
-
-    private QueryParts recentCompletedFilters(MultiValueMap<String, String> query) {
-        List<String> conditions = new ArrayList<>();
-        List<Object> args = new ArrayList<>();
-        conditions.add("s2.status IN ('success', 'failed')");
-        addDeviceFilter(conditions, args, "s2.operator", first(query, "device"));
-        addLike(conditions, args, "s2.task_id", first(query, "taskId"));
-        addLike(conditions, args, "COALESCE(t.task_type, t.topic, '')", first(query, "taskType"));
-        return new QueryParts(" WHERE " + String.join(" AND ", conditions), args);
+                ) scope
+                STRAIGHT_JOIN speaker_segment s ON s.id = scope.id
+                """.formatted(recentByStatus, recentByStatus);
     }
 
     private void addDeviceFilter(List<String> conditions, List<Object> args, String value) {
@@ -318,6 +314,6 @@ public class SpeakerSegmentMonitorService {
         return value == null ? "" : String.valueOf(value).trim();
     }
 
-    private record QueryParts(String where, List<Object> args) {
+    private record QueryParts(String from, String where, List<Object> args) {
     }
 }
