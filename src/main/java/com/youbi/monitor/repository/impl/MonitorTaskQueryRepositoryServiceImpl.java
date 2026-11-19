@@ -358,9 +358,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     private static final String MONITOR_COUNT_SQL = """
             SELECT COUNT(*)
             FROM task t
-            LEFT JOIN task_source ts ON ts.task_id = t.id
-            LEFT JOIN task_options opts ON opts.task_id = t.id
-            LEFT JOIN task_metadata meta ON meta.task_id = t.id
+            __MONITOR_COUNT_METADATA_JOIN__
             __TASK_MONITOR_WHERE__
             """;
     public MonitorTaskQueryRepositoryServiceImpl(MonitorRepository repository) {
@@ -416,7 +414,9 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
     @Override
     public long countTaskMonitorItems(String status, String topic, String taskType, String stage, String search) {
         SqlFilter filter = taskMonitorFilter(status, topic, taskType, stage, search);
-        Long count = repository.queryForObject(monitorSql(MONITOR_COUNT_SQL, filter), Long.class, filter.args().toArray());
+        String metadataJoin = text(search).isBlank() ? "" : "LEFT JOIN task_metadata meta ON meta.task_id = t.id";
+        String sql = monitorSql(MONITOR_COUNT_SQL, filter).replace("__MONITOR_COUNT_METADATA_JOIN__", metadataJoin);
+        Long count = repository.queryForObject(sql, Long.class, filter.args().toArray());
         return count == null ? 0 : count;
     }
 
