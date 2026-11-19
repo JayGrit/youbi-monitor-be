@@ -310,7 +310,8 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 LIMIT 1
               ) bilibili_upload_account_name,
               u.error_message uploader_error
-            FROM task t
+            FROM (__MONITOR_PAGE__) page
+            JOIN task t ON t.id = page.id
             LEFT JOIN distributor_task_stages d ON d.task_id = t.id AND d.stage_name = 'downloader' AND d.sub_stage = 'main'
             LEFT JOIN distributor_task_stages de ON de.task_id = t.id AND de.stage_name = 'demucs' AND de.sub_stage = 'main'
             LEFT JOIN distributor_task_stages w ON w.task_id = t.id AND w.stage_name = 'whisper' AND w.sub_stage = 'main'
@@ -336,6 +337,7 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                 MAX(CASE WHEN platform = 'youtube' THEN status END) youtube_upload_status,
                 MAX(CASE WHEN platform = 'x' THEN status END) x_upload_status
               FROM uploader_task_status
+              JOIN (__MONITOR_PAGE__) page_ids ON page_ids.id = uploader_task_status.task_id
               GROUP BY task_id
             ) us ON us.task_id = t.id
             LEFT JOIN task_source ts ON ts.task_id = t.id
@@ -347,12 +349,11 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
                      COALESCE(SUM(CASE WHEN stage = 'process_assets' THEN source_object_count ELSE 0 END), 0) minio_storage_object_count,
                      MAX(updated_at) minio_storage_updated_at
               FROM backupper_minio
+              JOIN (__MONITOR_PAGE__) page_ids ON page_ids.id = backupper_minio.task_id
               GROUP BY task_id
             ) bm ON bm.task_id = t.id
             __DOWNLOADER_PROGRESS_JOIN__
-            __TASK_MONITOR_WHERE__
-            __TASK_MONITOR_ORDER_BY__
-            LIMIT ? OFFSET ?
+            ORDER BY t.created_at DESC, t.id DESC
             """;
     private static final String MONITOR_COUNT_SQL = """
             SELECT COUNT(*)
@@ -396,8 +397,19 @@ public class MonitorTaskQueryRepositoryServiceImpl extends MonitorRepositorySqlS
         List<Object> args = new ArrayList<>(filter.args());
         args.add(limit);
         args.add(offset);
-        String sql = monitorSql(MONITOR_SUMMARY_SQL, filter);
-        List<TaskMonitorItem> rows = repository.query(sql, new TaskRowMapper(now), args.toArray());
+        String pageSql = """
+                SELECT t.id
+                FROM task t
+                LEFT JOIN task_metadata meta ON meta.task_id = t.id
+                %s
+                ORDER BY t.created_at DESC, t.id DESC
+                LIMIT ? OFFSET ?
+                """.formatted(filter.clause());
+        String sql = applyCapabilities(MONITOR_SUMMARY_SQL).replace("__MONITOR_PAGE__", pageSql);
+        List<Object> queryArgs = new ArrayList<>(args);
+        queryArgs.addAll(args);
+        queryArgs.addAll(args);
+        List<TaskMonitorItem> rows = repository.query(sql, new TaskRowMapper(now), queryArgs.toArray());
         return withRouteGraphs(rows, now);
     }
 
