@@ -27,23 +27,27 @@ public class NewYouthService {
         LocalDateTime now = LocalDateTime.now(SHANGHAI);
         LocalDateTime hour = now.withMinute(0).withSecond(0).withNano(0);
         LocalDateTime midnight = now.toLocalDate().atStartOfDay();
-        Long accountId = repository.query("""
-                SELECT id FROM uploader_account
+        Account account = repository.query("""
+                SELECT id, subscribers, bilibili_total_charge_count FROM uploader_account
                 WHERE platform = 'bilibili' AND topic = 'newyouth' AND bilibili_uid = 678811807
                 LIMIT 1
-                """, (rs, ignored) -> rs.getLong(1)).stream().findFirst().orElse(null);
+                """, (rs, ignored) -> new Account(rs.getLong("id"), rs.getObject("subscribers", Long.class),
+                rs.getObject("bilibili_total_charge_count", Long.class))).stream().findFirst().orElse(null);
 
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("generatedAt", now.toString());
-        response.put("accountId", accountId);
+        response.put("accountId", account == null ? null : account.id());
         response.put("uid", "678811807");
-        if (accountId == null) {
+        response.put("followerCount", account == null ? null : account.followerCount());
+        response.put("chargeCount", account == null ? null : account.chargeCount());
+        if (account == null) {
             response.put("previousHour", emptyPie(hour.minusHours(1), hour));
             response.put("today", emptyPie(midnight, hour));
             response.put("followers", List.of());
             return response;
         }
 
+        long accountId = account.id();
         Map<LocalDateTime, Run> runs = new HashMap<>();
         repository.query("""
                 SELECT id, scheduled_slot FROM product_podcast_web_run
@@ -77,7 +81,8 @@ public class NewYouthService {
                                 NULLIF(bv_podcast.title, ''), current_data.bvid) AS title,
                        COALESCE(previous_data.view_count, 0) AS previous_views,
                        current_data.view_count AS current_views,
-                       COALESCE(uploader.scheduled_publish_at, uploader.completed_at) AS published_at
+                       COALESCE(inventory.published_at, publish_stage.completed_at,
+                                uploader.scheduled_publish_at, uploader.completed_at) AS published_at
                 FROM (
                     SELECT bvid, MAX(run_id) AS run_id
                     FROM product_podcast_web_video_data_history
@@ -99,6 +104,15 @@ public class NewYouthService {
                 LEFT JOIN product_podcast podcast ON podcast.task_id = current_data.task_id
                 LEFT JOIN product_podcast bv_podcast
                     ON current_data.task_id IS NULL AND bv_podcast.bilibili_video_url = current_data.bvid
+                LEFT JOIN uploader_podcast_stage_job publish_job
+                    ON publish_job.task_id = COALESCE(podcast.task_id, bv_podcast.task_id)
+                    AND COALESCE(podcast.video_review_approved, bv_podcast.video_review_approved) = 1
+                    AND publish_job.sub_stage = 'publish_video_draft' AND publish_job.topic = 'newyouth'
+                    AND CAST(JSON_UNQUOTE(JSON_EXTRACT(publish_job.result_json, '$.bvid')) AS BINARY)
+                        = current_data.bvid
+                LEFT JOIN distributor_task_stages publish_stage
+                    ON publish_stage.task_id = publish_job.task_id AND publish_stage.stage_name = 'uploader'
+                    AND publish_stage.sub_stage = publish_job.sub_stage AND publish_stage.status = 'success'
                 LEFT JOIN uploader_task uploader
                     ON uploader.task_id = COALESCE(current_data.task_id, bv_podcast.task_id)
                     AND uploader.platform = 'bilibili' AND uploader.topic = 'newyouth'
@@ -206,6 +220,8 @@ public class NewYouthService {
         if (!date.isBefore(today)) return "today";
         return !date.isBefore(today.minusDays(2)) ? "recent" : "earlier";
     }
+
+    private record Account(long id, Long followerCount, Long chargeCount) {}
 
     record Run(long id, LocalDateTime slot) {}
 
